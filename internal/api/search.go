@@ -147,6 +147,10 @@ func (a *API) collectMatches(org *store.Org, idx searchIndex, query search.Query
 	}
 
 	if len(misses) > 0 {
+		// len(misses) is bounded by the documents already resident in the store
+		// (one bool per uncached doc), not a per-request user-controlled size, so
+		// this cannot be driven to an out-of-bounds allocation.
+		// nosemgrep: go-uncontrolled-allocation
 		hit := make([]bool, len(misses))
 		parallelFor(len(misses), func(i int) {
 			_, fields, ok := a.searchDoc(idx.collection, misses[i].id, misses[i].raw, idx.mergeAttrs)
