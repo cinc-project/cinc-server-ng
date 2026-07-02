@@ -111,6 +111,11 @@ func (a *API) putFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "could not read request body")
 		return
 	}
+	// MD5 is mandated by the Chef file-store protocol: clients content-address
+	// uploads by hex MD5 and pass that checksum in the URL. This verifies the
+	// body matches the client-supplied key; it is not a security hash. Changing
+	// it would reject every genuine chef-client/knife upload.
+	// nosemgrep: go-weak-hash
 	sum := md5.Sum(body)
 	if hex.EncodeToString(sum[:]) != checksum {
 		writeError(w, http.StatusBadRequest, "Checksum of uploaded content does not match "+checksum)
@@ -249,6 +254,10 @@ func (a *API) commitSandbox(w http.ResponseWriter, r *http.Request) {
 // sandboxID derives a deterministic id from the (sorted) checksum set, matching
 // chef-zero's content-addressed sandbox identifiers.
 func sandboxID(sortedSums []string) string {
+	// MD5 here reproduces chef-zero's content-addressed sandbox identifier so
+	// clients see the id they expect; it derives an identifier, not a security
+	// digest.
+	// nosemgrep: go-weak-hash
 	sum := md5.Sum([]byte(strings.Join(sortedSums, "")))
 	return hex.EncodeToString(sum[:])
 }
