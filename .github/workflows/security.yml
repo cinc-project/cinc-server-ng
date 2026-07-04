@@ -16,12 +16,12 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0 # full history so PR scans are diff-aware
-      - uses: mondoohq/actions/xgrep@b41754752763419780430abef5e35842ba2bec66 # v13.2.0
+      - uses: mondoohq/actions/xgrep@c38cfdf99da709760f58ff35aa5608688657f2f7 # v13.3.0
         with:
           # Report-only to start: findings land in the Security tab without
           # blocking merges. Tighten to "error" once the baseline is triaged.
           fail-on: off
-      - uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+      - uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
         if: always()
         with:
           sarif_file: results.sarif
