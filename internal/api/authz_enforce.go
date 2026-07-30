@@ -148,6 +148,15 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	if len(parts) >= 1 && parts[0] == "users" {
 		return classifyUsers(method, parts[1:])
 	}
+	// Provisioning an organization is a server-level operation, so it is
+	// superuser-only. Listing them stays open: it exposes only names, which a
+	// caller can already enumerate via /users/{user}/organizations.
+	if len(parts) == 1 && parts[0] == "organizations" {
+		if method == http.MethodPost {
+			return &authzCheck{superuserOnly: true, perm: "create"}, true
+		}
+		return nil, false
+	}
 	if len(parts) < 2 || parts[0] != "organizations" || parts[1] == "" {
 		return nil, false // not an org-scoped path
 	}
@@ -166,10 +175,11 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	}
 
 	if len(rest) == 0 { // /organizations/{org}
-		if read {
-			return &authzCheck{aclType: "organizations", aclName: org, perm: "read"}, true
+		perm, ok := itemPerm(method)
+		if !ok {
+			return nil, false
 		}
-		return nil, false
+		return &authzCheck{aclType: "organizations", aclName: org, perm: perm}, true
 	}
 
 	switch seg := rest[0]; {
@@ -177,8 +187,27 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 		return classifyDataBag(method, rest, read)
 	case seg == "cookbooks" || seg == "cookbook_artifacts":
 		return classifyCookbook(method, seg, rest, read)
+	case seg == "users":
+		return classifyOrgMembership(method, rest)
 	case enforceSegs[seg]:
 		return classifyGeneric(method, seg, rest, read)
+	}
+	return nil, false
+}
+
+// classifyOrgMembership gates the org-membership routes
+// (/organizations/{org}/users[/{user}]). Adding or removing a member is
+// governed by the org's "groups" container, because association writes the
+// org's "users" group — so an actor outside the org, which belongs to none of
+// its groups, can never associate itself in. The read routes are left to the
+// handler's own membership check (orgViewAllowed).
+func classifyOrgMembership(method string, rest []string) (*authzCheck, bool) {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodDelete:
+		if len(rest) > 2 {
+			return nil, false
+		}
+		return &authzCheck{aclType: "containers", aclName: "groups", perm: "update"}, true
 	}
 	return nil, false
 }
@@ -211,7 +240,28 @@ func classifyUsers(method string, rest []string) (*authzCheck, bool) {
 	if rest[1] == "_acl" {
 		return &authzCheck{global: true, aclType: "users", aclName: rest[0], perm: "grant"}, true
 	}
+	// /users/{name}/keys[/{key}] — a user's public_key is the credential the
+	// auth layer verifies against, so rewriting it is an account takeover.
+	// Gated like the user record itself: superuser-only, except that a user may
+	// always rotate its own keys.
+	if rest[1] == "keys" {
+		perm, ok := userKeyPerm(method)
+		if !ok {
+			return nil, false
+		}
+		return &authzCheck{superuserOnly: true, perm: perm, allowSelf: rest[0]}, true
+	}
 	return nil, false
+}
+
+// userKeyPerm names the operation a method performs on a user's key set. The
+// permission is only used for the denial message (the check is superuser-only),
+// but naming it accurately keeps that message truthful.
+func userKeyPerm(method string) (string, bool) {
+	if method == http.MethodPost {
+		return "create", true
+	}
+	return itemPerm(method)
 }
 
 // classifyGeneric handles the standard object collections (container ACL for
@@ -237,7 +287,48 @@ func classifyGeneric(method, seg string, rest []string, read bool) (*authzCheck,
 		}
 		return c, true
 	}
-	return nil, false
+	return classifySubResource(method, seg, rest)
+}
+
+// classifySubResource gates the routes nested under a named object —
+// {seg}/{name}/{sub}[/...]. Each collapses onto the parent object's ACL, the
+// way classifyCookbook collapses a cookbook's versions onto the cookbook. They
+// are enumerated rather than allowed wholesale because each one writes state
+// that authentication or fleet convergence depends on:
+//
+//   - keys: an actor's public_key IS the credential the auth layer verifies
+//     against, so writing it is an account takeover.
+//   - policies/{name}/revisions: a revision carries the run_list every node in
+//     a group converges on.
+//   - policy_groups/{group}/policies: the deploy operation that points a group
+//     at a revision.
+func classifySubResource(method, seg string, rest []string) (*authzCheck, bool) {
+	if len(rest) < 3 {
+		return nil, false
+	}
+	name, sub := rest[1], rest[2]
+	read := method == http.MethodGet || method == http.MethodHead
+
+	perm := ""
+	switch {
+	case sub == "keys":
+		// Adding, replacing, or removing a key all mutate the actor.
+		perm = "update"
+	case seg == "policies" && sub == "revisions":
+		perm = "update"
+		if method == http.MethodDelete {
+			perm = "delete"
+		}
+	case seg == "policy_groups" && sub == "policies":
+		// Removing a policy from a group edits the group, not the policy.
+		perm = "update"
+	default:
+		return nil, false
+	}
+	if read {
+		perm = "read"
+	}
+	return &authzCheck{aclType: seg, aclName: name, perm: perm}, true
 }
 
 // classifyCookbook handles cookbooks and cookbook_artifacts, which are
