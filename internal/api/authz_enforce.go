@@ -494,23 +494,38 @@ func actorAllowed(org *store.Org, actor Actor, aclType, aclName, perm string) (b
 	if ace == nil {
 		return false, nil
 	}
+	// A direct actor grant settles it without the group scan.
 	if slices.Contains(anyStrings(ace["actors"]), actor.Name) {
 		return true, nil
 	}
-	groups := anyStrings(ace["groups"])
-	if len(groups) == 0 {
+	if len(anyStrings(ace["groups"])) == 0 {
 		return false, nil
 	}
 	member, err := actorGroups(org, actor)
 	if err != nil {
 		return false, err
 	}
-	for _, g := range groups {
+	return aceAllows(ace, actor, member), nil
+}
+
+// aceAllows reports whether a single ACL entry grants actor, given the set of
+// groups it belongs to. Callers that evaluate many objects against one actor
+// (search result filtering) resolve membership once and reuse it here, rather
+// than paying actorGroups per object.
+func aceAllows(entry any, actor Actor, member map[string]bool) bool {
+	ace, _ := entry.(map[string]any)
+	if ace == nil {
+		return false
+	}
+	if slices.Contains(anyStrings(ace["actors"]), actor.Name) {
+		return true
+	}
+	for _, g := range anyStrings(ace["groups"]) {
 		if member[g] {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 // anyStrings coerces a JSON-decoded array into a []string. It accepts both
