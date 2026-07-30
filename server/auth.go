@@ -19,11 +19,23 @@ import (
 // request (except unauthenticated system paths) before delegating to next.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// System paths (e.g. /_status) and the cookbook file store are
-		// unauthenticated: in real Chef the sandbox hands back pre-signed
-		// bookshelf URLs that knife/chef-client/cinc-client PUT/GET without
-		// Mixlib signing, so the file store must accept those requests directly.
-		if api.SystemPaths[r.URL.Path] || isFileStorePath(r.URL.Path) {
+		// System paths (e.g. /_status) are unauthenticated.
+		if api.SystemPaths[r.URL.Path] {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// The cookbook file store is exempt from Mixlib signing: in real Chef
+		// the sandbox hands back pre-signed bookshelf URLs that
+		// knife/chef-client/cinc-client PUT/GET without signing them. cinc-zero
+		// reproduces that shape, so authorization rides on the URL — the grant
+		// the server issued, scoped to this org, checksum, and operation.
+		if org, checksum, ok := fileStorePath(r.URL.Path); ok {
+			if err := auth.VerifyFileStore(s.fileStoreKey, org, checksum,
+				fileStoreOp(r.Method), r.URL.Query(), s.opts.Now()); err != nil {
+				unauthorized(w, err.Error())
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -215,11 +227,24 @@ func limitBody(next http.Handler, max int64) http.Handler {
 	})
 }
 
-// isFileStorePath reports whether path addresses the cookbook file store
-// (/organizations/{org}/file_store/{checksum}), which is served without auth.
-func isFileStorePath(path string) bool {
+// fileStorePath reports whether path addresses the cookbook file store
+// (/organizations/{org}/file_store/{checksum}), returning the org and checksum
+// a pre-signed grant must cover.
+func fileStorePath(path string) (org, checksum string, ok bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	return len(parts) == 4 && parts[0] == "organizations" && parts[2] == "file_store"
+	if len(parts) != 4 || parts[0] != "organizations" || parts[2] != "file_store" {
+		return "", "", false
+	}
+	return parts[1], parts[3], true
+}
+
+// fileStoreOp names the grant a request needs: an upload grant must not be
+// replayable as a download, or the reverse.
+func fileStoreOp(method string) string {
+	if method == http.MethodPut || method == http.MethodPost {
+		return auth.FileStorePut
+	}
+	return auth.FileStoreGet
 }
 
 // orgFromPath extracts the organization name from an "/organizations/{org}/..."

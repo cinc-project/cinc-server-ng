@@ -191,6 +191,7 @@ type Server struct {
 	validatorKeys map[string][]byte // org name -> PEM-encoded validator private key
 	keyCache      *auth.PublicKeyCache
 	webuiPub      *rsa.PublicKey // verifies X-Ops-Request-Source: web requests
+	fileStoreKey  []byte         // signs/verifies pre-signed cookbook file-store URLs
 	url           string
 }
 
@@ -326,6 +327,19 @@ func New(opts Options) (*Server, error) {
 		}
 	}
 
+	// The cookbook file store cannot use Mixlib signing (clients transfer file
+	// bodies at URLs the server hands them, unsigned), so with authentication on
+	// it is protected by pre-signed URLs instead. The key is per-process: grants
+	// are short-lived and never persisted, so a restart simply invalidates any
+	// still-outstanding URL. With authentication off there is nothing to protect.
+	var fileStoreKey []byte
+	if !opts.DisableAuth {
+		fileStoreKey = make([]byte, 32)
+		if _, err := rand.Read(fileStoreKey); err != nil {
+			return nil, fmt.Errorf("generate file store key: %w", err)
+		}
+	}
+
 	s := &Server{
 		opts:          opts,
 		store:         st,
@@ -333,8 +347,12 @@ func New(opts Options) (*Server, error) {
 		validatorKeys: validatorKeys,
 		keyCache:      auth.NewPublicKeyCache(),
 		webuiPub:      webuiPub,
+		fileStoreKey:  fileStoreKey,
 	}
-	handler := api.New(st, api.WithACLEnforcement(opts.EnforceACL)).Handler()
+	handler := api.New(st,
+		api.WithACLEnforcement(opts.EnforceACL),
+		api.WithFileStoreKey(fileStoreKey),
+	).Handler()
 	if !opts.DisableAuth {
 		handler = s.authMiddleware(handler)
 	}

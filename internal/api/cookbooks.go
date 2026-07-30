@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tas50/cinc-zero/internal/auth"
 	"github.com/tas50/cinc-zero/internal/store"
 )
 
@@ -96,9 +97,25 @@ func (a *API) registerFileStoreRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base, a.getFile)
 }
 
-func fileStoreURL(r *http.Request, org, checksum string) string {
-	return requestBaseURL(r) + "/organizations/" + org + "/file_store/" + checksum
+// fileStoreURL builds the URL a client uses to transfer one cookbook file
+// body. When the server configured a file-store key, the URL carries a
+// pre-signed grant for op that expires — the file store is exempt from Mixlib
+// signing (clients use these URLs unsigned, as they would a real Chef server's
+// bookshelf URLs), so the URL itself is what authorizes the transfer. With no
+// key configured the URL is bare, preserving the package's permissive default.
+func (a *API) fileStoreURL(r *http.Request, org, checksum, op string) string {
+	url := requestBaseURL(r) + "/organizations/" + org + "/file_store/" + checksum
+	if len(a.fileStoreKey) == 0 {
+		return url
+	}
+	exp := time.Now().Add(fileStoreGrantTTL)
+	return url + "?" + auth.FileStoreQuery(a.fileStoreKey, org, checksum, op, exp)
 }
+
+// fileStoreGrantTTL is how long a pre-signed file-store URL stays valid. It
+// must comfortably outlast a chef-client run that fetches every file in a
+// cookbook from a manifest read at the start of the run.
+const fileStoreGrantTTL = time.Hour
 
 func (a *API) putFile(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
@@ -184,7 +201,7 @@ func (a *API) createSandbox(w http.ResponseWriter, r *http.Request) {
 		if has {
 			out[sum] = map[string]any{"needs_upload": false}
 		} else {
-			out[sum] = map[string]any{"url": fileStoreURL(r, org.Name(), sum), "needs_upload": true}
+			out[sum] = map[string]any{"url": a.fileStoreURL(r, org.Name(), sum, auth.FileStorePut), "needs_upload": true}
 		}
 	}
 
@@ -422,7 +439,7 @@ func (a *API) getCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		writeRaw(w, http.StatusOK, raw)
 		return
 	}
-	injectFileURLs(m, r, org.Name())
+	a.injectFileURLs(m, r, org.Name())
 	writeJSON(w, http.StatusOK, m)
 }
 
@@ -467,7 +484,7 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	if existed {
 		status = http.StatusOK
 	}
-	injectFileURLs(m, r, org.Name())
+	a.injectFileURLs(m, r, org.Name())
 	writeJSON(w, status, m)
 }
 
@@ -501,7 +518,7 @@ func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		injectFileURLs(m, r, org.Name())
+		a.injectFileURLs(m, r, org.Name())
 		writeJSON(w, http.StatusOK, m)
 		return
 	}
@@ -649,10 +666,10 @@ func gcOrphanedBlobs(org *store.Org, candidates []string) error {
 	return nil
 }
 
-func injectFileURLs(m map[string]any, r *http.Request, org string) {
+func (a *API) injectFileURLs(m map[string]any, r *http.Request, org string) {
 	walkFileEntries(m, func(obj map[string]any) {
 		if sum, ok := obj["checksum"].(string); ok {
-			obj["url"] = fileStoreURL(r, org, sum)
+			obj["url"] = a.fileStoreURL(r, org, sum, auth.FileStoreGet)
 		}
 	})
 }

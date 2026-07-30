@@ -17,6 +17,11 @@ type API struct {
 	// checked against object ACLs and group membership before reaching a
 	// handler. When clear (the default) every authenticated actor is permitted.
 	enforceACL bool
+	// fileStoreKey signs the pre-signed cookbook file-store URLs the server
+	// hands to clients. When empty (the default) those URLs carry no grant and
+	// the file store is open, matching the permissive zero value the rest of the
+	// package uses; server.New sets a key whenever authentication is on.
+	fileStoreKey []byte
 	// search memoizes the flattened searchable view of each document so repeated
 	// queries skip re-unmarshalling and re-flattening unchanged objects.
 	search *searchCache
@@ -28,6 +33,13 @@ type Option func(*API)
 // WithACLEnforcement enables (or disables) authorization enforcement.
 func WithACLEnforcement(enabled bool) Option {
 	return func(a *API) { a.enforceACL = enabled }
+}
+
+// WithFileStoreKey sets the key used to pre-sign cookbook file-store URLs. The
+// authentication layer must verify grants with the same key. Leave it unset to
+// keep the file store open (the permissive default for direct API-layer use).
+func WithFileStoreKey(key []byte) Option {
+	return func(a *API) { a.fileStoreKey = key }
 }
 
 // New returns an API backed by st, applying any options.
