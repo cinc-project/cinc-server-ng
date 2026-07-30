@@ -55,6 +55,11 @@ func FileStoreQuery(key []byte, org, checksum, op string, exp time.Time) string 
 // given organization's file-store object. It returns nil only if the request is
 // authorized.
 func VerifyFileStore(key []byte, org, checksum, op string, q url.Values, now time.Time) error {
+	// With no key every grant would be forgeable, since the MAC input is public.
+	// Refuse rather than authorize on a key a caller forgot to configure.
+	if len(key) == 0 {
+		return errors.New("auth: no file store key configured")
+	}
 	sig := q.Get("sig")
 	if sig == "" {
 		return errors.New("auth: file store request is not signed")

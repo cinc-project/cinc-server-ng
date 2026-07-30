@@ -72,6 +72,16 @@ func TestFileStoreQueryRejectsExpired(t *testing.T) {
 	}
 }
 
+// An unset key must authorize nothing. Otherwise a caller that verifies with a
+// key it forgot to configure would accept grants anyone could compute.
+func TestFileStoreVerifyRejectsEmptyKey(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	q := query(t, nil, "acme", "abc123", FileStoreGet, now.Add(time.Hour))
+	if err := VerifyFileStore(nil, "acme", "abc123", FileStoreGet, q, now); err == nil {
+		t.Fatal("grant verified against an empty key, want rejection")
+	}
+}
+
 func TestFileStoreQueryRejectsOtherKey(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	q := query(t, presignKey, "acme", "abc123", FileStoreGet, now.Add(time.Hour))
