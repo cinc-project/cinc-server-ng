@@ -31,6 +31,8 @@ type API struct {
 	// searchIdx holds the inverted index for each searched collection, built on
 	// first use and kept current from the store's write stream.
 	searchIdx *searchIndexes
+	// stats holds the server's instruments, served by /_stats.
+	stats *instruments
 }
 
 // Option configures an API at construction time.
@@ -59,6 +61,9 @@ func New(st *store.Store, opts ...Option) *API {
 	for _, opt := range opts {
 		opt(a)
 	}
+	// Instruments are registered after the options are applied so they can read
+	// through to whatever the API was configured with.
+	a.stats = newInstruments(a)
 	// Keep the derived indexes current as data changes beneath us.
 	st.Watch(a.searchIdx.observe)
 	st.Watch(a.groups.observe)

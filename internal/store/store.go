@@ -45,7 +45,23 @@ type Store struct {
 	// that releases them on commit.
 	watch  *watchers
 	events emitter
+	// counts tallies the store operations a request performs. Read
+	// amplification is what sets throughput on a durable backend — the fleet
+	// check-in path costs several reads per write — so it is worth being able
+	// to see it in production rather than only in a benchmark.
+	counts *Counts
 }
+
+// Counts tallies store operations since start.
+type Counts struct {
+	Reads   atomic.Int64
+	Writes  atomic.Int64
+	Deletes atomic.Int64
+	Scans   atomic.Int64
+}
+
+// Counts returns the store's operation tallies.
+func (s *Store) Counts() *Counts { return s.counts }
 
 // New returns a Store backed by the default in-memory backend.
 func New() *Store {
@@ -56,7 +72,10 @@ func New() *Store {
 // backend such as SQLite.
 func NewWithBackend(b Backend) *Store {
 	w := &watchers{}
-	return &Store{backend: b, groupsGen: new(atomic.Uint64), watch: w, events: w}
+	return &Store{
+		backend: b, groupsGen: new(atomic.Uint64),
+		watch: w, events: w, counts: &Counts{},
+	}
 }
 
 // Backend returns the underlying Backend, for callers (e.g. the server) that need
@@ -69,7 +88,7 @@ func (s *Store) Close() error { return s.backend.Close() }
 // Global returns the server-global object space, used for collections such as
 // "users" and "organizations" that are not scoped to an organization.
 func (s *Store) Global() *Org {
-	return &Org{backend: s.backend, name: "", groupsGen: s.groupsGen, events: s.events}
+	return &Org{backend: s.backend, name: "", groupsGen: s.groupsGen, events: s.events, counts: s.counts}
 }
 
 // CreateOrg creates a new, empty organization. It returns ErrConflict if an
@@ -78,7 +97,7 @@ func (s *Store) CreateOrg(name string) (*Org, error) {
 	if err := s.backend.CreateOrg(name); err != nil {
 		return nil, err
 	}
-	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events}, nil
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events, counts: s.counts}, nil
 }
 
 // Org returns the named organization and whether it exists.
@@ -90,7 +109,7 @@ func (s *Store) Org(name string) (*Org, bool, error) {
 	if !ok {
 		return nil, false, nil
 	}
-	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events}, true, nil
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events, counts: s.counts}, true, nil
 }
 
 // DeleteOrg removes an organization, reporting whether it existed.
@@ -123,7 +142,7 @@ func (s *Store) Tx(fn func(tx *Store) error) error {
 	// sees a write that was rolled back.
 	buf := &txBuffer{}
 	err := s.backend.Tx(func(b Backend) error {
-		return fn(&Store{backend: b, groupsGen: s.groupsGen, watch: s.watch, events: buf})
+		return fn(&Store{backend: b, groupsGen: s.groupsGen, watch: s.watch, events: buf, counts: s.counts})
 	})
 	if err == nil {
 		buf.flushTo(s.events)
@@ -140,6 +159,7 @@ type Org struct {
 	// events is where this handle's writes are reported: the registered
 	// observers directly, or a transaction buffer that releases them on commit.
 	events emitter
+	counts *Counts
 }
 
 // note records a committed write: it advances the groups generation when the
@@ -179,6 +199,9 @@ func (o *Org) Name() string { return o.name }
 
 // Create stores val under coll/key, returning ErrConflict if it already exists.
 func (o *Org) Create(coll, key string, val []byte) error {
+	if o.counts != nil {
+		o.counts.Writes.Add(1)
+	}
 	err := o.backend.Create(o.name, coll, key, val)
 	if err == nil {
 		o.note(coll, key, val, false)
@@ -188,6 +211,9 @@ func (o *Org) Create(coll, key string, val []byte) error {
 
 // Put stores val under coll/key, overwriting any existing value.
 func (o *Org) Put(coll, key string, val []byte) error {
+	if o.counts != nil {
+		o.counts.Writes.Add(1)
+	}
 	err := o.backend.Put(o.name, coll, key, val)
 	if err == nil {
 		o.note(coll, key, val, false)
@@ -197,6 +223,9 @@ func (o *Org) Put(coll, key string, val []byte) error {
 
 // Get returns the value at coll/key. The returned slice is the caller's to keep.
 func (o *Org) Get(coll, key string) ([]byte, bool, error) {
+	if o.counts != nil {
+		o.counts.Reads.Add(1)
+	}
 	return o.backend.Get(o.name, coll, key)
 }
 
@@ -205,6 +234,9 @@ func (o *Org) Get(coll, key string) ([]byte, bool, error) {
 // owned copy just like Get (the no-copy optimization is internal to the memory
 // backend's Range). Callers must still treat the result as read-only.
 func (o *Org) View(coll, key string) ([]byte, bool, error) {
+	if o.counts != nil {
+		o.counts.Reads.Add(1)
+	}
 	return o.backend.Get(o.name, coll, key)
 }
 
@@ -214,11 +246,17 @@ func (o *Org) View(coll, key string) ([]byte, bool, error) {
 // from fn stops iteration early. Callers that need sorted order must sort the
 // values they collect.
 func (o *Org) Range(coll string, fn func(key string, raw []byte) bool) error {
+	if o.counts != nil {
+		o.counts.Scans.Add(1)
+	}
 	return o.backend.Range(o.name, coll, fn)
 }
 
 // Delete removes coll/key, returning the removed value and whether it existed.
 func (o *Org) Delete(coll, key string) ([]byte, bool, error) {
+	if o.counts != nil {
+		o.counts.Deletes.Add(1)
+	}
 	old, existed, err := o.backend.Delete(o.name, coll, key)
 	if err == nil && existed {
 		o.note(coll, key, nil, true)
