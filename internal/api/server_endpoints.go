@@ -18,7 +18,7 @@ const (
 )
 
 func (a *API) registerServerEndpoints(mux *http.ServeMux) {
-	mux.HandleFunc("GET /_stats", a.stats)
+	mux.HandleFunc("GET /_stats", a.statsHandler)
 	mux.HandleFunc("GET /license", a.license)
 	mux.HandleFunc("GET /server_api_version", a.serverAPIVersion)
 	mux.HandleFunc("GET /organizations/{org}/required_recipe", a.requiredRecipe)
@@ -37,13 +37,6 @@ func (a *API) serverAPIVersion(w http.ResponseWriter, r *http.Request) {
 		"request_version":  requested,
 		"response_version": requested,
 	})
-}
-
-// stats is a stub: a stock Chef server exposes erchef/Prometheus metrics here,
-// which carry no meaning for an in-memory test server, so it returns an empty
-// (but well-formed) stats array.
-func (a *API) stats(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []any{})
 }
 
 // license reports the server license state. A stock Chef Infra Server exposes

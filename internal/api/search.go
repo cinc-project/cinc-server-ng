@@ -556,8 +556,12 @@ func (a *API) findMatches(org *store.Org, idx searchIndex, query search.Query) (
 	indexed := ci.size()
 	ci.mu.RUnlock()
 	if !planned {
+		// Falling back to a scan costs what the index exists to avoid, so it is
+		// counted rather than left to be inferred from latency.
+		a.stats.searches.With(searchScanned).Inc()
 		return a.collectMatches(org, idx, query)
 	}
+	a.stats.searches.With(searchPlanned).Inc()
 	return fetchMatches(org, idx.collection, ids, indexed)
 }
 

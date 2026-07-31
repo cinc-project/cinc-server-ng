@@ -123,12 +123,13 @@ the pure-Go [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) driver
 so the static binary and `scratch`/`distroless` images keep working with
 `CGO_ENABLED=0`.
 
-**High write throughput.** For fleets where many clients check in at once, pass
-`--sqlite-group-commit` to batch concurrently-pending writes into shared
-transactions (group commit), amortizing SQLite's per-commit cost. It roughly
-halves write cost under concurrent load at the price of slightly higher latency
-for a lone serialized writer, so it is opt-in and off by default; leave it off
-for single-client use such as CI fixtures.
+**High write throughput.** Concurrently-pending writes are batched into shared
+transactions (group commit), amortizing SQLite's per-commit cost. Under
+concurrent fleet load this is worth roughly 2.5x write throughput and about an
+order of magnitude in tail latency (p99 5.06ms → 488µs on a 16-writer
+workload). It costs a few microseconds on a write that finds no batch to join,
+so a lone serialized writer — a CI fixture doing one thing at a time — can turn
+it off with `--sqlite-group-commit=false`.
 
 The storage layer is pluggable behind a small `store.Backend` interface
 (`(org, collection, key) → bytes` plus a blob store), so PostgreSQL/RDS can be
@@ -155,6 +156,39 @@ version and any pending migrations are applied automatically at startup, so
 upgrading the binary against an existing database just works. Because object
 bodies are stored as opaque JSON, the schema is tiny and rarely changes.
 Downgrading the binary against a newer database is not supported.
+
+## Metrics
+
+`GET /_stats` reports what the server is doing. It requires authentication, like
+any other API route, and answers in two formats:
+
+```sh
+# JSON metric families (the default)
+curl -s .../_stats
+
+# Prometheus text exposition, for a scraper
+curl -s -H 'Accept: text/plain' .../_stats
+```
+
+What it exposes is chosen to answer the questions that decide whether the server
+is keeping up with a fleet:
+
+| Metric | Why it matters |
+| --- | --- |
+| `cinc_zero_http_requests_total{outcome}` | Request rate split by `2xx`/`3xx`/`4xx`/`5xx`, with `401` broken out — rejected credentials mean something different from bad requests. |
+| `cinc_zero_http_request_duration_seconds` | Latency as a histogram. A mean hides the stalls; the buckets do not. |
+| `cinc_zero_store_reads_total` / `_writes_total` / `_deletes_total` | Read amplification is what limits throughput on a durable backend — the check-in path costs several reads per write, so watch the ratio, not just the totals. |
+| `cinc_zero_store_scans_total` | Collection scans. A rising rate means work that grows with the size of your data. |
+| `cinc_zero_search_queries_total{resolution}` | `indexed` vs `scanned`. A query the planner cannot handle silently falls back to scanning the whole collection; this is how you find out. |
+| `cinc_zero_search_indexed_documents` | Documents held in the inverted search indexes. |
+| `cinc_zero_uptime_seconds`, `cinc_zero_goroutines`, `cinc_zero_heap_bytes` | Process health. |
+
+Instrumentation is measured rather than assumed: it costs about 150ns per
+request, which is ~3% of the cheapest possible request (no auth, in-memory) and
+is not measurable on a realistic authenticated one.
+
+Embedding programs can read the same numbers directly with `srv.Metrics()`
+instead of going through HTTP.
 
 ## Docker
 

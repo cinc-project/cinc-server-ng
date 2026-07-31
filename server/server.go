@@ -22,6 +22,7 @@ import (
 
 	"github.com/tas50/cinc-zero/internal/api"
 	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-zero/internal/metrics"
 	"github.com/tas50/cinc-zero/internal/repo"
 	"github.com/tas50/cinc-zero/internal/state"
 	"github.com/tas50/cinc-zero/internal/store"
@@ -192,6 +193,7 @@ type Server struct {
 	keyCache      *auth.PublicKeyCache
 	webuiPub      *rsa.PublicKey // verifies X-Ops-Request-Source: web requests
 	fileStoreKey  []byte         // signs/verifies pre-signed cookbook file-store URLs
+	api           *api.API
 	url           string
 }
 
@@ -349,13 +351,18 @@ func New(opts Options) (*Server, error) {
 		webuiPub:      webuiPub,
 		fileStoreKey:  fileStoreKey,
 	}
-	handler := api.New(st,
+	apiInstance := api.New(st,
 		api.WithACLEnforcement(opts.EnforceACL),
 		api.WithFileStoreKey(fileStoreKey),
-	).Handler()
+	)
+	s.api = apiInstance
+	handler := apiInstance.Handler()
 	if !opts.DisableAuth {
 		handler = s.authMiddleware(handler)
 	}
+	// Measure outside authentication, so requests rejected before they reach a
+	// route are counted too — a flood of bad credentials is worth seeing.
+	handler = apiInstance.Instrument(handler)
 	// Cap the request body outermost, so the limit is in force before any layer
 	// (auth, or a handler on an auth-exempt path) reads the body.
 	if opts.MaxBodyBytes > 0 {
@@ -442,3 +449,7 @@ func (s *Server) ValidatorKey(org string) []byte { return s.validatorKeys[org] }
 
 // Store exposes the underlying store for programmatic seeding and inspection.
 func (s *Server) Store() *store.Store { return s.store }
+
+// Metrics returns the server's instrument registry, so an embedding program can
+// gather the same numbers /_stats serves.
+func (s *Server) Metrics() *metrics.Registry { return s.api.Metrics() }
