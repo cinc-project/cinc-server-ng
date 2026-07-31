@@ -441,6 +441,12 @@ func actorGroups(org *store.Org, actor Actor) (map[string]bool, error) {
 	type rec struct{ users, clients, groups []string }
 	all := map[string]rec{}
 	if err := org.Range("groups", func(name string, raw []byte) bool {
+		if m, ok := decodeMembers(raw); ok {
+			all[name] = rec{m.Users, m.Clients, m.Groups}
+			return true
+		}
+		// Unusual shape (e.g. a hand-written state file with non-string
+		// members): fall back to the tolerant map decode.
 		var g map[string]any
 		if json.Unmarshal(raw, &g) == nil {
 			all[name] = rec{anyStrings(g["users"]), anyStrings(g["clients"]), anyStrings(g["groups"])}
