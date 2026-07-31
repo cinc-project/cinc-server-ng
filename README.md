@@ -212,6 +212,44 @@ docker run -p 8889:8889 -v cinc-data:/data \
   ghcr.io/tas50/cinc-zero:latest --storage sqlite --db /data/cinc.db
 ```
 
+## Compatibility with Chef Infra Server
+
+Fidelity is the point of this project, so it is tested three ways, each
+answering a different question.
+
+**Unit and API tests** (`make test`) check cinc-zero against its own idea of
+correct. Fast, broad, and unable to tell you that idea is wrong.
+
+**Conformance** (`make conformance`) drives the real `knife` CLI against an
+in-process server, so a genuine signed-request lifecycle has to work end to end
+— reads, writes, search, policyfiles, authorization, and the cookbook
+sandbox/upload flow. It runs with ACL enforcement on, matching what the binary
+ships with; testing the permissive configuration would leave every
+authorization path unexercised by a real client. CI sets
+`CINC_ZERO_REQUIRE_CONFORMANCE=1`, which turns "knife is unusable" from a skip
+into a failure: a conformance job that quietly executes nothing while reporting
+success is worse than no job at all.
+
+**Differential** (`make differential`) issues the same requests to cinc-zero and
+to a real Chef Infra Server and diffs the responses. This is the only suite that
+can find a response we have confidently got wrong, because clients are lenient —
+`knife` will accept a missing field, an extra field, or the wrong type, so "the
+client did not error" says little about fidelity. It needs a full Chef Infra
+Server, so it runs on demand and weekly rather than per-PR (see
+`.github/workflows/differential.yml`).
+
+Responses cannot match byte for byte — different hosts, different generated
+identifiers, different keys — so they are normalized first. Those rules are kept
+deliberately narrow, in `differential/normalize.go`: every rule erases a
+difference, so an over-broad one hides the bugs the suite exists to find. A
+value is only replaced when it is unequal *by construction*.
+
+Anything left over is either a bug or an accepted deviation recorded in
+`differential/known.go` with a reason. **That list, not a percentage, is the
+compatibility statement.** "100% compatible" is not a claim anyone can check;
+"here are the ways we differ, and why each is acceptable" is — and an
+unexplained difference fails the run, so the list only grows deliberately.
+
 ## Development
 
 Building, testing, the `knife` conformance suite, the dev fixtures

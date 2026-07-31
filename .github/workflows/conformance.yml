@@ -2,7 +2,11 @@ name: Conformance
 
 # Drives the real knife CLI (from Cinc Workstation) against an in-process
 # cinc-zero server, validating end-to-end fidelity of signed requests, search,
-# and the cookbook sandbox/upload flow.
+# authorization, policyfiles, and the cookbook sandbox/upload flow.
+#
+# CINC_ZERO_REQUIRE_CONFORMANCE turns "knife is unusable" from a skip into a
+# failure. Without it, a broken Workstation install would leave this job green
+# having executed nothing at all.
 
 on:
   workflow_dispatch:
@@ -34,4 +38,6 @@ jobs:
           echo "KNIFE=$(command -v knife)" >> "$GITHUB_ENV"
 
       - name: Run conformance suite
+        env:
+          CINC_ZERO_REQUIRE_CONFORMANCE: "1"
         run: go test -tags conformance ./conformance/ -v

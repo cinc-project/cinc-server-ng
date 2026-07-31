@@ -1,0 +1,106 @@
+name: Differential
+
+# Compares cinc-zero's API responses against a real Chef Infra Server (the FOSS
+# Cinc Server distribution) by issuing the same requests to both and diffing
+# what comes back.
+#
+# Every other suite checks cinc-zero against its own idea of correct. This is
+# the only thing that checks it against the real implementation, so it is the
+# only thing that can find a response we have confidently got wrong.
+#
+# It installs and reconfigures a full Chef Infra Server, which takes several
+# minutes and a lot of the runner, so it does not run per-PR. Run it on demand
+# before a release, and on a schedule to catch upstream drift.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    name: cinc-zero vs Chef Infra Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ORG: diffs
+      DIFF_USER: diffuser
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Cinc Server
+        run: |
+          curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable
+          sudo cinc-server-ctl reconfigure --chef-license=accept
+          sudo cinc-server-ctl status
+
+      - name: Provision the org and the shared identity
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /tmp/diff
+          # One identity, valid on both servers: a response may name the actor
+          # that created an object, so comparing across two users would report a
+          # difference on every ACL.
+          sudo cinc-server-ctl user-create "$DIFF_USER" Diff User diff@example.com "$(openssl rand -hex 16)" \
+            --filename /tmp/diff/user.pem
+          sudo cinc-server-ctl org-create "$ORG" "Differential" --association_user "$DIFF_USER" \
+            --filename /tmp/diff/validator.pem
+          sudo chmod -R a+r /tmp/diff
+          openssl rsa -in /tmp/diff/user.pem -pubout -out /tmp/diff/user.pub
+
+      - name: Export the reference server's CA
+        run: |
+          set -euo pipefail
+          # Pinned rather than skipping verification: comparing responses is
+          # pointless if they could have come from anywhere.
+          openssl s_client -showcerts -connect localhost:443 -servername "$(hostname -f)" </dev/null 2>/dev/null \
+            | openssl x509 -outform PEM > /tmp/diff/ca.pem
+          test -s /tmp/diff/ca.pem
+
+      - name: Seed cinc-zero with the same identity
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/state/users "/tmp/state/organizations/$ORG/groups"
+          PUBKEY=$(python3 -c 'import json,sys; print(json.dumps(open(sys.argv[1]).read()))' /tmp/diff/user.pub)
+          cat > /tmp/state/users/$DIFF_USER.json <<EOF
+          {"username":"$DIFF_USER","display_name":"Diff User","email":"diff@example.com","public_key":$PUBKEY}
+          EOF
+          echo "[\"$DIFF_USER\"]" > "/tmp/state/organizations/$ORG/members.json"
+          # An org admin, matching what --association_user grants on the
+          # reference server.
+          cat > "/tmp/state/organizations/$ORG/groups/admins.json" <<EOF
+          {"groupname":"admins","users":["$DIFF_USER"],"clients":[],"groups":[]}
+          EOF
+
+      - name: Start cinc-zero
+        run: |
+          set -euo pipefail
+          go build -o /tmp/cinc-zero ./cmd/cinc-zero
+          /tmp/cinc-zero --addr 127.0.0.1:8889 --orgs "$ORG" --state /tmp/state >/tmp/cinc-zero.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8889/_status >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "cinc-zero did not become ready:"; cat /tmp/cinc-zero.log; exit 1
+
+      - name: Compare
+        env:
+          DIFF_REFERENCE_URL: https://localhost/organizations/diffs
+          DIFF_CANDIDATE_URL: http://127.0.0.1:8889/organizations/diffs
+          DIFF_KEY: /tmp/diff/user.pem
+          DIFF_REFERENCE_CA: /tmp/diff/ca.pem
+        run: go test -tags differential ./differential/ -v -timeout 30m
+
+      - name: cinc-zero log
+        if: always()
+        run: cat /tmp/cinc-zero.log || true

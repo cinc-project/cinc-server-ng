@@ -15,7 +15,7 @@ LDFLAGS := -X $(LDFLAGS_PKG).version=$(VERSION) \
            -X $(LDFLAGS_PKG).commit=$(COMMIT) \
            -X $(LDFLAGS_PKG).buildDate=$(BUILD_DATE)
 
-.PHONY: all build dist install test conformance vet fmt tidy clean run run-dev dev-db dev-db-reset run-dev-sqlite help
+.PHONY: all build dist install test conformance differential vet fmt tidy clean run run-dev dev-db dev-db-reset run-dev-sqlite help
 
 all: build
 
@@ -49,7 +49,12 @@ test:
 ## conformance: drive the real knife CLI (from Cinc Workstation) against
 ## cinc-zero; needs knife installed (see https://omnitruck.cinc.sh/install.sh)
 conformance:
-	go test -tags conformance ./conformance/ -v
+	CINC_ZERO_REQUIRE_CONFORMANCE=1 go test -tags conformance ./conformance/ -v
+
+## differential: compare responses against a real Chef Infra Server. Needs both
+## servers running and DIFF_* configured; see .github/workflows/differential.yml.
+differential:
+	go test -tags differential ./differential/ -v -timeout 30m
 
 ## vet: run go vet across all packages
 vet:
