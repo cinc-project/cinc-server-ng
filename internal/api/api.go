@@ -25,6 +25,9 @@ type API struct {
 	// search memoizes the flattened searchable view of each document so repeated
 	// queries skip re-unmarshalling and re-flattening unchanged objects.
 	search *searchCache
+	// groups memoizes the reverse index of group membership, rebuilt only when
+	// the store reports that groups changed.
+	groups *groupIndexCache
 }
 
 // Option configures an API at construction time.
@@ -44,7 +47,7 @@ func WithFileStoreKey(key []byte) Option {
 
 // New returns an API backed by st, applying any options.
 func New(st *store.Store, opts ...Option) *API {
-	a := &API{store: st, search: newSearchCache()}
+	a := &API{store: st, search: newSearchCache(), groups: newGroupIndexCache()}
 	for _, opt := range opts {
 		opt(a)
 	}

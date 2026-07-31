@@ -82,8 +82,11 @@ func TestCheckinStoreOpCount(t *testing.T) {
 		name, method, body string
 		maxGets            int64
 	}{
-		{"GET node", "GET", "", 5},
-		{"PUT node", "PUT", string(benchFleetNodeBody("node0")), 5},
+		// A GET must not read the node twice. Authorization checks the object's
+		// existence before allowing the request, and the handler then needs the
+		// same bytes; that read is handed forward rather than repeated.
+		{"GET node", "GET", "", 3},
+		{"PUT node", "PUT", string(benchFleetNodeBody("node0")), 3},
 	} {
 		counting.reset()
 		if code := statusOf(t, signedAs(t, "node0", key, c.method, url, c.body)); code != http.StatusOK {

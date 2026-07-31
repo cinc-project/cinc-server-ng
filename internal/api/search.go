@@ -301,14 +301,14 @@ func (a *API) searchReadFilter(r *http.Request, org *store.Org, idx searchIndex)
 	// A data bag's items all share the bag's ACL, so one check decides the
 	// whole index.
 	if idx.aclObject != "" {
-		allowed, err := actorAllowed(org, actor, idx.aclType, idx.aclObject, "read")
+		allowed, err := a.actorAllowed(org, actor, idx.aclType, idx.aclObject, "read")
 		if err != nil {
 			return nil, err
 		}
 		return func(string) bool { return allowed }, nil
 	}
 
-	member, err := actorGroups(org, actor)
+	member, err := a.actorGroups(org, actor)
 	if err != nil {
 		return nil, err
 	}
