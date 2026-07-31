@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 
 	"github.com/tas50/cinc-zero/internal/store"
 )
@@ -60,7 +59,7 @@ func (a *API) registerAuthzRoutes(mux *http.ServeMux) {
 	const groups = "/organizations/{org}/groups"
 	mux.HandleFunc("GET "+groups, a.listObjects("groups"))
 	mux.HandleFunc("POST "+groups, a.createGroup)
-	mux.HandleFunc("GET "+groups+"/{name}", a.getObject("groups"))
+	mux.HandleFunc("GET "+groups+"/{name}", a.getGroup)
 	mux.HandleFunc("PUT "+groups+"/{name}", a.putGroup)
 	mux.HandleFunc("DELETE "+groups+"/{name}", a.deleteObject("groups"))
 	mux.HandleFunc("HEAD "+groups+"/{name}", a.headObject("groups"))
@@ -72,6 +71,26 @@ func (a *API) registerAuthzRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/{name}", a.getObject("containers"))
 	mux.HandleFunc("POST "+base, a.createContainer)
 	mux.HandleFunc("DELETE "+base+"/{name}", a.deleteObject("containers"))
+}
+
+// getGroup returns a group with its incremental membership rows folded into
+// the document, so callers see one consistent membership however it was added.
+func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
+	org := a.org(w, r)
+	if org == nil {
+		return
+	}
+	name := r.PathValue("name")
+	doc, ok, err := groupDocWithMembers(org, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
+		return
+	}
+	writeRaw(w, http.StatusOK, doc)
 }
 
 // createGroup creates a group from the Chef create body, which names the group
@@ -92,6 +111,10 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	users, clients, groups := groupMembers(obj)
+	if err := clearMembers(org, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	err := org.Create("groups", name, mustEncode(groupDoc(name, users, clients, groups)))
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Object already exists")
@@ -120,6 +143,12 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 	users, clients, groups := groupMembers(obj)
+	// An explicit write replaces the group's membership, so any rows added
+	// incrementally since the last write no longer apply.
+	if err := clearMembers(org, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	doc := mustEncode(groupDoc(name, users, clients, groups))
 	if err := org.Put("groups", name, doc); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -143,22 +172,7 @@ func groupName(obj map[string]any) string {
 // org's "clients" group and inherits its ACL grants under enforcement — the
 // membership Chef gives clients so they can register and manage their own node.
 func addClientToOrgGroup(org *store.Org, group, client string) error {
-	var users, clients, groups []string
-	raw, ok, err := org.Get("groups", group)
-	if err != nil {
-		return err
-	}
-	if ok {
-		var g map[string]any
-		if json.Unmarshal(raw, &g) == nil {
-			users, clients, groups = groupMembers(g)
-		}
-	}
-	if slices.Contains(clients, client) {
-		return nil
-	}
-	clients = append(clients, client)
-	return org.Put("groups", group, mustEncode(groupDoc(group, users, clients, groups)))
+	return addMember(org, group, memberClients, client)
 }
 
 // groupMembers pulls members from a group body. An update nests them under

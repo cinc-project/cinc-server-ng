@@ -28,6 +28,9 @@ type API struct {
 	// groups memoizes the reverse index of group membership, rebuilt only when
 	// the store reports that groups changed.
 	groups *groupIndexCache
+	// searchIdx holds the inverted index for each searched collection, built on
+	// first use and kept current from the store's write stream.
+	searchIdx *searchIndexes
 }
 
 // Option configures an API at construction time.
@@ -47,10 +50,18 @@ func WithFileStoreKey(key []byte) Option {
 
 // New returns an API backed by st, applying any options.
 func New(st *store.Store, opts ...Option) *API {
-	a := &API{store: st, search: newSearchCache(), groups: newGroupIndexCache()}
+	a := &API{
+		store:     st,
+		search:    newSearchCache(),
+		groups:    newGroupIndexCache(),
+		searchIdx: newSearchIndexes(),
+	}
 	for _, opt := range opts {
 		opt(a)
 	}
+	// Keep the derived indexes current as data changes beneath us.
+	st.Watch(a.searchIdx.observe)
+	st.Watch(a.groups.observe)
 	return a
 }
 

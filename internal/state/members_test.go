@@ -1,7 +1,6 @@
 package state
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -72,22 +71,15 @@ func TestLoadMembersJoinsUsersGroup(t *testing.T) {
 		t.Fatal("acme not created")
 	}
 
-	raw, ok, err := org.Get("groups", "users")
+	// Membership is the document plus any incrementally added rows, so it is
+	// read through the API rather than off the stored document.
+	members, _, _, err := api.GroupMembership(org, "users")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok {
-		t.Fatal("users group missing")
-	}
-	var g struct {
-		Users []string `json:"users"`
-	}
-	if err := json.Unmarshal(raw, &g); err != nil {
-		t.Fatal(err)
-	}
 	for _, name := range []string{"dana", "erin"} {
-		if !slices.Contains(g.Users, name) {
-			t.Errorf("%s is not in the users group: %v", name, g.Users)
+		if !slices.Contains(members, name) {
+			t.Errorf("%s is not in the users group: %v", name, members)
 		}
 	}
 }
@@ -112,20 +104,11 @@ func TestSeedUserGroupMembership(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
 	groupUsers := func(group string) []string {
-		raw, ok, err := org.Get("groups", group)
+		users, _, _, err := api.GroupMembership(org, group)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !ok {
-			t.Fatalf("group %q missing", group)
-		}
-		var g struct {
-			Users []string `json:"users"`
-		}
-		if err := json.Unmarshal(raw, &g); err != nil {
-			t.Fatal(err)
-		}
-		return g.Users
+		return users
 	}
 
 	if admins := groupUsers("admins"); !slices.Contains(admins, "tim") {

@@ -281,38 +281,17 @@ func (a *API) inviterAuthorized(org *store.Org, inviter string) (bool, error) {
 	} else if !ok {
 		return false, nil
 	}
-	raw, ok, err := org.Get("groups", "admins")
+	users, _, _, err := groupMembership(org, "admins")
 	if err != nil {
 		return false, err
 	}
-	if ok {
-		var g map[string]any
-		if json.Unmarshal(raw, &g) == nil && slices.Contains(anyStrings(g["users"]), inviter) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return slices.Contains(users, inviter), nil
 }
 
 // addUserToOrgGroup adds user to the named org group's user list (creating the
 // group if absent), so authorization membership reflects the new member.
 func addUserToOrgGroup(org *store.Org, group, user string) error {
-	var users, clients, groups []string
-	raw, ok, err := org.Get("groups", group)
-	if err != nil {
-		return err
-	}
-	if ok {
-		var g map[string]any
-		if json.Unmarshal(raw, &g) == nil {
-			users, clients, groups = groupMembers(g)
-		}
-	}
-	if slices.Contains(users, user) {
-		return nil
-	}
-	users = append(users, user)
-	return org.Put("groups", group, mustEncode(groupDoc(group, users, clients, groups)))
+	return addMember(org, group, memberUsers, user)
 }
 
 // AddUserToOrgGroup adds a global user to an org group, mirroring what
