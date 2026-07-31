@@ -40,6 +40,11 @@ type Store struct {
 	// rare (membership changes, not check-ins) and over-invalidation only costs
 	// a rebuild, while under-invalidation would be a correctness bug.
 	groupsGen *atomic.Uint64
+	// watch holds the registered write observers; events is where this Store's
+	// writes are delivered — the observers directly, or a transaction buffer
+	// that releases them on commit.
+	watch  *watchers
+	events emitter
 }
 
 // New returns a Store backed by the default in-memory backend.
@@ -50,7 +55,8 @@ func New() *Store {
 // NewWithBackend returns a Store backed by b. Use this to run against a durable
 // backend such as SQLite.
 func NewWithBackend(b Backend) *Store {
-	return &Store{backend: b, groupsGen: new(atomic.Uint64)}
+	w := &watchers{}
+	return &Store{backend: b, groupsGen: new(atomic.Uint64), watch: w, events: w}
 }
 
 // Backend returns the underlying Backend, for callers (e.g. the server) that need
@@ -63,7 +69,7 @@ func (s *Store) Close() error { return s.backend.Close() }
 // Global returns the server-global object space, used for collections such as
 // "users" and "organizations" that are not scoped to an organization.
 func (s *Store) Global() *Org {
-	return &Org{backend: s.backend, name: "", groupsGen: s.groupsGen}
+	return &Org{backend: s.backend, name: "", groupsGen: s.groupsGen, events: s.events}
 }
 
 // CreateOrg creates a new, empty organization. It returns ErrConflict if an
@@ -72,7 +78,7 @@ func (s *Store) CreateOrg(name string) (*Org, error) {
 	if err := s.backend.CreateOrg(name); err != nil {
 		return nil, err
 	}
-	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen}, nil
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events}, nil
 }
 
 // Org returns the named organization and whether it exists.
@@ -84,12 +90,19 @@ func (s *Store) Org(name string) (*Org, bool, error) {
 	if !ok {
 		return nil, false, nil
 	}
-	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen}, true, nil
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events}, true, nil
 }
 
 // DeleteOrg removes an organization, reporting whether it existed.
 func (s *Store) DeleteOrg(name string) (bool, error) {
-	return s.backend.DeleteOrg(name)
+	existed, err := s.backend.DeleteOrg(name)
+	if err == nil && existed && s.events != nil {
+		// An org-wide drop, reported with no collection: derived indexes must
+		// discard everything they hold for this org, or a name that is deleted
+		// and recreated would inherit the old contents.
+		s.events.emit(Event{Org: name, Deleted: true})
+	}
+	return existed, err
 }
 
 // ListOrgs returns the organization names in sorted order.
@@ -105,10 +118,17 @@ func (s *Store) ListOrgs() ([]string, error) {
 // fn returns.
 func (s *Store) Tx(fn func(tx *Store) error) error {
 	// The transaction view shares the generation counter, so a group written
-	// inside a transaction still invalidates the cached index.
-	return s.backend.Tx(func(b Backend) error {
-		return fn(&Store{backend: b, groupsGen: s.groupsGen})
+	// inside a transaction still invalidates the cached index. Its events are
+	// buffered and only released if the transaction commits, so an index never
+	// sees a write that was rolled back.
+	buf := &txBuffer{}
+	err := s.backend.Tx(func(b Backend) error {
+		return fn(&Store{backend: b, groupsGen: s.groupsGen, watch: s.watch, events: buf})
 	})
+	if err == nil {
+		buf.flushTo(s.events)
+	}
+	return err
 }
 
 // Org is a handle to a single organization's collection of objects. The empty
@@ -117,6 +137,18 @@ type Org struct {
 	backend   Backend
 	name      string
 	groupsGen *atomic.Uint64
+	// events is where this handle's writes are reported: the registered
+	// observers directly, or a transaction buffer that releases them on commit.
+	events emitter
+}
+
+// note records a committed write: it advances the groups generation when the
+// groups collection changed, and reports the write to any observers.
+func (o *Org) note(coll, key string, val []byte, deleted bool) {
+	o.noteWrite(coll)
+	if o.events != nil {
+		o.events.emit(Event{Org: o.name, Collection: coll, Key: key, Value: val, Deleted: deleted})
+	}
 }
 
 // groupsColl is the collection whose writes advance the groups generation.
@@ -149,7 +181,7 @@ func (o *Org) Name() string { return o.name }
 func (o *Org) Create(coll, key string, val []byte) error {
 	err := o.backend.Create(o.name, coll, key, val)
 	if err == nil {
-		o.noteWrite(coll)
+		o.note(coll, key, val, false)
 	}
 	return err
 }
@@ -158,7 +190,7 @@ func (o *Org) Create(coll, key string, val []byte) error {
 func (o *Org) Put(coll, key string, val []byte) error {
 	err := o.backend.Put(o.name, coll, key, val)
 	if err == nil {
-		o.noteWrite(coll)
+		o.note(coll, key, val, false)
 	}
 	return err
 }
@@ -189,7 +221,7 @@ func (o *Org) Range(coll string, fn func(key string, raw []byte) bool) error {
 func (o *Org) Delete(coll, key string) ([]byte, bool, error) {
 	old, existed, err := o.backend.Delete(o.name, coll, key)
 	if err == nil && existed {
-		o.noteWrite(coll)
+		o.note(coll, key, nil, true)
 	}
 	return old, existed, err
 }
