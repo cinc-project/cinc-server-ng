@@ -195,14 +195,19 @@ func TestClassifyRequest(t *testing.T) {
 		// Global user ACLs: grant on the user object, evaluated in the global space.
 		{"GET", "/users/bob/_acl", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant"}},
 		{"PUT", "/users/bob/_acl/grant", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant"}},
+		// Org membership changes are gated by the org's groups container, so a
+		// non-member cannot associate itself in (see authz_gaps_test.go).
+		{"POST", "/organizations/acme/users", &authzCheck{aclType: "containers", aclName: "groups", perm: "update"}},
+		// An actor's keys are its credential, so they are gated like the actor.
+		{"GET", "/users/bob/keys", &authzCheck{superuserOnly: true, perm: "read", allowSelf: "bob"}},
+		// Provisioning an org is server-level; listing them stays open.
+		{"POST", "/organizations", &authzCheck{superuserOnly: true, perm: "create"}},
+		// Policy sub-resources collapse onto the policy object's ACL.
+		{"GET", "/organizations/acme/policies/app/revisions/1.0.0", &authzCheck{aclType: "policies", aclName: "app", perm: "read"}},
 		// Unclassified: allow-through (no ACL restrictions or out of scope).
 		{"GET", "/organizations/acme/search/node", nil},
 		{"GET", "/organizations/acme/sandboxes", nil},
-		{"POST", "/organizations/acme/users", nil}, // org association
-		{"GET", "/users/bob/keys", nil},            // user key sub-endpoints are not gated
-		{"POST", "/organizations", nil},
 		{"GET", "/organizations", nil},
-		{"GET", "/organizations/acme/policies/app/revisions/1.0.0", nil}, // sub-resource
 	}
 	for _, c := range cases {
 		got, ok := classifyRequest(c.method, c.path)

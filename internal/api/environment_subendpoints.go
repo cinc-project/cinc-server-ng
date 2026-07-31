@@ -273,7 +273,7 @@ func (a *API) envCookbookVersions(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(raw, &m) != nil {
 			continue
 		}
-		injectFileURLs(m, r, org.Name())
+		a.injectFileURLs(m, r, org.Name())
 		solved[name] = m
 		for dep := range manifestDependencies(m) {
 			queue = append(queue, dep)

@@ -293,36 +293,37 @@ func TestServerLoadsCookbookRepo(t *testing.T) {
 	}
 }
 
-func TestFileStorePathSkipsAuth(t *testing.T) {
-	// Auth is enabled, but the cookbook file store must accept unsigned
-	// uploads/downloads (real Chef hands out pre-signed bookshelf URLs).
+func TestFileStorePathSkipsMixlibSigning(t *testing.T) {
+	// The cookbook file store must accept requests that carry no Mixlib
+	// signature (real Chef hands out pre-signed bookshelf URLs, which clients
+	// use unsigned). Authorization rides on the URL instead, so the transfer
+	// works with the grant the server issued and nothing else.
 	srv := startServer(t, Options{Orgs: []string{"acme"}})
 
 	content := "package 'nginx'\n"
 	sum := md5.Sum([]byte(content))
 	checksum := hex.EncodeToString(sum[:])
-	url := srv.URL() + "/organizations/acme/file_store/" + checksum
 
-	// Unsigned PUT is accepted.
-	req, _ := http.NewRequest("PUT", url, strings.NewReader(content))
+	// Unsigned PUT to the granted upload URL is accepted.
+	req, _ := http.NewRequest("PUT", sandboxUploadURL(t, srv, checksum), strings.NewReader(content))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
-		t.Fatalf("unsigned file_store PUT = %d, want 200", resp.StatusCode)
+		t.Fatalf("granted file_store PUT = %d, want 200", resp.StatusCode)
 	}
 
-	// Unsigned GET serves it back.
-	resp, err = http.Get(url)
+	// Unsigned GET at the granted download URL serves it back.
+	resp, err = http.Get(grantedDownloadURL(t, srv, "acme", checksum))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 || string(body) != content {
-		t.Fatalf("unsigned file_store GET = %d %q", resp.StatusCode, body)
+		t.Fatalf("granted file_store GET = %d %q", resp.StatusCode, body)
 	}
 
 	// A non-file_store path still requires auth.

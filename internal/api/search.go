@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -240,10 +241,18 @@ func (a *API) listSearchIndexes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// searchIndex describes where an index's documents live and how to address one.
+// searchIndex describes where an index's documents live, how to address one,
+// and which ACL governs reading them. aclType/aclObject mirror what
+// classifyRequest would require of the equivalent direct read route, so search
+// results can be filtered to what the actor could have fetched directly.
+// aclObject is empty for indexes whose documents are governed one ACL per
+// document (nodes, roles, clients, environments) and names the owning object
+// for data bags, whose items all share the bag's ACL.
 type searchIndex struct {
 	collection string
 	mergeAttrs bool // node-style attribute precedence merge
+	aclType    string
+	aclObject  string
 	urlFor     func(r *http.Request, org, id string) string
 }
 
@@ -254,6 +263,7 @@ func (a *API) resolveIndex(r *http.Request, org *store.Org, name string) (search
 		return searchIndex{
 			collection: coll,
 			mergeAttrs: name == "node",
+			aclType:    coll,
 			urlFor:     func(r *http.Request, org, id string) string { return objectURL(r, org, coll, id) },
 		}, true, nil
 	default:
@@ -266,9 +276,66 @@ func (a *API) resolveIndex(r *http.Request, org *store.Org, name string) (search
 		}
 		return searchIndex{
 			collection: dataBagItemsColl(name),
+			aclType:    "data",
+			aclObject:  name,
 			urlFor:     func(r *http.Request, org, id string) string { return dataBagURL(r, org, name) + "/" + id },
 		}, true, nil
 	}
+}
+
+// searchReadFilter returns a predicate reporting whether the request's actor
+// may read a matched document, or nil when no filtering applies — enforcement
+// off (the permissive default), no authenticated actor, or the superuser.
+//
+// A search scans a whole collection, so the filter must not cost a store read
+// per row. Group membership and the org's stored ACLs are each resolved once
+// up front and the per-row decision is then made from memory.
+func (a *API) searchReadFilter(r *http.Request, org *store.Org, idx searchIndex) (func(id string) bool, error) {
+	if !a.enforceACL {
+		return nil, nil
+	}
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.IsGlobalAdmin {
+		return nil, nil
+	}
+	// A data bag's items all share the bag's ACL, so one check decides the
+	// whole index.
+	if idx.aclObject != "" {
+		allowed, err := actorAllowed(org, actor, idx.aclType, idx.aclObject, "read")
+		if err != nil {
+			return nil, err
+		}
+		return func(string) bool { return allowed }, nil
+	}
+
+	member, err := actorGroups(org, actor)
+	if err != nil {
+		return nil, err
+	}
+	stored := map[string]bool{}
+	prefix := idx.aclType + "/"
+	if err := org.Range("acls", func(key string, raw []byte) bool {
+		name, ok := strings.CutPrefix(key, prefix)
+		if !ok {
+			return true
+		}
+		var acl map[string]any
+		if json.Unmarshal(raw, &acl) == nil {
+			stored[name] = aceAllows(acl["read"], actor, member)
+		}
+		return true
+	}); err != nil {
+		return nil, err
+	}
+	// An object with no stored ACL falls back to the same permissive default
+	// loadACL applies on the direct read route.
+	byDefault := aceAllows(defaultACL()["read"], actor, member)
+	return func(id string) bool {
+		if allowed, ok := stored[id]; ok {
+			return allowed
+		}
+		return byDefault
+	}, nil
 }
 
 func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
@@ -319,6 +386,23 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Drop documents the actor could not have read directly, before the window
+	// is taken, so neither the rows nor "total" disclose them.
+	allow, err := a.searchReadFilter(r, org, idx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if allow != nil {
+		readable := make([]match, 0, len(matches))
+		for _, m := range matches {
+			if allow(m.id) {
+				readable = append(readable, m)
+			}
+		}
+		matches = readable
 	}
 
 	start := queryInt(r, "start", 0)

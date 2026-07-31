@@ -96,7 +96,7 @@ func (a *API) getArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		writeRaw(w, http.StatusOK, raw)
 		return
 	}
-	injectFileURLs(m, r, org.Name())
+	a.injectFileURLs(m, r, org.Name())
 	writeJSON(w, http.StatusOK, m)
 }
 
@@ -139,7 +139,7 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	injectFileURLs(m, r, org.Name())
+	a.injectFileURLs(m, r, org.Name())
 	writeJSON(w, http.StatusCreated, m)
 }
 
@@ -164,7 +164,7 @@ func (a *API) deleteArtifactVersion(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		injectFileURLs(m, r, org.Name())
+		a.injectFileURLs(m, r, org.Name())
 		writeJSON(w, http.StatusOK, m)
 		return
 	}
