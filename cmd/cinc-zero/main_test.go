@@ -128,3 +128,27 @@ func TestVersionSubcommand(t *testing.T) {
 		}
 	}
 }
+
+// Group commit is on by default: it is worth roughly 2.5x write throughput and
+// an order of magnitude better p99 under concurrent fleet load, at the cost of
+// a few microseconds on a serialized single-client write. Fleet correctness of
+// the default matters more than that latency, so it must be opt-out.
+func TestGroupCommitDefaultsOn(t *testing.T) {
+	f, err := parseFlags(nil, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if !f.groupCommit {
+		t.Error("sqlite group commit should default on")
+	}
+}
+
+func TestGroupCommitCanBeDisabled(t *testing.T) {
+	f, err := parseFlags([]string{"--sqlite-group-commit=false"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if f.groupCommit {
+		t.Error("--sqlite-group-commit=false should turn group commit off")
+	}
+}

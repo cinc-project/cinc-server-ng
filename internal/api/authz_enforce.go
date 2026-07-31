@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -32,7 +31,8 @@ func actorFromContext(ctx context.Context) (Actor, bool) {
 // is only installed when enforcement is enabled.
 func (a *API) authzMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if a.authorize(w, r) {
+		r, ok := a.authorize(w, r)
+		if ok {
 			next.ServeHTTP(w, r)
 		}
 	})
@@ -43,27 +43,27 @@ func (a *API) authzMiddleware(next http.Handler) http.Handler {
 // failure) and returns false. The ordering is authentication (already done) →
 // existence → authorization, so a missing object reports 404 rather than
 // leaking 403 to an actor that also lacks permission.
-func (a *API) authorize(w http.ResponseWriter, r *http.Request) bool {
+func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
 	actor, ok := actorFromContext(r.Context())
 	if !ok {
 		// No actor: an authentication-exempt path (the file store, _status).
-		return true
+		return r, true
 	}
 	if actor.IsGlobalAdmin {
-		return true // pivotal-style superuser bypasses ACLs
+		return r, true // pivotal-style superuser bypasses ACLs
 	}
 	check, ok := classifyRequest(r.Method, r.URL.Path)
 	if !ok {
-		return true // route carries no ACL restriction
+		return r, true // route carries no ACL restriction
 	}
 	// A user may always act on its own global record (self-service); the global
 	// admin already returned above, so anyone else hits the superuser gate.
 	if check.allowSelf != "" && actor.Name == check.allowSelf {
-		return true
+		return r, true
 	}
 	if check.superuserOnly {
 		writeError(w, http.StatusForbidden, "missing "+check.perm+" permission")
-		return false
+		return r, false
 	}
 	// Global checks (the user collection and user ACLs) evaluate against the
 	// global space; org-scoped checks resolve the org from the path.
@@ -75,33 +75,35 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) bool {
 		org, ok, err = a.store.Org(orgName)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
-			return false
+			return r, false
 		}
 		if !ok {
-			return true // unknown org: let the handler emit its own 404
+			return r, true // unknown org: let the handler emit its own 404
 		}
 	}
 	if check.existColl != "" {
-		_, ok, err := org.Get(check.existColl, check.existKey)
+		raw, ok, err := org.Get(check.existColl, check.existKey)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
-			return false
+			return r, false
 		}
 		if !ok {
 			writeError(w, http.StatusNotFound, check.existMsg)
-			return false
+			return r, false
 		}
+		// Hand the bytes forward so a read handler need not fetch them again.
+		r = withPreread(r, org.Name(), check.existColl, check.existKey, raw)
 	}
-	allowed, err := actorAllowed(org, actor, check.aclType, check.aclName, check.perm)
+	allowed, err := a.actorAllowed(org, actor, check.aclType, check.aclName, check.perm)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
-		return false
+		return r, false
 	}
 	if !allowed {
 		writeError(w, http.StatusForbidden, "missing "+check.perm+" permission")
-		return false
+		return r, false
 	}
-	return true
+	return r, true
 }
 
 // authzCheck describes the authorization a request must pass: holding perm on
@@ -433,59 +435,26 @@ type Actor struct {
 	ViaWebUI bool
 }
 
-// actorGroups returns the set of group names the actor belongs to, expanding
-// nested group membership transitively (a group that lists another group in its
-// groups[] inherits that group's members). Cycles terminate because a group is
-// only ever added to the result once.
-func actorGroups(org *store.Org, actor Actor) (map[string]bool, error) {
-	type rec struct{ users, clients, groups []string }
-	all := map[string]rec{}
-	if err := org.Range("groups", func(name string, raw []byte) bool {
-		var g map[string]any
-		if json.Unmarshal(raw, &g) == nil {
-			all[name] = rec{anyStrings(g["users"]), anyStrings(g["clients"]), anyStrings(g["groups"])}
-		}
-		return true
-	}); err != nil {
-		return nil, err
-	}
-
-	member := map[string]bool{}
-	var queue []string
-	add := func(name string) {
-		if !member[name] {
-			member[name] = true
-			queue = append(queue, name)
-		}
-	}
-
-	// Seed with the groups that list the actor directly.
-	for name, g := range all {
-		direct := g.users
-		if actor.IsClient {
-			direct = g.clients
-		}
-		if slices.Contains(direct, actor.Name) {
-			add(name)
-		}
-	}
-	// Climb: any group that nests a member group is itself a member.
-	for len(queue) > 0 {
-		g := queue[0]
-		queue = queue[1:]
-		for name, h := range all {
-			if !member[name] && slices.Contains(h.groups, g) {
-				add(name)
-			}
-		}
-	}
-	return member, nil
-}
-
 // actorAllowed reports whether the actor holds perm on the object identified by
 // aclType/aclName, via a direct actor entry or any group it transitively
-// belongs to.
+// belongs to. This is the uncached form: it is the definition the cached path
+// must agree with, and what unit tests exercise directly.
 func actorAllowed(org *store.Org, actor Actor, aclType, aclName, perm string) (bool, error) {
+	return allowedWith(org, actor, aclType, aclName, perm, actorGroups)
+}
+
+// actorAllowed is the same check, resolving group membership through the
+// cached reverse index rather than rescanning every group.
+func (a *API) actorAllowed(org *store.Org, actor Actor, aclType, aclName, perm string) (bool, error) {
+	return allowedWith(org, actor, aclType, aclName, perm, a.actorGroups)
+}
+
+// allowedWith evaluates an ACL entry, deferring group resolution to groupsOf so
+// the cached and uncached forms share one definition. Group membership is only
+// resolved when the entry does not already name the actor, which keeps the
+// common "creator owns its object" grant free of any group work at all.
+func allowedWith(org *store.Org, actor Actor, aclType, aclName, perm string,
+	groupsOf func(*store.Org, Actor) (map[string]bool, error)) (bool, error) {
 	acl, err := loadACL(org, aclType, aclName)
 	if err != nil {
 		return false, err
@@ -494,14 +463,14 @@ func actorAllowed(org *store.Org, actor Actor, aclType, aclName, perm string) (b
 	if ace == nil {
 		return false, nil
 	}
-	// A direct actor grant settles it without the group scan.
+	// A direct actor grant settles it without resolving groups.
 	if slices.Contains(anyStrings(ace["actors"]), actor.Name) {
 		return true, nil
 	}
 	if len(anyStrings(ace["groups"])) == 0 {
 		return false, nil
 	}
-	member, err := actorGroups(org, actor)
+	member, err := groupsOf(org, actor)
 	if err != nil {
 		return false, err
 	}

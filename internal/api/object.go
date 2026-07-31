@@ -134,7 +134,7 @@ func (a *API) getObject(segment string) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		raw, ok, err := org.View(segment, name)
+		raw, ok, err := viewObject(r, org, segment, name)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -193,7 +193,7 @@ func (a *API) headObject(segment string) http.HandlerFunc {
 		if org == nil {
 			return
 		}
-		_, ok, err := org.View(segment, r.PathValue("name"))
+		_, ok, err := viewObject(r, org, segment, r.PathValue("name"))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

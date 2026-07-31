@@ -226,7 +226,7 @@ func (a *API) scopedGet(segment string, scope scopeFunc) http.HandlerFunc {
 		if org == nil {
 			return
 		}
-		raw, ok, err := org.Get(segment, r.PathValue("name"))
+		raw, ok, err := viewObject(r, org, segment, r.PathValue("name"))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

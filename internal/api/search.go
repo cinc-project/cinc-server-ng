@@ -301,14 +301,14 @@ func (a *API) searchReadFilter(r *http.Request, org *store.Org, idx searchIndex)
 	// A data bag's items all share the bag's ACL, so one check decides the
 	// whole index.
 	if idx.aclObject != "" {
-		allowed, err := actorAllowed(org, actor, idx.aclType, idx.aclObject, "read")
+		allowed, err := a.actorAllowed(org, actor, idx.aclType, idx.aclObject, "read")
 		if err != nil {
 			return nil, err
 		}
 		return func(string) bool { return allowed }, nil
 	}
 
-	member, err := actorGroups(org, actor)
+	member, err := a.actorGroups(org, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +317,13 @@ func (a *API) searchReadFilter(r *http.Request, org *store.Org, idx searchIndex)
 	if err := org.Range("acls", func(key string, raw []byte) bool {
 		name, ok := strings.CutPrefix(key, prefix)
 		if !ok {
+			return true
+		}
+		// The typed decode avoids building a map[string]any per ACL document,
+		// which a collection-wide scan would otherwise pay for every row on
+		// every request. An unexpected shape falls back to the tolerant decode.
+		if ace, ok := decodeReadACE(raw); ok {
+			stored[name] = ace.allows(actor.Name, member)
 			return true
 		}
 		var acl map[string]any
@@ -389,11 +396,14 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Drop documents the actor could not have read directly, before the window
-	// is taken, so neither the rows nor "total" disclose them.
-	allow, err := a.searchReadFilter(r, org, idx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	// is taken, so neither the rows nor "total" disclose them. A query that
+	// matched nothing needs no filter, so it does not pay to resolve one.
+	var allow func(string) bool
+	if len(matches) > 0 {
+		if allow, err = a.searchReadFilter(r, org, idx); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	if allow != nil {
 		readable := make([]match, 0, len(matches))

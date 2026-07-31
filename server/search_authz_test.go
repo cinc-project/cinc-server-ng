@@ -103,6 +103,70 @@ func TestSearchFiltersPerObjectACL(t *testing.T) {
 	}
 }
 
+// The read filter memoizes parsed ACLs to keep a scan from re-parsing every
+// ACL document per request. An ACL change must still take effect on the very
+// next search, or the cache would serve stale authorization.
+func TestSearchReflectsACLChangeImmediately(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}, EnforceACL: true})
+	base := srv.URL() + "/organizations/acme"
+	nodeKey := createActor(t, srv, base+"/clients", `{"name":"node1"}`)
+
+	if code := statusOf(t, signed(t, srv, "POST", base+"/nodes", `{"name":"web01"}`)); code != 201 {
+		t.Fatalf("create node = %d, want 201", code)
+	}
+	search := signedAs(t, "node1", nodeKey, "GET", base+"/search/node?q=*:*", "")
+	if got := searchIDs(t, search, "name"); len(got) != 1 {
+		t.Fatalf("before restriction: %v, want [web01]", got)
+	}
+
+	// Revoke, then search again: the tightened ACL must apply at once.
+	restrictRead(t, srv, base+"/nodes/web01/_acl/read")
+	if got := searchIDs(t, signedAs(t, "node1", nodeKey, "GET", base+"/search/node?q=*:*", ""), "name"); len(got) != 0 {
+		t.Fatalf("after restriction: %v, want no rows", got)
+	}
+
+	// And re-granting must apply at once too, so the cache is not merely
+	// latching on the first answer it computed.
+	grant := `{"read":{"actors":[],"groups":["admins","users","clients"]}}`
+	if code := statusOf(t, signed(t, srv, "PUT", base+"/nodes/web01/_acl/read", grant)); code != 200 {
+		t.Fatalf("re-grant = %d, want 200", code)
+	}
+	if got := searchIDs(t, signedAs(t, "node1", nodeKey, "GET", base+"/search/node?q=*:*", ""), "name"); len(got) != 1 {
+		t.Fatalf("after re-grant: %v, want [web01]", got)
+	}
+}
+
+// Group membership is likewise resolved per request; a membership change must
+// take effect on the next search.
+func TestSearchReflectsGroupChangeImmediately(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}, EnforceACL: true})
+	base := srv.URL() + "/organizations/acme"
+	nodeKey := createActor(t, srv, base+"/clients", `{"name":"node1"}`)
+
+	if code := statusOf(t, signed(t, srv, "POST", base+"/nodes", `{"name":"web01"}`)); code != 201 {
+		t.Fatalf("create node = %d, want 201", code)
+	}
+	// Grant read only to a group node1 is not yet in.
+	grant := `{"read":{"actors":[],"groups":["auditors"]}}`
+	if code := statusOf(t, signed(t, srv, "PUT", base+"/nodes/web01/_acl/read", grant)); code != 200 {
+		t.Fatalf("grant to auditors = %d, want 200", code)
+	}
+	if got := searchIDs(t, signedAs(t, "node1", nodeKey, "GET", base+"/search/node?q=*:*", ""), "name"); len(got) != 0 {
+		t.Fatalf("before joining auditors: %v, want no rows", got)
+	}
+
+	if code := statusOf(t, signed(t, srv, "POST", base+"/groups", `{"name":"auditors"}`)); code != 201 {
+		t.Fatalf("create group = %d, want 201", code)
+	}
+	if code := statusOf(t, signed(t, srv, "PUT", base+"/groups/auditors",
+		`{"actors":{"users":[],"clients":["node1"],"groups":[]}}`)); code != 200 {
+		t.Fatalf("add node1 to auditors = %d, want 200", code)
+	}
+	if got := searchIDs(t, signedAs(t, "node1", nodeKey, "GET", base+"/search/node?q=*:*", ""), "name"); len(got) != 1 {
+		t.Fatalf("after joining auditors: %v, want [web01]", got)
+	}
+}
+
 // With enforcement off (the permissive default) search keeps returning
 // everything, so existing test pipelines are unaffected.
 func TestSearchUnfilteredWhenEnforcementOff(t *testing.T) {

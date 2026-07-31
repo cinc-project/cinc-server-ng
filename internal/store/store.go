@@ -11,7 +11,10 @@
 // error), the data-access methods return an error that callers must handle.
 package store
 
-import "errors"
+import (
+	"errors"
+	"sync/atomic"
+)
 
 var (
 	// ErrConflict is returned by Create when the key already exists.
@@ -25,17 +28,29 @@ var (
 // facade over a Backend.
 type Store struct {
 	backend Backend
+	// groupsGen advances whenever any organization's "groups" collection is
+	// written. The authorization layer caches a reverse index of group
+	// membership and uses this to know when to rebuild it. It lives here, at the
+	// single point every write passes through, rather than being bumped by each
+	// caller that happens to write a group — several packages do, and a missed
+	// call site would mean silently stale authorization.
+	//
+	// It is deliberately store-wide rather than per-organization: a group write
+	// in one org needlessly invalidates another's index, but group writes are
+	// rare (membership changes, not check-ins) and over-invalidation only costs
+	// a rebuild, while under-invalidation would be a correctness bug.
+	groupsGen *atomic.Uint64
 }
 
 // New returns a Store backed by the default in-memory backend.
 func New() *Store {
-	return &Store{backend: NewMemoryBackend()}
+	return NewWithBackend(NewMemoryBackend())
 }
 
 // NewWithBackend returns a Store backed by b. Use this to run against a durable
 // backend such as SQLite.
 func NewWithBackend(b Backend) *Store {
-	return &Store{backend: b}
+	return &Store{backend: b, groupsGen: new(atomic.Uint64)}
 }
 
 // Backend returns the underlying Backend, for callers (e.g. the server) that need
@@ -48,7 +63,7 @@ func (s *Store) Close() error { return s.backend.Close() }
 // Global returns the server-global object space, used for collections such as
 // "users" and "organizations" that are not scoped to an organization.
 func (s *Store) Global() *Org {
-	return &Org{backend: s.backend, name: ""}
+	return &Org{backend: s.backend, name: "", groupsGen: s.groupsGen}
 }
 
 // CreateOrg creates a new, empty organization. It returns ErrConflict if an
@@ -57,7 +72,7 @@ func (s *Store) CreateOrg(name string) (*Org, error) {
 	if err := s.backend.CreateOrg(name); err != nil {
 		return nil, err
 	}
-	return &Org{backend: s.backend, name: name}, nil
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen}, nil
 }
 
 // Org returns the named organization and whether it exists.
@@ -69,7 +84,7 @@ func (s *Store) Org(name string) (*Org, bool, error) {
 	if !ok {
 		return nil, false, nil
 	}
-	return &Org{backend: s.backend, name: name}, true, nil
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen}, true, nil
 }
 
 // DeleteOrg removes an organization, reporting whether it existed.
@@ -89,16 +104,42 @@ func (s *Store) ListOrgs() ([]string, error) {
 // (e.g. creating an organization). The *Store passed to fn must not be used after
 // fn returns.
 func (s *Store) Tx(fn func(tx *Store) error) error {
+	// The transaction view shares the generation counter, so a group written
+	// inside a transaction still invalidates the cached index.
 	return s.backend.Tx(func(b Backend) error {
-		return fn(&Store{backend: b})
+		return fn(&Store{backend: b, groupsGen: s.groupsGen})
 	})
 }
 
 // Org is a handle to a single organization's collection of objects. The empty
 // name addresses the global space (see Store.Global).
 type Org struct {
-	backend Backend
-	name    string
+	backend   Backend
+	name      string
+	groupsGen *atomic.Uint64
+}
+
+// groupsColl is the collection whose writes advance the groups generation.
+const groupsColl = "groups"
+
+// noteWrite advances the groups generation if coll is the groups collection.
+// It runs after the write has landed: a reader that samples the generation
+// before building an index and finds it unchanged afterwards is guaranteed to
+// have seen that write, so the cache can never latch onto stale data.
+func (o *Org) noteWrite(coll string) {
+	if coll == groupsColl && o.groupsGen != nil {
+		o.groupsGen.Add(1)
+	}
+}
+
+// GroupsGeneration reports a counter that advances whenever any organization's
+// groups are written. Sample it before reading groups; if it still matches
+// after, whatever was derived from that read is current.
+func (o *Org) GroupsGeneration() uint64 {
+	if o.groupsGen == nil {
+		return 0
+	}
+	return o.groupsGen.Load()
 }
 
 // Name returns the organization name.
@@ -106,12 +147,20 @@ func (o *Org) Name() string { return o.name }
 
 // Create stores val under coll/key, returning ErrConflict if it already exists.
 func (o *Org) Create(coll, key string, val []byte) error {
-	return o.backend.Create(o.name, coll, key, val)
+	err := o.backend.Create(o.name, coll, key, val)
+	if err == nil {
+		o.noteWrite(coll)
+	}
+	return err
 }
 
 // Put stores val under coll/key, overwriting any existing value.
 func (o *Org) Put(coll, key string, val []byte) error {
-	return o.backend.Put(o.name, coll, key, val)
+	err := o.backend.Put(o.name, coll, key, val)
+	if err == nil {
+		o.noteWrite(coll)
+	}
+	return err
 }
 
 // Get returns the value at coll/key. The returned slice is the caller's to keep.
@@ -138,7 +187,11 @@ func (o *Org) Range(coll string, fn func(key string, raw []byte) bool) error {
 
 // Delete removes coll/key, returning the removed value and whether it existed.
 func (o *Org) Delete(coll, key string) ([]byte, bool, error) {
-	return o.backend.Delete(o.name, coll, key)
+	old, existed, err := o.backend.Delete(o.name, coll, key)
+	if err == nil && existed {
+		o.noteWrite(coll)
+	}
+	return old, existed, err
 }
 
 // Keys returns the sorted keys in a collection.
