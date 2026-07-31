@@ -34,7 +34,19 @@ import (
 // single Store.
 type searchCache struct {
 	m sync.Map // key string -> searchEntry
+	// n approximates the number of live entries. Entries are recomputable, so
+	// when the cache outgrows maxSearchCacheEntries it is simply dropped whole
+	// rather than evicted one at a time: an LRU would need bookkeeping on every
+	// read, and reads here are the hot path (one per document on a scan).
+	n atomic.Int64
 }
+
+// maxSearchCacheEntries bounds the flatten cache. Without a bound it grows with
+// every distinct document ever searched, which was acceptable for a short-lived
+// test server but is a leak for one holding a fleet. The inverted index, not
+// this cache, is what makes repeat queries fast; this only spares re-deriving
+// the merged view of the rows a projection returns.
+const maxSearchCacheEntries = 16384
 
 type searchEntry struct {
 	raw    []byte // identity-checked against the current stored slice
@@ -44,6 +56,17 @@ type searchEntry struct {
 
 func newSearchCache() *searchCache {
 	return &searchCache{}
+}
+
+// store adds an entry, discarding the whole cache if it has outgrown its bound.
+func (c *searchCache) store(key string, e searchEntry) {
+	if c.n.Load() >= maxSearchCacheEntries {
+		c.m.Clear()
+		c.n.Store(0)
+	}
+	if _, loaded := c.m.Swap(key, e); !loaded {
+		c.n.Add(1)
+	}
 }
 
 // searchDoc returns the searchable view of a stored document: its merged form
@@ -70,7 +93,7 @@ func (a *API) searchDoc(coll, id string, raw []byte, mergeAttrs bool) (merged ma
 	}
 	fields = search.Flatten(searchable)
 
-	a.search.m.Store(key, searchEntry{raw: raw, merged: searchable, fields: fields})
+	a.search.store(key, searchEntry{raw: raw, merged: searchable, fields: fields})
 	return searchable, fields, true
 }
 
@@ -381,14 +404,13 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Whole-object match-all needs no field map, so skip flattening entirely and
-	// return the stored documents directly; every other query (and any partial
-	// projection, which needs the merged view) flattens and filters.
+	// Match-all needs no index at all: every stored document qualifies, so read
+	// them straight out. Anything else resolves through the inverted index.
 	var matches []match
-	if partial == nil && search.IsMatchAll(query) {
+	if search.IsMatchAll(query) {
 		matches, err = a.collectAll(org, idx)
 	} else {
-		matches, err = a.collectMatches(org, idx, query)
+		matches, err = a.findMatches(org, idx, query)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -396,23 +418,11 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Drop documents the actor could not have read directly, before the window
-	// is taken, so neither the rows nor "total" disclose them. A query that
-	// matched nothing needs no filter, so it does not pay to resolve one.
-	var allow func(string) bool
-	if len(matches) > 0 {
-		if allow, err = a.searchReadFilter(r, org, idx); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if allow != nil {
-		readable := make([]match, 0, len(matches))
-		for _, m := range matches {
-			if allow(m.id) {
-				readable = append(readable, m)
-			}
-		}
-		matches = readable
+	// is taken, so neither the rows nor "total" disclose them.
+	matches, err = a.filterReadable(r, org, idx, matches)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
 	start := queryInt(r, "start", 0)
@@ -530,4 +540,111 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// findMatches resolves a query through the collection's inverted index, so cost
+// tracks the number of candidates rather than the size of the collection. A
+// query the planner does not recognize falls back to scanning, which is always
+// correct — the index is an optimization of the scan, never a redefinition.
+func (a *API) findMatches(org *store.Org, idx searchIndex, query search.Query) ([]match, error) {
+	ci, err := a.searchIdx.get(org, idx.collection, idx.mergeAttrs)
+	if err != nil {
+		return nil, err
+	}
+	ci.mu.RLock()
+	ids, planned := search.Plan(query, postingsView{ci})
+	indexed := ci.size()
+	ci.mu.RUnlock()
+	if !planned {
+		return a.collectMatches(org, idx, query)
+	}
+	return fetchMatches(org, idx.collection, ids, indexed)
+}
+
+// fetchMatches reads the matched documents. A scan reads the whole collection
+// once; individual reads cost a lookup each, so the scan only pays off when the
+// result set is a large share of what is stored.
+func fetchMatches(org *store.Org, coll string, ids search.DocIDs, indexed int) ([]match, error) {
+	matches := make([]match, 0, len(ids))
+	if indexed > 0 && len(ids)*4 >= indexed {
+		if err := org.Range(coll, func(id string, raw []byte) bool {
+			if _, ok := ids[id]; ok {
+				matches = append(matches, match{id: id, raw: raw})
+			}
+			return true
+		}); err != nil {
+			return nil, err
+		}
+	} else {
+		for id := range ids {
+			raw, ok, err := org.View(coll, id)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				matches = append(matches, match{id: id, raw: raw})
+			}
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].id < matches[j].id })
+	return matches, nil
+}
+
+// filterReadable drops the documents the actor could not have fetched directly.
+//
+// How that is cheapest to establish depends on how many matched. Resolving the
+// org's stored ACLs in bulk is worth it for a broad result set, but for a
+// handful of rows — which an indexed query now commonly returns — checking each
+// one directly touches far less.
+func (a *API) filterReadable(r *http.Request, org *store.Org, idx searchIndex, matches []match) ([]match, error) {
+	if !a.enforceACL || len(matches) == 0 {
+		return matches, nil
+	}
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.IsGlobalAdmin {
+		return matches, nil
+	}
+
+	// A data bag's items all share the bag's ACL, so one check decides them all.
+	if idx.aclObject != "" {
+		allowed, err := a.actorAllowed(org, actor, idx.aclType, idx.aclObject, "read")
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			return matches, nil
+		}
+		return nil, nil
+	}
+
+	// Below this many rows, per-object checks read less than resolving every
+	// stored ACL in the organization.
+	const bulkThreshold = 64
+	readable := matches[:0]
+	if len(matches) <= bulkThreshold {
+		for _, m := range matches {
+			allowed, err := a.actorAllowed(org, actor, idx.aclType, m.id, "read")
+			if err != nil {
+				return nil, err
+			}
+			if allowed {
+				readable = append(readable, m)
+			}
+		}
+		return readable, nil
+	}
+
+	allow, err := a.searchReadFilter(r, org, idx)
+	if err != nil {
+		return nil, err
+	}
+	if allow == nil {
+		return matches, nil
+	}
+	for _, m := range matches {
+		if allow(m.id) {
+			readable = append(readable, m)
+		}
+	}
+	return readable, nil
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 
 	"github.com/tas50/cinc-zero/internal/store"
@@ -43,23 +44,57 @@ func buildGroupIndex(org *store.Org) (*groupIndex, error) {
 		clients: map[string][]string{},
 		nests:   map[string][]string{},
 	}
-	err := org.Range("groups", func(name string, raw []byte) bool {
+	if err := org.Range("groups", func(name string, raw []byte) bool {
 		users, clients, nested := indexMembers(raw)
-		for _, u := range users {
-			idx.users[u] = append(idx.users[u], name)
-		}
-		for _, c := range clients {
-			idx.clients[c] = append(idx.clients[c], name)
-		}
-		for _, g := range nested {
-			idx.nests[g] = append(idx.nests[g], name)
+		idx.addAll(name, users, clients, nested)
+		return true
+	}); err != nil {
+		return nil, err
+	}
+	// Membership added incrementally lives in rows rather than the document, so
+	// the index has to fold those in too.
+	if err := org.Range(groupMembersColl, func(key string, _ []byte) bool {
+		if group, kind, actor, ok := splitMemberKey(key); ok {
+			idx.addOne(group, kind, actor)
 		}
 		return true
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
 	return idx, nil
+}
+
+// addAll records a group's members from its document.
+func (idx *groupIndex) addAll(group string, users, clients, nested []string) {
+	for _, u := range users {
+		idx.users[u] = append(idx.users[u], group)
+	}
+	for _, c := range clients {
+		idx.clients[c] = append(idx.clients[c], group)
+	}
+	for _, g := range nested {
+		idx.nests[g] = append(idx.nests[g], group)
+	}
+}
+
+// addOne records a single membership row, skipping a duplicate of what the
+// group document already declared.
+func (idx *groupIndex) addOne(group, kind, actor string) {
+	var into map[string][]string
+	switch kind {
+	case memberUsers:
+		into = idx.users
+	case memberClients:
+		into = idx.clients
+	case memberGroups:
+		into = idx.nests
+	default:
+		return
+	}
+	if slices.Contains(into[actor], group) {
+		return
+	}
+	into[actor] = append(into[actor], group)
 }
 
 // indexMembers pulls a group's members, preferring the typed decode and
@@ -135,6 +170,33 @@ func (c *groupIndexCache) get(org *store.Org) (*groupIndex, error) {
 	}
 	c.mu.Unlock()
 	return built, nil
+}
+
+// observe applies a membership row to the cached index in place. Rebuilding on
+// each row would put the fleet bootstrap back to quadratic, which is the whole
+// reason membership is stored as rows. Changes to a group *document* are rare
+// and still go through the generation check, which rebuilds.
+func (c *groupIndexCache) observe(ev store.Event) {
+	if ev.Collection != groupMembersColl {
+		return
+	}
+	group, kind, actor, ok := splitMemberKey(ev.Key)
+	if !ok {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	idx, ok := c.m[ev.Org]
+	if !ok {
+		return // not built yet; the build will read the row itself
+	}
+	if ev.Deleted {
+		// A removal is rare (an explicit group write clearing rows), and the
+		// membership lists are short, so drop the index and let it rebuild.
+		delete(c.m, ev.Org)
+		return
+	}
+	idx.addOne(group, kind, actor)
 }
 
 // actorGroups returns the set of group names the actor belongs to, expanding
