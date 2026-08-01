@@ -17,7 +17,7 @@ import (
 // ({name, full_name, guid}).
 const orgsColl = "organizations"
 
-func (a *API) registerOrganizationRoutes(mux *http.ServeMux) {
+func (a *API) registerOrganizationRoutes(mux *recordingMux) {
 	mux.HandleFunc("GET /organizations", a.listOrganizations)
 	mux.HandleFunc("POST /organizations", a.createOrganization)
 	mux.HandleFunc("GET /organizations/{org}", a.getOrganization)

@@ -17,7 +17,7 @@ const (
 	apiVersionMax = 2
 )
 
-func (a *API) registerServerEndpoints(mux *http.ServeMux) {
+func (a *API) registerServerEndpoints(mux *recordingMux) {
 	mux.HandleFunc("GET /_stats", a.statsHandler)
 	mux.HandleFunc("GET /license", a.license)
 	mux.HandleFunc("GET /server_api_version", a.serverAPIVersion)

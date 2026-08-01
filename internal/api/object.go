@@ -18,7 +18,7 @@ var listBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 4096); return
 // object" collection such as nodes, roles, or environments. These share an
 // identical shape: a list endpoint returning name->URL, plus create/get/
 // update/delete/head on individual named objects.
-func (a *API) registerObjectRoutes(mux *http.ServeMux, segment string) {
+func (a *API) registerObjectRoutes(mux *recordingMux, segment string) {
 	base := "/organizations/{org}/" + segment
 	mux.HandleFunc("GET "+base, a.listObjects(segment))
 	mux.HandleFunc("POST "+base, a.createObject(segment))

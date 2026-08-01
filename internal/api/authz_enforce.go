@@ -54,7 +54,15 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	}
 	check, ok := classifyRequest(r.Method, r.URL.Path)
 	if !ok {
-		return r, true // route carries no ACL restriction
+		// Nothing classified this request. For a read that means the route
+		// carries no ACL restriction; for one that changes state it means
+		// nobody decided, and deciding by default in the caller's favour is
+		// what produced this file's history.
+		if a.refuseUnclassifiedWrite(r) {
+			writeError(w, http.StatusForbidden, "missing permission")
+			return r, false
+		}
+		return r, true
 	}
 	// A user may always act on its own global record (self-service); the global
 	// admin already returned above, so anyone else hits the superuser gate.
@@ -189,7 +197,7 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 		return classifyDataBag(method, rest, read)
 	case seg == "cookbooks" || seg == "cookbook_artifacts":
 		return classifyCookbook(method, seg, rest, read)
-	case seg == "users":
+	case seg == "users" || seg == "association_requests":
 		return classifyOrgMembership(method, rest)
 	case enforceSegs[seg]:
 		return classifyGeneric(method, seg, rest, read)
@@ -197,12 +205,17 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	return nil, false
 }
 
-// classifyOrgMembership gates the org-membership routes
-// (/organizations/{org}/users[/{user}]). Adding or removing a member is
-// governed by the org's "groups" container, because association writes the
-// org's "users" group — so an actor outside the org, which belongs to none of
-// its groups, can never associate itself in. The read routes are left to the
-// handler's own membership check (orgViewAllowed).
+// classifyOrgMembership gates the org-membership routes:
+// /organizations/{org}/users[/{user}] and the invitations that lead to them,
+// /organizations/{org}/association_requests[/{id}].
+//
+// Changing who belongs to an org is governed by the org's "groups" container,
+// because association writes the org's "users" group — so an actor outside the
+// org, which belongs to none of its groups, can never let itself in. Issuing an
+// invitation is gated the same way: acceptance re-checks that the inviter still
+// has the authority, but an outsider should not be able to create the
+// invitation in the first place. The read routes are left to the handler's own
+// membership check (orgViewAllowed).
 func classifyOrgMembership(method string, rest []string) (*authzCheck, bool) {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodDelete:

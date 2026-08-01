@@ -13,7 +13,7 @@ import (
 // environment's version constraints, a simplified dependency solver, recipe and
 // node listings, and per-environment role run lists.
 
-func (a *API) registerEnvironmentSubRoutes(mux *http.ServeMux) {
+func (a *API) registerEnvironmentSubRoutes(mux *recordingMux) {
 	const e = "/organizations/{org}/environments/{env}"
 	mux.HandleFunc("GET "+e+"/cookbooks", a.envCookbooks)
 	mux.HandleFunc("GET "+e+"/cookbooks/{name}", a.envCookbook)

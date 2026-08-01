@@ -16,7 +16,7 @@ const AssociationUsersCollection = "association_users"
 
 const assocColl = AssociationUsersCollection
 
-func (a *API) registerAssociationRoutes(mux *http.ServeMux) {
+func (a *API) registerAssociationRoutes(mux *recordingMux) {
 	mux.HandleFunc("GET /organizations/{org}/users", a.listOrgUsers)
 	mux.HandleFunc("POST /organizations/{org}/users", a.associateUser)
 	mux.HandleFunc("GET /organizations/{org}/users/{user}", a.getOrgUser)

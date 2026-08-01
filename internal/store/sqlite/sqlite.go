@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/tas50/cinc-zero/internal/store"
 	_ "modernc.org/sqlite"
@@ -184,6 +185,11 @@ type coalescer struct {
 	b    *Backend       // owns db/rdb; used to build per-batch tx views
 	ch   chan *writeJob // submitted writes awaiting a batch
 	done chan struct{}  // closed when the loop has drained and exited
+	// once guards the shutdown, so closing a Backend twice is a no-op rather
+	// than a panic on an already-closed channel. Shutdown paths overlap in
+	// practice — a deferred stop alongside an explicit one — and crashing the
+	// process is a much worse outcome than doing nothing.
+	once sync.Once
 }
 
 func newCoalescer(b *Backend) *coalescer {
@@ -295,8 +301,10 @@ func (c *coalescer) fail(batch []*writeJob, err error) {
 // further writes may be submitted (the same don't-use-after-Close contract the
 // Backend already carries).
 func (c *coalescer) close() {
-	close(c.ch)
-	<-c.done
+	c.once.Do(func() {
+		close(c.ch)
+		<-c.done
+	})
 }
 
 // SQL for the objects-table hot path, shared by the prepared statements and the

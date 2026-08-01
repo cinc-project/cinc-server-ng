@@ -235,7 +235,7 @@ func parallelFor(n int, fn func(i int)) {
 
 const defaultSearchRows = 1000
 
-func (a *API) registerSearchRoutes(mux *http.ServeMux) {
+func (a *API) registerSearchRoutes(mux *recordingMux) {
 	mux.HandleFunc("GET /organizations/{org}/search", a.listSearchIndexes)
 	mux.HandleFunc("GET /organizations/{org}/search/{index}", a.runSearch)
 	mux.HandleFunc("POST /organizations/{org}/search/{index}", a.runSearch)

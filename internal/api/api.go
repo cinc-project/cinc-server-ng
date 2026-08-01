@@ -33,6 +33,12 @@ type API struct {
 	searchIdx *searchIndexes
 	// stats holds the server's instruments, served by /_stats.
 	stats *instruments
+	// mux is the router, retained so authorization can ask whether a request
+	// reaches a real route before refusing it.
+	mux *recordingMux
+	// routes are the patterns registered, so a test can require every mutating
+	// one to be authorized.
+	routes []string
 }
 
 // Option configures an API at construction time.
@@ -72,7 +78,8 @@ func New(st *store.Store, opts ...Option) *API {
 
 // Handler builds the HTTP handler exposing the full API surface.
 func (a *API) Handler() http.Handler {
-	mux := http.NewServeMux()
+	mux := newRecordingMux()
+	a.mux = mux
 	a.registerSystemRoutes(mux)
 	a.registerObjectRoutes(mux, "nodes")
 	a.registerObjectRoutes(mux, "roles")
@@ -97,6 +104,8 @@ func (a *API) Handler() http.Handler {
 	a.registerOrganizationRoutes(mux)
 	a.registerAuthzRoutes(mux)
 	a.registerServerEndpoints(mux)
+
+	a.routes = mux.patterns
 
 	var h http.Handler = withJSONErrors(mux)
 	if a.enforceACL {

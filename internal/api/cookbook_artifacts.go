@@ -14,7 +14,7 @@ import (
 // identifier rather than a version, share the same blob store and manifest
 // shape, and have no _latest/_recipes aliases.
 
-func (a *API) registerCookbookArtifactRoutes(mux *http.ServeMux) {
+func (a *API) registerCookbookArtifactRoutes(mux *recordingMux) {
 	const base = "/organizations/{org}/cookbook_artifacts"
 	mux.HandleFunc("GET "+base, a.listArtifacts)
 	mux.HandleFunc("GET "+base+"/{name}", a.getArtifact)
