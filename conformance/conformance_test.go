@@ -161,6 +161,44 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
+// createClient registers a client through the API and returns the path to the
+// private key the server issued.
+//
+// This goes through `knife raw` rather than `knife client create -f` because
+// the latter's key-writing behavior varies between knife versions, and a
+// conformance test should not fail on that. Reading the key out of the response
+// also asserts something worth asserting: that client creation returns the
+// generated key in the shape a client expects to find it.
+func (h *harness) createClient(t *testing.T, name string) string {
+	t.Helper()
+	bodyPath := filepath.Join(h.dir, name+"-create.json")
+	write(t, bodyPath, `{"name":"`+name+`","admin":false,"validator":false}`)
+	out := h.run(t, "raw", "-m", "POST", "/clients", "-i", bodyPath)
+
+	if i := strings.IndexByte(out, '{'); i > 0 {
+		out = out[i:]
+	}
+	var created struct {
+		PrivateKey string `json:"private_key"`
+		ChefKey    struct {
+			PrivateKey string `json:"private_key"`
+		} `json:"chef_key"`
+	}
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatalf("client create response is not JSON: %v\n%s", err, out)
+	}
+	key := created.ChefKey.PrivateKey
+	if key == "" {
+		key = created.PrivateKey // the pre-v1 shape
+	}
+	if key == "" {
+		t.Fatalf("client create returned no private key; a client could never authenticate:\n%s", out)
+	}
+	path := filepath.Join(h.dir, name+".pem")
+	write(t, path, key)
+	return path
+}
+
 // field walks a decoded document, failing if the path is absent.
 func field(t *testing.T, doc map[string]any, path ...string) any {
 	t.Helper()
@@ -282,8 +320,7 @@ func TestKnifeACLEnforcement(t *testing.T) {
 		`{"name":"web01","chef_environment":"_default","json_class":"Chef::Node","chef_type":"node"}`)
 	h.run(t, "node", "from", "file", filepath.Join(h.dir, "web01.json"))
 
-	clientKey := filepath.Join(h.dir, "node1.pem")
-	h.run(t, "client", "create", "node1", "--disable-editing", "--file", clientKey)
+	clientKey := h.createClient(t, "node1")
 	nodeCfg := h.writeConfig(t, "node1.rb", "node1", clientKey)
 
 	// The client authenticates and, being in the org's clients group, may read
@@ -318,8 +355,7 @@ func TestKnifeACLEnforcement(t *testing.T) {
 func TestKnifeClientBootstrapFlow(t *testing.T) {
 	h := setup(t)
 
-	clientKey := filepath.Join(h.dir, "node2.pem")
-	h.run(t, "client", "create", "node2", "--disable-editing", "--file", clientKey)
+	clientKey := h.createClient(t, "node2")
 	nodeCfg := h.writeConfig(t, "node2.rb", "node2", clientKey)
 
 	write(t, filepath.Join(h.dir, "node2.json"),
