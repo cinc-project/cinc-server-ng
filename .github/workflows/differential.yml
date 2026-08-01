@@ -41,6 +41,12 @@ jobs:
       - name: Install Cinc Server
         run: |
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable
+          # Pin api_fqdn rather than leaving it to auto-detection: the public API
+          # is only routed for requests addressed to it, and a runner's detected
+          # name is not something to rely on.
+          sudo mkdir -p /etc/opscode
+          printf "api_fqdn '%s'\nnginx['server_name'] = '%s'\n" "$(hostname -f)" "$(hostname -f)" \
+            | sudo tee /etc/opscode/chef-server.rb
           sudo cinc-server-ctl reconfigure --chef-license=accept
           sudo cinc-server-ctl status
 
@@ -123,11 +129,12 @@ jobs:
         shell: bash +e {0}
         run: |
           FQDN=$(hostname -f)
-          echo "=== nginx config files ==="
-          sudo find /var/opt/opscode /opt/opscode -name 'nginx.conf' -o -name '*chef_http*' 2>/dev/null | head
+          echo "=== nginx tree ==="
+          sudo ls /var/opt/opscode 2>&1 | head
+          sudo find / -maxdepth 6 -name 'nginx.conf' -path '*opscode*' 2>/dev/null | head
           echo
-          echo "=== locations and upstreams ==="
-          sudo grep -rhE "location|proxy_pass|server_name" /var/opt/opscode/nginx/etc 2>/dev/null | sed 's/^ *//' | sort -u | head -40
+          echo "=== routed locations ==="
+          sudo grep -rhE "^\\s*location|proxy_pass|server_name" $(sudo find / -maxdepth 7 -path '*opscode*nginx*' -name '*.conf' 2>/dev/null | head -20) 2>/dev/null | sed 's/^ *//' | sort -u | head -40
           echo
           echo "=== path probes ==="
           for target in "/_status" "/organizations" "/organizations/$ORG" "/organizations/$ORG/nodes" "/users" "/authenticate_user"; do
