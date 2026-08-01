@@ -199,6 +199,19 @@ func (h *harness) createClient(t *testing.T, name string) string {
 	return path
 }
 
+// deniedForAuthorization reports whether knife's output describes an
+// authorization refusal. The server's contract is the 403 status; how knife
+// renders it is not, so several phrasings are accepted.
+func deniedForAuthorization(out string) bool {
+	lower := strings.ToLower(out)
+	for _, phrase := range []string{"403", "forbidden", "not authorized", "missing read permission"} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // field walks a decoded document, failing if the path is absent.
 func field(t *testing.T, doc map[string]any, path ...string) any {
 	t.Helper()
@@ -335,13 +348,16 @@ func TestKnifeACLEnforcement(t *testing.T) {
 	h.run(t, "raw", "-m", "PUT", "/nodes/web01/_acl/read",
 		"-i", filepath.Join(h.dir, "read-acl.json"))
 
-	// Now the same client must be refused.
+	// Now the same client must be refused. knife's wording for a 403 is its own
+	// business and varies by version ("you are not authorized for this action"),
+	// so the assertion is that the request was refused as an authorization
+	// failure rather than on the exact phrasing.
 	out, err := h.runAs(nodeCfg, "node", "show", "web01")
 	if err == nil {
 		t.Fatalf("client read a node whose ACL excludes it:\n%s", out)
 	}
-	if !strings.Contains(out, "403") && !strings.Contains(strings.ToLower(out), "forbidden") {
-		t.Errorf("denial should report 403 Forbidden, got:\n%s", out)
+	if !deniedForAuthorization(out) {
+		t.Errorf("refusal does not look like an authorization failure, got:\n%s", out)
 	}
 
 	// The admin is unaffected, since the superuser bypasses ACLs.
