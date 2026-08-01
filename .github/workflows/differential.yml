@@ -147,8 +147,15 @@ jobs:
           sudo ls /var/opt/cinc-project 2>&1 | head
           sudo find /var/opt/cinc-project/nginx -name '*.conf' 2>/dev/null | head -20
           echo
-          echo "=== server blocks and routed locations ==="
-          sudo grep -rhE "^\\s*(location|server_name|listen|proxy_pass|root)" /var/opt/cinc-project/nginx/etc 2>/dev/null | sed 's/^ *//' | sort -u | head -50
+          echo "=== nginx.conf (structure preserved: which location sits in which server) ==="
+          sudo cat -n /var/opt/cinc-project/nginx/etc/nginx.conf | sed -n '1,200p'
+          echo
+          echo "=== chef_https_lb.conf ==="
+          sudo cat -n /var/opt/cinc-project/nginx/etc/chef_https_lb.conf | sed -n '1,160p'
+          echo
+          echo "=== what the router knows ==="
+          sudo cat /var/opt/cinc-project/nginx/etc/*routes* 2>/dev/null | head -30
+          curl -sSk "https://$FQDN/_route/" | head -5
           echo
           echo "=== path probes ==="
           for target in "/_status" "/organizations" "/organizations/$ORG" "/organizations/$ORG/nodes" "/users" "/authenticate_user"; do
