@@ -150,12 +150,17 @@ jobs:
           echo "=== nginx.conf (structure preserved: which location sits in which server) ==="
           sudo cat -n /var/opt/cinc-project/nginx/etc/nginx.conf | sed -n '1,200p'
           echo
-          echo "=== chef_https_lb.conf ==="
-          sudo cat -n /var/opt/cinc-project/nginx/etc/chef_https_lb.conf | sed -n '1,160p'
+          echo "=== chef_https_lb.conf: the catch-all location and after ==="
+          sudo sed -n '150,300p' /var/opt/cinc-project/nginx/etc/chef_https_lb.conf | cat -n
           echo
-          echo "=== what the router knows ==="
-          sudo cat /var/opt/cinc-project/nginx/etc/*routes* 2>/dev/null | head -30
-          curl -sSk "https://$FQDN/_route/" | head -5
+          echo "=== routing lua ==="
+          sudo find /var/opt/cinc-project/nginx /opt/cinc-project/embedded/conf -name '*.lua' 2>/dev/null | head
+          echo
+          echo "=== what nginx logged for a real API request ==="
+          curl -sSk -o /dev/null "https://$FQDN/organizations/$ORG/nodes"
+          sudo tail -5 /var/log/cinc-project/nginx/access.log 2>/dev/null
+          echo "--- error log ---"
+          sudo tail -20 /var/log/cinc-project/nginx/error.log 2>/dev/null
           echo
           echo "=== path probes ==="
           for target in "/_status" "/organizations" "/organizations/$ORG" "/organizations/$ORG/nodes" "/users" "/authenticate_user"; do
