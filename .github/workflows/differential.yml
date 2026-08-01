@@ -89,6 +89,9 @@ jobs:
           openssl s_client -showcerts -connect localhost:443 -servername "$(hostname -f)" </dev/null 2>/dev/null \
             | openssl x509 -outform PEM > /tmp/diff/ca.pem
           test -s /tmp/diff/ca.pem
+          # The certificate is issued for the host's FQDN, so the comparison has
+          # to address the server by that name for verification to succeed.
+          echo "DIFF_REFERENCE_URL=https://$(hostname -f)/organizations/$ORG" >> "$GITHUB_ENV"
 
       - name: Seed cinc-zero with the same identity
         run: |
@@ -118,7 +121,8 @@ jobs:
 
       - name: Compare
         env:
-          DIFF_REFERENCE_URL: https://localhost/organizations/diffs
+          # DIFF_REFERENCE_URL comes from the CA step, which knows the name the
+          # certificate is valid for.
           DIFF_CANDIDATE_URL: http://127.0.0.1:8889/organizations/diffs
           DIFF_KEY: /tmp/diff/user.pem
           DIFF_REFERENCE_CA: /tmp/diff/ca.pem
