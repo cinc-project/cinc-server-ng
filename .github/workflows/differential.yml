@@ -123,12 +123,18 @@ jobs:
         run: |
           set -uo pipefail
           FQDN=$(hostname -f)
-          echo "api_fqdn from config:"; sudo grep -r "api_fqdn" /etc/opscode/chef-server-running.json 2>/dev/null | head -3 || true
-          for target in "https://$FQDN/_status" "https://$FQDN/organizations/$ORG/nodes" "https://localhost/organizations/$ORG/nodes"; do
-            code=$(curl -sSk -o /tmp/probe.out -w '%{http_code}' "$target" || echo000)
-            echo "--- $target -> $code"
-            head -c 200 /tmp/probe.out; echo
+          echo "=== nginx locations ==="
+          sudo find /var/opt/opscode/nginx/etc -name '*.conf' -print 2>/dev/null | head
+          sudo grep -rhE "^\\s*(location|server_name|listen|proxy_pass)" /var/opt/opscode/nginx/etc 2>/dev/null | head -40
+          echo
+          echo "=== path probes ==="
+          for target in "/_status" "/organizations" "/organizations/$ORG" "/organizations/$ORG/nodes" "/users" "/authenticate_user"; do
+            code=$(curl -sSk -o /tmp/probe.out -w '%{http_code}' "https://$FQDN$target" || echo 000)
+            printf '%-40s -> %s  %s\n' "$target" "$code" "$(head -c 80 /tmp/probe.out | tr -d '\n')"
           done
+          echo
+          echo "=== orgs known to the server ==="
+          sudo cinc-server-ctl org-list || true
 
       - name: Compare
         env:
