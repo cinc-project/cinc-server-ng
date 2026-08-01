@@ -1,0 +1,171 @@
+name: Benchmark vs Chef Infra Server
+
+# Runs the same load generator against a real Chef Infra Server (the FOSS Cinc
+# Server distribution) and against cinc-zero, on the same host, with the same
+# seeded data and the same signing identity.
+#
+# READ THE CAVEATS IN THE SUMMARY THIS PRINTS BEFORE QUOTING ANY NUMBER. The two
+# are not like for like, and the differences all favour cinc-zero:
+#
+#   - Chef Infra Server is erchef, PostgreSQL, OpenSearch, bifrost, bookshelf
+#     and nginx sharing a runner. cinc-zero is one Go process on the same box,
+#     so they are competing for the same cores.
+#   - Chef is reached over HTTPS through nginx; cinc-zero over plain HTTP with
+#     no proxy hop.
+#   - Chef writes durably through PostgreSQL and indexes into OpenSearch.
+#     cinc-zero here is in memory.
+#   - Chef implements a great deal cinc-zero does not.
+#
+# What this measures honestly is what each gives you on one machine, which is
+# the question that matters when choosing a server to put in a test pipeline.
+# It is not a claim about Chef Infra Server's performance on hardware it was
+# sized for.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "nodes to seed into each server"
+        default: "500"
+      conc:
+        description: "concurrency for the QPS phase"
+        default: "10"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: cinc-zero vs Chef Infra Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ORG: bench
+      BENCH_USER: benchuser
+      SEED: ${{ inputs.seed || '500' }}
+      CONC: ${{ inputs.conc || '10' }}
+    steps:
+      - name: Validate inputs
+        run: |
+          # These come from whoever dispatched the run. They are only ever used
+          # quoted, but a benchmark parameter has no business being anything
+          # other than a number, so reject the rest rather than reason about it.
+          for pair in "seed:$SEED" "conc:$CONC"; do
+            name=${pair%%:*}; value=${pair#*:}
+            case "$value" in
+              ''|*[!0-9]*) echo "$name must be a positive integer, got: $value" >&2; exit 1;;
+            esac
+          done
+          echo "seed=$SEED conc=$CONC"
+
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Cinc Server
+        run: |
+          set -euo pipefail
+          curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable
+          sudo mkdir -p /etc/cinc-project
+          printf "api_fqdn '%s'\n" "$(hostname -f)" | sudo tee /etc/cinc-project/cinc-server.rb
+          sudo cinc-server-ctl reconfigure --chef-license=accept
+
+      - name: Point the API name at loopback
+        run: echo "127.0.0.1 $(hostname -f)" | sudo tee -a /etc/hosts
+
+      - name: Wait for the API to be ready
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if curl -fsSk https://localhost/_status | grep -q '"status":"pong"'; then exit 0; fi
+            sleep 5
+          done
+          sudo cinc-server-ctl status || true
+          exit 1
+
+      - name: Provision the org and the shared identity
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /tmp/bench
+          sudo cinc-server-ctl user-create "$BENCH_USER" Bench User bench@example.com "$(openssl rand -hex 16)" \
+            --filename /tmp/bench/user.pem
+          sudo cinc-server-ctl org-create "$ORG" "Benchmark" --association_user "$BENCH_USER" \
+            --filename /tmp/bench/validator.pem
+          sudo chown -R "$(id -u):$(id -g)" /tmp/bench
+          openssl rsa -in /tmp/bench/user.pem -pubout -out /tmp/bench/user.pub
+          openssl s_client -showcerts -connect localhost:443 -servername "$(hostname -f)" </dev/null 2>/dev/null \
+            | openssl x509 -outform PEM > /tmp/bench/ca.pem
+          echo "REF_URL=https://$(hostname -f)/organizations/$ORG" >> "$GITHUB_ENV"
+
+      - name: Start cinc-zero with the same identity
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/state/users "/tmp/state/organizations/$ORG/groups"
+          PUBKEY=$(python3 -c 'import json,sys; print(json.dumps(open(sys.argv[1]).read()))' /tmp/bench/user.pub)
+          cat > "/tmp/state/users/$BENCH_USER.json" <<EOF
+          {"username":"$BENCH_USER","display_name":"Bench User","email":"bench@example.com","public_key":$PUBKEY}
+          EOF
+          echo "[\"$BENCH_USER\"]" > "/tmp/state/organizations/$ORG/members.json"
+          cat > "/tmp/state/organizations/$ORG/groups/admins.json" <<EOF
+          {"groupname":"admins","users":["$BENCH_USER"],"clients":[],"groups":[]}
+          EOF
+          go build -o /tmp/cinc-zero ./cmd/cinc-zero
+          /tmp/cinc-zero --addr 127.0.0.1:8889 --orgs "$ORG" --state /tmp/state >/tmp/cinc-zero.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8889/_status >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/cinc-zero.log; exit 1
+
+      - name: Benchmark Chef Infra Server
+        run: |
+          go run ./cmd/loadtest -label "Chef Infra Server" \
+            -base "$REF_URL" -user "$BENCH_USER" -keypem /tmp/bench/user.pem \
+            -cacert /tmp/bench/ca.pem \
+            -seed "$SEED" -conc "$CONC" | tee /tmp/chef.txt
+
+      - name: Benchmark cinc-zero
+        run: |
+          go run ./cmd/loadtest -label "cinc-zero (signed)" \
+            -base "http://127.0.0.1:8889/organizations/$ORG" \
+            -user "$BENCH_USER" -keypem /tmp/bench/user.pem \
+            -seed "$SEED" -conc "$CONC" | tee /tmp/cinczero.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## cinc-zero vs Chef Infra Server"
+            echo
+            echo "Host: \`$(uname -msr)\`, $(nproc) cores · Go $(go version | awk '{print $3}')"
+            echo "Params: seed=$SEED conc=$CONC · both signed with the same identity"
+            echo
+            echo '### Chef Infra Server'
+            echo '```'; cat /tmp/chef.txt 2>/dev/null || echo "(did not run)"; echo '```'
+            echo '### cinc-zero'
+            echo '```'; cat /tmp/cinczero.txt 2>/dev/null || echo "(did not run)"; echo '```'
+            echo
+            echo "### Reading these honestly"
+            echo
+            echo "The two are **not like for like**, and every difference favours cinc-zero:"
+            echo
+            echo "- Chef Infra Server is erchef, PostgreSQL, OpenSearch, bifrost, bookshelf and nginx"
+            echo "  sharing this runner with cinc-zero and the load generator."
+            echo "- Chef is reached over HTTPS through nginx; cinc-zero over plain HTTP, no proxy hop."
+            echo "- Chef writes durably through PostgreSQL and indexes into OpenSearch; cinc-zero here"
+            echo "  is in memory."
+            echo "- Chef implements a great deal that cinc-zero does not."
+            echo
+            echo "This measures what each gives you on one machine — the question that matters when"
+            echo "choosing a server for a test pipeline. It is not a statement about Chef Infra"
+            echo "Server on hardware it was sized for."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: cinc-zero log
+        if: always()
+        run: cat /tmp/cinc-zero.log || true
