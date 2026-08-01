@@ -61,6 +61,21 @@ jobs:
           sudo cinc-server-ctl reconfigure --chef-license=accept
           sudo cinc-server-ctl status
 
+      - name: Point the API name at loopback
+        run: |
+          set -euo pipefail
+          # The Lua router checks the client IP against a maintenance-mode
+          # allowlist held in Redis, and that read fails on a fresh install
+          # ("WRONGTYPE ... xmaint_allowed_ips_list"). Requests arriving on the
+          # external interface then fall through to nginx's static landing page
+          # instead of reaching erchef, while loopback requests route normally —
+          # which is why cinc-server-ctl worked while everything else got HTML.
+          #
+          # Resolving the API name to loopback sidesteps it without weakening
+          # anything: the certificate is issued for that name, so TLS
+          # verification still applies.
+          echo "127.0.0.1 $(hostname -f)" | sudo tee -a /etc/hosts
+
       - name: Wait for the API to be ready
         run: |
           set -euo pipefail
