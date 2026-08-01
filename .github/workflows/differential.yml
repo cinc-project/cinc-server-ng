@@ -9,13 +9,25 @@ name: Differential
 # only thing that can find a response we have confidently got wrong.
 #
 # It installs and reconfigures a full Chef Infra Server, which takes several
-# minutes and a lot of the runner, so it does not run per-PR. Run it on demand
-# before a release, and on a schedule to catch upstream drift.
+# minutes and a lot of the runner, so it does not run per-PR.
+#
+# KNOWN BLOCKER: on a stock Cinc Server install on a GitHub runner, the public
+# API is not routed. /_status reaches erchef and reports every upstream healthy,
+# and cinc-server-ctl provisions orgs and users successfully (those go through
+# the internal interface), but every public API path — /organizations, /users,
+# /authenticate_user — returns nginx's static landing page with 200. Pinning
+# api_fqdn did not change it, and the nginx configuration is not under the
+# expected /var/opt/opscode path, so the routing could not be inspected.
+#
+# The comparison harness itself is fine: it runs, signs, normalizes and diffs
+# correctly, and reports every landing page as a difference exactly as it
+# should. Until the reference server serves its API, this workflow cannot
+# produce a meaningful result, so the weekly schedule is off — a job that always
+# fails teaches people to ignore it. The "Probe the reference API routing" step
+# below is left in place as the evidence for whoever picks this up.
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+  workflow_dispatch: # schedule disabled until the blocker above is resolved
 
 permissions:
   contents: read
@@ -41,8 +53,34 @@ jobs:
       - name: Install Cinc Server
         run: |
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable
+          # Pin api_fqdn rather than leaving it to auto-detection: the public API
+          # is only routed for requests addressed to it, and a runner's detected
+          # name is not something to rely on.
+          sudo mkdir -p /etc/opscode
+          printf "api_fqdn '%s'\nnginx['server_name'] = '%s'\n" "$(hostname -f)" "$(hostname -f)" \
+            | sudo tee /etc/opscode/chef-server.rb
           sudo cinc-server-ctl reconfigure --chef-license=accept
           sudo cinc-server-ctl status
+
+      - name: Wait for the API to be ready
+        run: |
+          set -euo pipefail
+          # reconfigure returns before erchef is actually serving, so
+          # provisioning immediately after it gets a 404 from nginx. Poll the
+          # status endpoint instead of guessing at a sleep. (-k here only
+          # because the CA has not been exported yet; the comparison itself
+          # pins it.)
+          for _ in $(seq 1 60); do
+            if curl -fsSk https://localhost/_status | grep -q '"status":"pong"'; then
+              echo "API ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the server never became ready:"
+          sudo cinc-server-ctl status || true
+          curl -sSk https://localhost/_status || true
+          exit 1
 
       - name: Provision the org and the shared identity
         run: |
@@ -55,7 +93,10 @@ jobs:
             --filename /tmp/diff/user.pem
           sudo cinc-server-ctl org-create "$ORG" "Differential" --association_user "$DIFF_USER" \
             --filename /tmp/diff/validator.pem
-          sudo chmod -R a+r /tmp/diff
+          # The ctl commands run as root, so hand the directory back before
+          # writing to it as the runner user.
+          sudo chown -R "$(id -u):$(id -g)" /tmp/diff
+          chmod -R u+rw /tmp/diff
           openssl rsa -in /tmp/diff/user.pem -pubout -out /tmp/diff/user.pub
 
       - name: Export the reference server's CA
@@ -66,6 +107,9 @@ jobs:
           openssl s_client -showcerts -connect localhost:443 -servername "$(hostname -f)" </dev/null 2>/dev/null \
             | openssl x509 -outform PEM > /tmp/diff/ca.pem
           test -s /tmp/diff/ca.pem
+          # The certificate is issued for the host's FQDN, so the comparison has
+          # to address the server by that name for verification to succeed.
+          echo "DIFF_REFERENCE_URL=https://$(hostname -f)/organizations/$ORG" >> "$GITHUB_ENV"
 
       - name: Seed cinc-zero with the same identity
         run: |
@@ -93,9 +137,32 @@ jobs:
           done
           echo "cinc-zero did not become ready:"; cat /tmp/cinc-zero.log; exit 1
 
+      - name: Probe the reference API routing
+        shell: bash +e {0}
+        run: |
+          FQDN=$(hostname -f)
+          echo "=== nginx tree ==="
+          sudo ls /var/opt/opscode 2>&1 | head
+          sudo find / -maxdepth 6 -name 'nginx.conf' -path '*opscode*' 2>/dev/null | head
+          echo
+          echo "=== routed locations ==="
+          sudo grep -rhE "^\\s*location|proxy_pass|server_name" $(sudo find / -maxdepth 7 -path '*opscode*nginx*' -name '*.conf' 2>/dev/null | head -20) 2>/dev/null | sed 's/^ *//' | sort -u | head -40
+          echo
+          echo "=== path probes ==="
+          for target in "/_status" "/organizations" "/organizations/$ORG" "/organizations/$ORG/nodes" "/users" "/authenticate_user"; do
+            code=$(curl -sSk -o /tmp/probe.out -w '%{http_code}' "https://$FQDN$target")
+            printf '%-40s -> %s  %s\n' "$target" "$code" "$(head -c 90 /tmp/probe.out | tr -d '\n')"
+          done
+          echo
+          echo "=== orgs ==="
+          sudo cinc-server-ctl org-list
+          echo "=== exit 0 regardless; this step is diagnostic ==="
+          exit 0
+
       - name: Compare
         env:
-          DIFF_REFERENCE_URL: https://localhost/organizations/diffs
+          # DIFF_REFERENCE_URL comes from the CA step, which knows the name the
+          # certificate is valid for.
           DIFF_CANDIDATE_URL: http://127.0.0.1:8889/organizations/diffs
           DIFF_KEY: /tmp/diff/user.pem
           DIFF_REFERENCE_CA: /tmp/diff/ca.pem
