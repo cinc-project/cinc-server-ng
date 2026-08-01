@@ -75,7 +75,10 @@ jobs:
             --filename /tmp/diff/user.pem
           sudo cinc-server-ctl org-create "$ORG" "Differential" --association_user "$DIFF_USER" \
             --filename /tmp/diff/validator.pem
-          sudo chmod -R a+r /tmp/diff
+          # The ctl commands run as root, so hand the directory back before
+          # writing to it as the runner user.
+          sudo chown -R "$(id -u):$(id -g)" /tmp/diff
+          chmod -R u+rw /tmp/diff
           openssl rsa -in /tmp/diff/user.pem -pubout -out /tmp/diff/user.pub
 
       - name: Export the reference server's CA
