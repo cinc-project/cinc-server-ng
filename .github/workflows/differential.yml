@@ -119,6 +119,17 @@ jobs:
           done
           echo "cinc-zero did not become ready:"; cat /tmp/cinc-zero.log; exit 1
 
+      - name: Probe the reference API routing
+        run: |
+          set -uo pipefail
+          FQDN=$(hostname -f)
+          echo "api_fqdn from config:"; sudo grep -r "api_fqdn" /etc/opscode/chef-server-running.json 2>/dev/null | head -3 || true
+          for target in "https://$FQDN/_status" "https://$FQDN/organizations/$ORG/nodes" "https://localhost/organizations/$ORG/nodes"; do
+            code=$(curl -sSk -o /tmp/probe.out -w '%{http_code}' "$target" || echo000)
+            echo "--- $target -> $code"
+            head -c 200 /tmp/probe.out; echo
+          done
+
       - name: Compare
         env:
           # DIFF_REFERENCE_URL comes from the CA step, which knows the name the
