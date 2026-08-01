@@ -9,13 +9,25 @@ name: Differential
 # only thing that can find a response we have confidently got wrong.
 #
 # It installs and reconfigures a full Chef Infra Server, which takes several
-# minutes and a lot of the runner, so it does not run per-PR. Run it on demand
-# before a release, and on a schedule to catch upstream drift.
+# minutes and a lot of the runner, so it does not run per-PR.
+#
+# KNOWN BLOCKER: on a stock Cinc Server install on a GitHub runner, the public
+# API is not routed. /_status reaches erchef and reports every upstream healthy,
+# and cinc-server-ctl provisions orgs and users successfully (those go through
+# the internal interface), but every public API path — /organizations, /users,
+# /authenticate_user — returns nginx's static landing page with 200. Pinning
+# api_fqdn did not change it, and the nginx configuration is not under the
+# expected /var/opt/opscode path, so the routing could not be inspected.
+#
+# The comparison harness itself is fine: it runs, signs, normalizes and diffs
+# correctly, and reports every landing page as a difference exactly as it
+# should. Until the reference server serves its API, this workflow cannot
+# produce a meaningful result, so the weekly schedule is off — a job that always
+# fails teaches people to ignore it. The "Probe the reference API routing" step
+# below is left in place as the evidence for whoever picks this up.
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+  workflow_dispatch: # schedule disabled until the blocker above is resolved
 
 permissions:
   contents: read
