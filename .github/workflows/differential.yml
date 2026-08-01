@@ -120,21 +120,25 @@ jobs:
           echo "cinc-zero did not become ready:"; cat /tmp/cinc-zero.log; exit 1
 
       - name: Probe the reference API routing
+        shell: bash +e {0}
         run: |
-          set -uo pipefail
           FQDN=$(hostname -f)
-          echo "=== nginx locations ==="
-          sudo find /var/opt/opscode/nginx/etc -name '*.conf' -print 2>/dev/null | head
-          sudo grep -rhE "^\\s*(location|server_name|listen|proxy_pass)" /var/opt/opscode/nginx/etc 2>/dev/null | head -40
+          echo "=== nginx config files ==="
+          sudo find /var/opt/opscode /opt/opscode -name 'nginx.conf' -o -name '*chef_http*' 2>/dev/null | head
+          echo
+          echo "=== locations and upstreams ==="
+          sudo grep -rhE "location|proxy_pass|server_name" /var/opt/opscode/nginx/etc 2>/dev/null | sed 's/^ *//' | sort -u | head -40
           echo
           echo "=== path probes ==="
           for target in "/_status" "/organizations" "/organizations/$ORG" "/organizations/$ORG/nodes" "/users" "/authenticate_user"; do
-            code=$(curl -sSk -o /tmp/probe.out -w '%{http_code}' "https://$FQDN$target" || echo 000)
-            printf '%-40s -> %s  %s\n' "$target" "$code" "$(head -c 80 /tmp/probe.out | tr -d '\n')"
+            code=$(curl -sSk -o /tmp/probe.out -w '%{http_code}' "https://$FQDN$target")
+            printf '%-40s -> %s  %s\n' "$target" "$code" "$(head -c 90 /tmp/probe.out | tr -d '\n')"
           done
           echo
-          echo "=== orgs known to the server ==="
-          sudo cinc-server-ctl org-list || true
+          echo "=== orgs ==="
+          sudo cinc-server-ctl org-list
+          echo "=== exit 0 regardless; this step is diagnostic ==="
+          exit 0
 
       - name: Compare
         env:
