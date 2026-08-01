@@ -11,23 +11,18 @@ name: Differential
 # It installs and reconfigures a full Chef Infra Server, which takes several
 # minutes and a lot of the runner, so it does not run per-PR.
 #
-# KNOWN BLOCKER: on a stock Cinc Server install on a GitHub runner, the public
-# API is not routed. /_status reaches erchef and reports every upstream healthy,
-# and cinc-server-ctl provisions orgs and users successfully (those go through
-# the internal interface), but every public API path — /organizations, /users,
-# /authenticate_user — returns nginx's static landing page with 200. Pinning
-# api_fqdn did not change it, and the nginx configuration is not under the
-# expected /var/opt/opscode path, so the routing could not be inspected.
-#
-# The comparison harness itself is fine: it runs, signs, normalizes and diffs
-# correctly, and reports every landing page as a difference exactly as it
-# should. Until the reference server serves its API, this workflow cannot
-# produce a meaningful result, so the weekly schedule is off — a job that always
-# fails teaches people to ignore it. The "Probe the reference API routing" step
-# below is left in place as the evidence for whoever picks this up.
+# Earlier runs could not reach the reference server's API: every path except
+# /_status returned nginx's static landing page. Part of that investigation was
+# looking in the wrong place — Cinc Server installs under /etc/cinc-project,
+# /var/opt/cinc-project and /opt/cinc-project, not the /etc/opscode and
+# /var/opt/opscode paths Chef Infra Server uses. Configuration written to the
+# opscode path was simply ignored, so "pinning api_fqdn changed nothing" was
+# never actually a test of that.
 
 on:
-  workflow_dispatch: # schedule disabled until the blocker above is resolved
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
 
 permissions:
   contents: read
@@ -53,14 +48,33 @@ jobs:
       - name: Install Cinc Server
         run: |
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable
+          # Cinc Server reads its configuration from /etc/cinc-project, not the
+          # /etc/opscode path Chef Infra Server uses. Show what the package laid
+          # down before adding to it, so a future change of layout is visible
+          # rather than silently ignored.
+          echo "=== /etc/cinc-project after install ==="
+          sudo ls -la /etc/cinc-project || true
           # Pin api_fqdn rather than leaving it to auto-detection: the public API
-          # is only routed for requests addressed to it, and a runner's detected
-          # name is not something to rely on.
-          sudo mkdir -p /etc/opscode
-          printf "api_fqdn '%s'\nnginx['server_name'] = '%s'\n" "$(hostname -f)" "$(hostname -f)" \
-            | sudo tee /etc/opscode/chef-server.rb
+          # is only routed for requests addressed to it.
+          sudo mkdir -p /etc/cinc-project
+          printf "api_fqdn '%s'\n" "$(hostname -f)" | sudo tee /etc/cinc-project/cinc-server.rb
           sudo cinc-server-ctl reconfigure --chef-license=accept
           sudo cinc-server-ctl status
+
+      - name: Point the API name at loopback
+        run: |
+          set -euo pipefail
+          # The Lua router checks the client IP against a maintenance-mode
+          # allowlist held in Redis, and that read fails on a fresh install
+          # ("WRONGTYPE ... xmaint_allowed_ips_list"). Requests arriving on the
+          # external interface then fall through to nginx's static landing page
+          # instead of reaching erchef, while loopback requests route normally —
+          # which is why cinc-server-ctl worked while everything else got HTML.
+          #
+          # Resolving the API name to loopback sidesteps it without weakening
+          # anything: the certificate is issued for that name, so TLS
+          # verification still applies.
+          echo "127.0.0.1 $(hostname -f)" | sudo tee -a /etc/hosts
 
       - name: Wait for the API to be ready
         run: |
@@ -137,27 +151,27 @@ jobs:
           done
           echo "cinc-zero did not become ready:"; cat /tmp/cinc-zero.log; exit 1
 
-      - name: Probe the reference API routing
-        shell: bash +e {0}
+      - name: Check the reference API is actually routed
         run: |
+          set -euo pipefail
           FQDN=$(hostname -f)
-          echo "=== nginx tree ==="
-          sudo ls /var/opt/opscode 2>&1 | head
-          sudo find / -maxdepth 6 -name 'nginx.conf' -path '*opscode*' 2>/dev/null | head
-          echo
-          echo "=== routed locations ==="
-          sudo grep -rhE "^\\s*location|proxy_pass|server_name" $(sudo find / -maxdepth 7 -path '*opscode*nginx*' -name '*.conf' 2>/dev/null | head -20) 2>/dev/null | sed 's/^ *//' | sort -u | head -40
-          echo
-          echo "=== path probes ==="
-          for target in "/_status" "/organizations" "/organizations/$ORG" "/organizations/$ORG/nodes" "/users" "/authenticate_user"; do
-            code=$(curl -sSk -o /tmp/probe.out -w '%{http_code}' "https://$FQDN$target")
-            printf '%-40s -> %s  %s\n' "$target" "$code" "$(head -c 90 /tmp/probe.out | tr -d '\n')"
-          done
-          echo
-          echo "=== orgs ==="
-          sudo cinc-server-ctl org-list
-          echo "=== exit 0 regardless; this step is diagnostic ==="
-          exit 0
+          # A Chef Infra Server front end answers anything that does not look
+          # like an API client with a friendly HTML landing page. Getting that
+          # back turns the comparison into a hundred diffs of the same web page,
+          # which is a confusing way to learn the request never reached the API
+          # — so check it here, where the message can say so.
+          body=$(curl -sSk -H "X-Chef-Version: 18.10.17" "https://$FQDN/organizations/$ORG/nodes")
+          if printf '%s' "$body" | grep -qi "<!DOCTYPE html>"; then
+            echo "The reference server answered an API path with its landing page,"
+            echo "so requests are not reaching erchef. Comparing now would be meaningless."
+            echo
+            echo "--- response ---"; printf '%s' "$body" | head -c 400; echo
+            echo "--- nginx access log ---"; sudo tail -5 /var/log/cinc-project/nginx/access.log || true
+            echo "--- nginx error log ---";  sudo tail -20 /var/log/cinc-project/nginx/error.log || true
+            echo "--- config ---"; sudo cinc-server-ctl show-config 2>/dev/null | grep -iE '"(api_fqdn|server_name)"' || true
+            exit 1
+          fi
+          echo "API is routed (401 or JSON expected without a signature): ${body:0:120}"
 
       - name: Compare
         env:

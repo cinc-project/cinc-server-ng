@@ -32,6 +32,9 @@ import (
 	"github.com/tas50/cinc-zero/internal/auth"
 )
 
+// chefClientVersion is announced on every request, as a real client does.
+const chefClientVersion = "18.10.17"
+
 // Target is one server under comparison.
 type Target struct {
 	// Name identifies the target in reported differences.
@@ -153,6 +156,11 @@ func (t *Target) do(ctx context.Context, step Step) Observation {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Ops-Server-API-Version", "1")
+	// Real Chef clients announce their version, and a Chef Infra Server's front
+	// end uses that to tell an API request from someone pointing a browser at
+	// it — without it, the request is answered with a friendly landing page
+	// instead of being routed to the API.
+	req.Header.Set("X-Chef-Version", chefClientVersion)
 	ts := time.Now().UTC().Format(time.RFC3339)
 	if err := auth.SignRequest(req, t.User, ts, payload, t.Key); err != nil {
 		return Observation{Transport: fmt.Errorf("sign: %w", err)}
