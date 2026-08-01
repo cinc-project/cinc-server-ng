@@ -44,6 +44,26 @@ jobs:
           sudo cinc-server-ctl reconfigure --chef-license=accept
           sudo cinc-server-ctl status
 
+      - name: Wait for the API to be ready
+        run: |
+          set -euo pipefail
+          # reconfigure returns before erchef is actually serving, so
+          # provisioning immediately after it gets a 404 from nginx. Poll the
+          # status endpoint instead of guessing at a sleep. (-k here only
+          # because the CA has not been exported yet; the comparison itself
+          # pins it.)
+          for _ in $(seq 1 60); do
+            if curl -fsSk https://localhost/_status | grep -q '"status":"pong"'; then
+              echo "API ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the server never became ready:"
+          sudo cinc-server-ctl status || true
+          curl -sSk https://localhost/_status || true
+          exit 1
+
       - name: Provision the org and the shared identity
         run: |
           set -euo pipefail
