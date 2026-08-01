@@ -11,23 +11,18 @@ name: Differential
 # It installs and reconfigures a full Chef Infra Server, which takes several
 # minutes and a lot of the runner, so it does not run per-PR.
 #
-# KNOWN BLOCKER: on a stock Cinc Server install on a GitHub runner, the public
-# API is not routed. /_status reaches erchef and reports every upstream healthy,
-# and cinc-server-ctl provisions orgs and users successfully (those go through
-# the internal interface), but every public API path — /organizations, /users,
-# /authenticate_user — returns nginx's static landing page with 200. Pinning
-# api_fqdn did not change it, and the nginx configuration is not under the
-# expected /var/opt/opscode path, so the routing could not be inspected.
-#
-# The comparison harness itself is fine: it runs, signs, normalizes and diffs
-# correctly, and reports every landing page as a difference exactly as it
-# should. Until the reference server serves its API, this workflow cannot
-# produce a meaningful result, so the weekly schedule is off — a job that always
-# fails teaches people to ignore it. The "Probe the reference API routing" step
-# below is left in place as the evidence for whoever picks this up.
+# Earlier runs could not reach the reference server's API: every path except
+# /_status returned nginx's static landing page. Part of that investigation was
+# looking in the wrong place — Cinc Server installs under /etc/cinc-project,
+# /var/opt/cinc-project and /opt/cinc-project, not the /etc/opscode and
+# /var/opt/opscode paths Chef Infra Server uses. Configuration written to the
+# opscode path was simply ignored, so "pinning api_fqdn changed nothing" was
+# never actually a test of that.
 
 on:
-  workflow_dispatch: # schedule disabled until the blocker above is resolved
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
 
 permissions:
   contents: read
@@ -53,12 +48,16 @@ jobs:
       - name: Install Cinc Server
         run: |
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable
+          # Cinc Server reads its configuration from /etc/cinc-project, not the
+          # /etc/opscode path Chef Infra Server uses. Show what the package laid
+          # down before adding to it, so a future change of layout is visible
+          # rather than silently ignored.
+          echo "=== /etc/cinc-project after install ==="
+          sudo ls -la /etc/cinc-project || true
           # Pin api_fqdn rather than leaving it to auto-detection: the public API
-          # is only routed for requests addressed to it, and a runner's detected
-          # name is not something to rely on.
-          sudo mkdir -p /etc/opscode
-          printf "api_fqdn '%s'\nnginx['server_name'] = '%s'\n" "$(hostname -f)" "$(hostname -f)" \
-            | sudo tee /etc/opscode/chef-server.rb
+          # is only routed for requests addressed to it.
+          sudo mkdir -p /etc/cinc-project
+          printf "api_fqdn '%s'\n" "$(hostname -f)" | sudo tee /etc/cinc-project/cinc-server.rb
           sudo cinc-server-ctl reconfigure --chef-license=accept
           sudo cinc-server-ctl status
 
@@ -141,12 +140,15 @@ jobs:
         shell: bash +e {0}
         run: |
           FQDN=$(hostname -f)
-          echo "=== nginx tree ==="
-          sudo ls /var/opt/opscode 2>&1 | head
-          sudo find / -maxdepth 6 -name 'nginx.conf' -path '*opscode*' 2>/dev/null | head
+          echo "=== resolved api_fqdn and nginx settings ==="
+          sudo cinc-server-ctl show-config 2>/dev/null | grep -iE '"(api_fqdn|server_name|ssl_port|non_ssl_port|url)"' | head -20
           echo
-          echo "=== routed locations ==="
-          sudo grep -rhE "^\\s*location|proxy_pass|server_name" $(sudo find / -maxdepth 7 -path '*opscode*nginx*' -name '*.conf' 2>/dev/null | head -20) 2>/dev/null | sed 's/^ *//' | sort -u | head -40
+          echo "=== nginx config tree ==="
+          sudo ls /var/opt/cinc-project 2>&1 | head
+          sudo find /var/opt/cinc-project/nginx -name '*.conf' 2>/dev/null | head -20
+          echo
+          echo "=== server blocks and routed locations ==="
+          sudo grep -rhE "^\\s*(location|server_name|listen|proxy_pass|root)" /var/opt/cinc-project/nginx/etc 2>/dev/null | sed 's/^ *//' | sort -u | head -50
           echo
           echo "=== path probes ==="
           for target in "/_status" "/organizations" "/organizations/$ORG" "/organizations/$ORG/nodes" "/users" "/authenticate_user"; do
