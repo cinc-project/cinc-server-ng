@@ -90,6 +90,12 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
 		return
 	}
+	// Chef reports the organization a group belongs to.
+	var g map[string]any
+	if json.Unmarshal(doc, &g) == nil {
+		g["orgname"] = org.Name()
+		doc = mustEncode(g)
+	}
 	writeRaw(w, http.StatusOK, doc)
 }
 

@@ -35,6 +35,14 @@ func searchIDs(t *testing.T, req *http.Request, idField string) []string {
 	}
 	ids := make([]string, 0, len(body.Rows))
 	for _, row := range body.Rows {
+		// A data bag item comes back wrapped, with its own fields under
+		// raw_data, so look there before the top level.
+		if raw, ok := row["raw_data"].(map[string]any); ok {
+			if id, ok := raw[idField].(string); ok {
+				ids = append(ids, id)
+				continue
+			}
+		}
 		id, _ := row[idField].(string)
 		ids = append(ids, id)
 	}

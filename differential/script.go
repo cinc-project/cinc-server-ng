@@ -94,8 +94,11 @@ func Script(actor string) []Step {
 		{Name: "client list", Method: "GET", Path: "/clients"},
 		// Creation returns a freshly generated private key, so only the status
 		// is comparable.
+		// create_key matters: without it a real server registers the client with
+		// no key at all, which then makes every keys and principals response
+		// differ for a reason that has nothing to do with those endpoints.
 		{Name: "client create", Method: "POST", Path: "/clients",
-			Body: `{"name":"diff-client","admin":false,"validator":false}`, SkipBody: true},
+			Body: `{"name":"diff-client","admin":false,"validator":false,"create_key":true}`, SkipBody: true},
 		{Name: "client read", Method: "GET", Path: "/clients/diff-client"},
 		{Name: "client missing", Method: "GET", Path: "/clients/diff-absent"},
 
