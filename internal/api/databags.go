@@ -101,7 +101,14 @@ func (a *API) deleteDataBag(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeRaw(w, http.StatusOK, raw)
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		writeRaw(w, http.StatusOK, raw)
+		return
+	}
+	doc["chef_type"] = chefTypeDataBag
+	doc["json_class"] = jsonClassDataBag
+	writeJSON(w, http.StatusOK, doc)
 }
 
 // bagExists reports whether the named bag exists, writing a 404 if not.
@@ -164,7 +171,12 @@ func (a *API) createDataBagItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeRaw(w, http.StatusCreated, raw)
+	var item map[string]any
+	if json.Unmarshal(raw, &item) != nil {
+		writeRaw(w, http.StatusCreated, raw)
+		return
+	}
+	writeJSON(w, http.StatusCreated, withCreateEnvelope(bag, item))
 }
 
 func (a *API) getDataBagItem(w http.ResponseWriter, r *http.Request) {
@@ -218,16 +230,17 @@ func (a *API) deleteDataBagItem(w http.ResponseWriter, r *http.Request) {
 	if !a.bagExists(w, org, bag) {
 		return
 	}
-	raw, ok, err := org.Delete(dataBagItemsColl(bag), r.PathValue("item"))
+	item := r.PathValue("item")
+	raw, ok, err := org.Delete(dataBagItemsColl(bag), item)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find data bag item "+r.PathValue("item"))
+		writeError(w, http.StatusNotFound, "Cannot find data bag item "+item)
 		return
 	}
-	writeRaw(w, http.StatusOK, raw)
+	writeRaw(w, http.StatusOK, wrapStoredDataBagItem(bag, item, raw))
 }
 
 // decodeItem reads a data bag item body and returns canonical bytes plus its

@@ -458,6 +458,10 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 				"url":  idx.urlFor(r, org.Name(), m.id),
 				"data": data,
 			})
+		} else if idx.aclObject != "" {
+			// A data bag item comes back through search in Chef's wrapped
+			// form, unlike the flat document a direct read returns.
+			out = append(out, json.RawMessage(wrapStoredDataBagItem(idx.aclObject, m.id, m.raw)))
 		} else {
 			out = append(out, m.raw)
 		}

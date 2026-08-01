@@ -235,7 +235,7 @@ func (a *API) scopedGet(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+r.PathValue("name"))
 			return
 		}
-		writeRaw(w, http.StatusOK, raw)
+		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), raw))
 	}
 }
 
@@ -297,7 +297,7 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+r.PathValue("name"))
 			return
 		}
-		writeRaw(w, http.StatusOK, raw)
+		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), raw))
 	}
 }
 
