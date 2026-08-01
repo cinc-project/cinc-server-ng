@@ -18,7 +18,7 @@ import (
 
 const defaultKeyName = "default"
 
-func (a *API) registerKeyRoutes(mux *http.ServeMux, prefix, segment string, scope scopeFunc) {
+func (a *API) registerKeyRoutes(mux *recordingMux, prefix, segment string, scope scopeFunc) {
 	base := prefix + segment + "/{name}/keys"
 	mux.HandleFunc("GET "+base, a.listKeys(segment, scope))
 	mux.HandleFunc("POST "+base, a.addKey(segment, scope))

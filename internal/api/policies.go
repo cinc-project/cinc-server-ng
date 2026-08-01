@@ -20,7 +20,7 @@ func policyRevColl(policy string) string { return "policy_revisions:" + policy }
 
 const policyRevPrefix = "policy_revisions:"
 
-func (a *API) registerPolicyRoutes(mux *http.ServeMux) {
+func (a *API) registerPolicyRoutes(mux *recordingMux) {
 	o := "/organizations/{org}"
 	mux.HandleFunc("GET "+o+"/policies", a.listPolicies)
 	mux.HandleFunc("GET "+o+"/policies/{name}", a.getPolicy)

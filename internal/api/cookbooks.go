@@ -21,7 +21,7 @@ import (
 // those checksums. Files live in an in-memory blob store keyed by hex MD5;
 // manifests live in the "cookbooks" collection keyed by "name/version".
 
-func (a *API) registerCookbookRoutes(mux *http.ServeMux) {
+func (a *API) registerCookbookRoutes(mux *recordingMux) {
 	a.registerFileStoreRoutes(mux)
 	a.registerSandboxRoutes(mux)
 
@@ -91,7 +91,7 @@ func manifestDependencies(m map[string]any) map[string]any {
 
 // --- file store -----------------------------------------------------------
 
-func (a *API) registerFileStoreRoutes(mux *http.ServeMux) {
+func (a *API) registerFileStoreRoutes(mux *recordingMux) {
 	const base = "/organizations/{org}/file_store/{checksum}"
 	mux.HandleFunc("PUT "+base, a.putFile)
 	mux.HandleFunc("GET "+base, a.getFile)
@@ -166,7 +166,7 @@ func (a *API) getFile(w http.ResponseWriter, r *http.Request) {
 
 // --- sandboxes ------------------------------------------------------------
 
-func (a *API) registerSandboxRoutes(mux *http.ServeMux) {
+func (a *API) registerSandboxRoutes(mux *recordingMux) {
 	mux.HandleFunc("POST /organizations/{org}/sandboxes", a.createSandbox)
 	mux.HandleFunc("PUT /organizations/{org}/sandboxes/{id}", a.commitSandbox)
 }

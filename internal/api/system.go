@@ -3,7 +3,7 @@ package api
 import "net/http"
 
 // registerSystemRoutes wires server-level, unauthenticated status endpoints.
-func (a *API) registerSystemRoutes(mux *http.ServeMux) {
+func (a *API) registerSystemRoutes(mux *recordingMux) {
 	mux.HandleFunc("GET /_status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "pong",

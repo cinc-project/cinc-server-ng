@@ -24,7 +24,7 @@ func writeStringError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-func (a *API) registerAssociationRequestRoutes(mux *http.ServeMux) {
+func (a *API) registerAssociationRequestRoutes(mux *recordingMux) {
 	mux.HandleFunc("GET /organizations/{org}/association_requests", a.listOrgInvites)
 	mux.HandleFunc("POST /organizations/{org}/association_requests", a.createInvite)
 	mux.HandleFunc("DELETE /organizations/{org}/association_requests/{id}", a.rescindInvite)

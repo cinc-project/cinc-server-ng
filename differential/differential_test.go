@@ -111,7 +111,7 @@ func TestIdenticalServersAgree(t *testing.T) {
 	reference := startTarget(t, "reference", nil)
 	candidate := startTarget(t, "candidate", nil)
 
-	diffs, err := differential.Run(context.Background(), differential.Script(),
+	diffs, err := differential.Run(context.Background(), differential.Script("pivotal"),
 		reference, candidate, differential.AcceptedDifferences())
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -148,7 +148,7 @@ func TestDifferenceInBodyIsDetected(t *testing.T) {
 		})
 	})
 
-	diffs, err := differential.Run(context.Background(), differential.Script(),
+	diffs, err := differential.Run(context.Background(), differential.Script("pivotal"),
 		reference, candidate, differential.AcceptedDifferences())
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -181,7 +181,7 @@ func TestDifferenceInStatusIsDetected(t *testing.T) {
 		})
 	})
 
-	diffs, err := differential.Run(context.Background(), differential.Script(),
+	diffs, err := differential.Run(context.Background(), differential.Script("pivotal"),
 		reference, candidate, differential.AcceptedDifferences())
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -214,7 +214,7 @@ func TestAcceptedDifferenceIsExplained(t *testing.T) {
 	allow := append(differential.AcceptedDifferences(), differential.Accepted{
 		Step: "node missing", Field: "*", Reason: "deliberate difference, for this test",
 	})
-	diffs, err := differential.Run(context.Background(), differential.Script(),
+	diffs, err := differential.Run(context.Background(), differential.Script("pivotal"),
 		reference, candidate, allow)
 	if err != nil {
 		t.Fatalf("run: %v", err)

@@ -27,7 +27,7 @@ func SeedOrg(org *store.Org) error {
 
 // registerEnvironmentRoutes wires environments using the generic object CRUD
 // but protects the immutable _default environment from mutation.
-func (a *API) registerEnvironmentRoutes(mux *http.ServeMux) {
+func (a *API) registerEnvironmentRoutes(mux *recordingMux) {
 	a.registerObjectRoutes(mux, "environments")
 
 	base := "/organizations/{org}/environments/_default"

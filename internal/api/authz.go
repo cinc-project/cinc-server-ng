@@ -52,7 +52,7 @@ func seedAuthz(org *store.Org) error {
 	return nil
 }
 
-func (a *API) registerAuthzRoutes(mux *http.ServeMux) {
+func (a *API) registerAuthzRoutes(mux *recordingMux) {
 	// Groups carry their name in "groupname" (the field Chef clients POST) and
 	// their members in top-level users/clients/groups arrays — a shape the
 	// generic object CRUD doesn't model, so create/update are dedicated.

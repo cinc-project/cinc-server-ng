@@ -119,3 +119,28 @@ func TestMemoryServerIsFreshEachTime(t *testing.T) {
 		t.Fatal("two independent in-memory servers should not share an admin key")
 	}
 }
+
+// Stop must tolerate being called twice. A deferred stop alongside an explicit
+// one is ordinary, and it used to panic once group commit became the default.
+func TestStopIsIdempotent(t *testing.T) {
+	srv, err := New(Options{
+		Orgs: []string{"acme"}, Storage: "sqlite",
+		DB: filepath.Join(t.TempDir(), "twice.db"), SQLiteGroupCommit: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := srv.Stop(ctx); err != nil {
+		t.Fatalf("first Stop: %v", err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("second Stop panicked: %v", r)
+		}
+	}()
+	_ = srv.Stop(ctx)
+}

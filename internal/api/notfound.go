@@ -6,7 +6,7 @@ import "net/http"
 // Chef-compatible JSON error body instead of net/http's plaintext defaults
 // ("404 page not found", "Method Not Allowed"). Matched routes are served
 // untouched — the success path is never buffered.
-func withJSONErrors(mux *http.ServeMux) http.Handler {
+func withJSONErrors(mux *recordingMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A non-empty pattern means a route (or a redirect) matched; serve it
 		// normally. Only genuinely unmatched requests are rewritten.

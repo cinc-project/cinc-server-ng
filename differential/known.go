@@ -33,6 +33,18 @@ var accepted = []Accepted{
 			"non-exceeded license, where a real server reports actual node licensing.",
 	},
 	{
+		Step:  "sandbox create",
+		Field: "checksums*",
+		Reason: "cinc-zero serves cookbook file bodies itself, handing out a pre-signed URL " +
+			"on its own address; a real server hands out a bookshelf URL. The flow is the " +
+			"same and clients use whatever URL they are given, but the URL cannot match.",
+	},
+	{
+		Step:   "sandbox create",
+		Field:  "uri",
+		Reason: "the sandbox URI embeds the server's own address and identifier scheme.",
+	},
+	{
 		Step:  "server api version",
 		Field: "*",
 		Reason: "the supported API version range is a property of each implementation " +

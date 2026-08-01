@@ -69,7 +69,7 @@ func TestAgainstRealChefServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	diffs, err := differential.Run(ctx, differential.Script(), reference, candidate,
+	diffs, err := differential.Run(ctx, differential.Script(user), reference, candidate,
 		differential.AcceptedDifferences())
 	if err != nil {
 		t.Fatalf("differential run: %v", err)

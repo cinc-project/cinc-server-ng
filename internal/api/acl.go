@@ -23,7 +23,7 @@ var aclObjectTypes = []string{
 	"environments", "groups", "nodes", "policies", "policy_groups", "roles",
 }
 
-func (a *API) registerACLRoutes(mux *http.ServeMux) {
+func (a *API) registerACLRoutes(mux *recordingMux) {
 	for _, typ := range aclObjectTypes {
 		base := "/organizations/{org}/" + typ + "/{name}/_acl"
 		mux.HandleFunc("GET "+base, a.getACL(typ))

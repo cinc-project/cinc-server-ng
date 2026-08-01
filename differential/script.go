@@ -10,10 +10,23 @@ package differential
 // error-body shapes are what clients branch on, they are easy to get subtly
 // wrong, and nothing else in this repository compares them against the real
 // thing.
+//
+// Two route families are left out on purpose rather than by omission:
+//
+//   - /_stats. The two servers expose entirely different metrics, so a
+//     comparison would report a difference per metric and mean nothing.
+//   - The file-store transfer itself. The sandbox handshake below covers the
+//     URL a client is told to upload to, but following it requires a real
+//     cookbook upload against both servers, which belongs in a converge test
+//     rather than a request-by-request comparison.
 
 // Script returns the sequence issued to both servers. Object names are prefixed
 // so a run against a real server is easy to identify and clean up.
-func Script() []Step {
+//
+// actor is the identity both servers run as; some routes are addressed by it
+// (a user's own keys, for instance), and it differs between a real deployment
+// and the self-test.
+func Script(actor string) []Step {
 	const node = `{"name":"diff-node","chef_environment":"_default","json_class":"Chef::Node",` +
 		`"chef_type":"node","normal":{"role":"frontend"},"default":{},"override":{},"automatic":{},` +
 		`"run_list":["recipe[diff-cookbook::default]"]}`
@@ -86,9 +99,48 @@ func Script() []Step {
 		{Name: "client read", Method: "GET", Path: "/clients/diff-client"},
 		{Name: "client missing", Method: "GET", Path: "/clients/diff-absent"},
 
+		// --- keys ---------------------------------------------------------------
+		// An actor's public_key is the credential the server authenticates
+		// against, so these routes decide who can act as whom. They were an
+		// account-takeover path once; comparing them against the reference is
+		// worth more than comparing almost anything else here.
+		{Name: "client keys list", Method: "GET", Path: "/clients/diff-client/keys"},
+		{Name: "client default key", Method: "GET", Path: "/clients/diff-client/keys/default"},
+		{Name: "client key missing", Method: "GET", Path: "/clients/diff-client/keys/diff-absent"},
+		{Name: "user keys list", Method: "GET", Path: "/users/" + actor + "/keys", ServerRoot: true},
+		{Name: "user default key", Method: "GET", Path: "/users/" + actor + "/keys/default", ServerRoot: true},
+
+		// --- principals ---------------------------------------------------------
+		{Name: "principal client", Method: "GET", Path: "/principals/diff-client"},
+		{Name: "principal user", Method: "GET", Path: "/principals/" + actor},
+		{Name: "principal missing", Method: "GET", Path: "/principals/diff-absent"},
+
 		// --- cookbooks and policies -------------------------------------------
 		{Name: "cookbook list", Method: "GET", Path: "/cookbooks"},
 		{Name: "cookbook missing", Method: "GET", Path: "/cookbooks/diff-absent"},
+		{Name: "cookbook latest", Method: "GET", Path: "/cookbooks/_latest"},
+		{Name: "cookbook recipes", Method: "GET", Path: "/cookbooks/_recipes"},
+		{Name: "cookbook artifact list", Method: "GET", Path: "/cookbook_artifacts"},
+		{Name: "cookbook artifact missing", Method: "GET", Path: "/cookbook_artifacts/diff-absent"},
+		{Name: "universe", Method: "GET", Path: "/universe"},
+		// The sandbox handshake issues the URLs a client uploads cookbook file
+		// bodies to. cinc-zero serves those itself with a pre-signed grant,
+		// where a real server hands out bookshelf URLs, so the shape of what
+		// comes back is expected to differ (see known.go).
+		{Name: "sandbox create", Method: "POST", Path: "/sandboxes",
+			Body: `{"checksums":{"0123456789abcdef0123456789abcdef":null}}`},
+
+		// --- server-level reads --------------------------------------------------
+		{Name: "required recipe", Method: "GET", Path: "/required_recipe"},
+		{Name: "org read", Method: "GET", Path: ""},
+		{Name: "invitation list", Method: "GET", Path: "/association_requests"},
+		{Name: "user invitations", Method: "GET", Path: "/users/" + actor + "/association_requests", ServerRoot: true},
+		{Name: "user invitation count", Method: "GET", Path: "/users/" + actor + "/association_requests/count", ServerRoot: true},
+		{Name: "user organizations", Method: "GET", Path: "/users/" + actor + "/organizations", ServerRoot: true},
+		// Credential verification: the interesting half is that a wrong password
+		// is refused the same way by both.
+		{Name: "authenticate wrong password", Method: "POST", Path: "/authenticate_user",
+			Body: `{"username":"` + actor + `","password":"definitely-not-the-password"}`, ServerRoot: true},
 		{Name: "policy list", Method: "GET", Path: "/policies"},
 		{Name: "policy group list", Method: "GET", Path: "/policy_groups"},
 		{Name: "policy revision push", Method: "PUT", Path: "/policy_groups/diff-group/policies/diff-policy",

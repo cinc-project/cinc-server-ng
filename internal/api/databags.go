@@ -15,7 +15,7 @@ const dataBagsColl = "data_bags"
 
 func dataBagItemsColl(bag string) string { return "databag_items:" + bag }
 
-func (a *API) registerDataBagRoutes(mux *http.ServeMux) {
+func (a *API) registerDataBagRoutes(mux *recordingMux) {
 	const base = "/organizations/{org}/data"
 	mux.HandleFunc("GET "+base, a.listDataBags)
 	mux.HandleFunc("POST "+base, a.createDataBag)

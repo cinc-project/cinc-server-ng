@@ -33,7 +33,7 @@ func StashPassword(org *store.Org, name string, obj map[string]any) (bool, error
 	return false, nil
 }
 
-func (a *API) registerAuthenticateRoutes(mux *http.ServeMux) {
+func (a *API) registerAuthenticateRoutes(mux *recordingMux) {
 	mux.HandleFunc("POST /authenticate_user", a.authenticateUser)
 }
 

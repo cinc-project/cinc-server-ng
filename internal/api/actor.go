@@ -18,7 +18,7 @@ type scopeFunc func(w http.ResponseWriter, r *http.Request) *store.Org
 // Actors are JSON objects carrying a public_key; on creation the server
 // generates an RSA key pair if the caller did not supply one, returning the
 // private key exactly once.
-func (a *API) registerActorRoutes(mux *http.ServeMux, prefix, segment string, scope scopeFunc) {
+func (a *API) registerActorRoutes(mux *recordingMux, prefix, segment string, scope scopeFunc) {
 	base := prefix + segment
 	mux.HandleFunc("GET "+base, a.scopedList(segment, scope))
 	mux.HandleFunc("POST "+base, a.createActor(segment, scope))
