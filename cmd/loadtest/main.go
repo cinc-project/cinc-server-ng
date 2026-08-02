@@ -24,6 +24,8 @@ package main
 import (
 	"bytes"
 	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"io"
@@ -48,6 +50,8 @@ var (
 	warmN     = flag.Int("warm", 3000, "sequential samples for the warm phase")
 	timeoutMS = flag.Int("timeout", 15000, "per-request timeout (ms)")
 	label     = flag.String("label", "server", "label for output")
+	caCert    = flag.String("cacert", "", "PEM certificate to trust in addition to the system roots, for a server using its own CA")
+	chefVer   = flag.String("chefversion", "18.10.17", "value for the X-Chef-Version header, which a Chef Infra Server front end uses to tell an API client from a browser")
 )
 
 var signer struct {
@@ -150,6 +154,9 @@ func newReq(method, url, body string) *http.Request {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-Ops-Server-API-Version", "1")
+	// A Chef Infra Server front end answers requests without this with an HTML
+	// landing page instead of routing them to the API.
+	req.Header.Set("X-Chef-Version", *chefVer)
 	return req
 }
 
@@ -175,9 +182,25 @@ func cloneReq(o op) *http.Request {
 }
 
 func newClient() *http.Client {
+	tr := &http.Transport{MaxIdleConns: 256, MaxIdleConnsPerHost: 256}
+	if *caCert != "" {
+		// A real Chef Infra Server serves its own certificate. Trust that CA
+		// rather than skipping verification: a benchmark that talks to whatever
+		// answers is not measuring what it claims to.
+		pem, err := os.ReadFile(*caCert)
+		must(err)
+		roots, err := x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			must(fmt.Errorf("cacert %q is not a valid PEM certificate", *caCert))
+		}
+		tr.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+	}
 	return &http.Client{
 		Timeout:   time.Duration(*timeoutMS) * time.Millisecond,
-		Transport: &http.Transport{MaxIdleConns: 256, MaxIdleConnsPerHost: 256},
+		Transport: tr,
 	}
 }
 
