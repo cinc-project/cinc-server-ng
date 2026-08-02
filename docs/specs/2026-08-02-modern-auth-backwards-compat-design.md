@@ -96,6 +96,45 @@ bespoke `X-Ops` dialect, so off-the-shelf tooling can speak it:
 - **Replay:** a server-issued single-use `nonce` in addition to the timestamp
   (§4).
 
+### 2a. Relationship to `X-Ops-Server-API-Version` — auth is a separate axis
+
+Adopting a modern scheme **does not** bump `X-Ops-Server-API-Version`, and the two
+are deliberately decoupled. That header negotiates the **resource/endpoint
+contract** (request/response shapes and endpoint semantics), currently range `0`–`2`
+(`internal/api/server_endpoints.go`), ahead of routing (`withAPIVersion`). It does
+not describe how a caller proves identity. Three independent version namespaces exist
+and must stay independent:
+
+| Discriminator | Versions | What it versions |
+|---------------|----------|------------------|
+| `X-Ops-Server-API-Version` | `0`–`2` | resource/endpoint contract |
+| `X-Ops-Sign version=` | `1.0`/`1.1`/`1.3` | legacy Mixlib signing protocol |
+| `http-sig-v1` (in `Signature-Input`) | `v1`, later `v2`… | the modern auth scheme itself |
+
+Two reasons the scheme must not be selected by the numeric API version:
+
+- **Orthogonality.** A modern client signs with `http-sig-v1` while still speaking
+  API-version-1 resource semantics; an old client signs with Mixlib against the same
+  version. Tying them would force a resource-contract migration on anyone who only
+  wants better crypto, and would break both auth schemes on any future
+  version bump.
+- **Layering (decisive).** `X-Ops-Server-API-Version` is folded *inside* the v1.3
+  signed canonical block, so the server must verify the signature before it can trust
+  that header's value. If the auth scheme were chosen *by* that version, verification
+  would depend on a value that is only trustworthy *after* verification — a circular
+  dependency. The scheme is therefore selected by an outer discriminator (§1): the
+  verifier chain sniffs `X-Ops-Sign` → legacy vs. `Signature-Input` → modern *before*
+  any version parsing.
+
+Consequences: the new routes (`POST /register`, `/auth/capabilities`, `/auth/nonce`,
+`/oauth/token`) are **additive** — they 404 on an old server, which *is* the discovery
+fallback (§6), not a version bump. Scheme negotiation lives in `/auth/capabilities`
+plus the header discriminator, never in `X-Ops-Server-API-Version`. The one place the
+axes touch: `http-sig-v1`'s signature base **covers** `X-Ops-Server-API-Version` (the
+modern equivalent of Mixlib folding it into the canonical string), so a proxy cannot
+strip or forge the negotiated version — the scheme *protects* the version header, it is
+not *selected by* it.
+
 ### 3. Node registration via JWT bootstrap token
 
 Replace the shared validator `.pem` with a short-lived, scoped, single-use JWT.
@@ -211,6 +250,10 @@ Each phase is independently shippable and TDD'd:
 - **Chain dispatch:** a request with `X-Ops-Sign` routes to `legacyMixlib`; a
   `Signature-Input` request routes to `http-sig-v1`; an unmatched request is 401
   (JSON).
+- **Version independence:** `http-sig-v1` verifies identically across every
+  supported `X-Ops-Server-API-Version` (0–2) and does not change the negotiated
+  range; a tampered `X-Ops-Server-API-Version` fails `http-sig-v1` verification
+  because it is covered by the signature base.
 - **`http-sig-v1`:** Ed25519 round-trip verify; tampered `Content-Digest` fails;
   expired key fails; `keyid` selects the right named key; ECDSA/RSA-PSS vectors.
 - **Nonce:** replayed nonce/`jti` is rejected; distinct nonces pass; entries lapse
