@@ -21,7 +21,7 @@ jobs:
           # Report-only to start: findings land in the Security tab without
           # blocking merges. Tighten to "error" once the baseline is triaged.
           fail-on: off
-      - uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+      - uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         if: always()
         with:
           sarif_file: results.sarif
