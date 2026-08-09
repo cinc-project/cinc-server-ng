@@ -2,6 +2,9 @@
 
 **Status:** proposed (design)
 **Date:** 2026-08-02
+**Companion:** [JWT bootstrap tokens for node
+registration](2026-08-09-jwt-bootstrap-token-design.md) — the normative profile for the
+registration credential described in §3/§5 here.
 
 ## Problem
 
@@ -43,9 +46,16 @@ a short-lived JWT **bootstrap token** that replaces the shared validator key for
 node registration — with the validator path preserved behind a flag. The classic
 Mixlib verifier is untouched and remains the default.
 
-Non-goal for this doc: the client-side signer abstraction lives in the sibling
-`cinc-api` repo (a `Signer` interface behind `Config`); it is referenced here only
-where the two must agree on the wire.
+Non-goals for this doc:
+
+- The **bootstrap token profile itself** — its JOSE header and claim allowlists,
+  algorithm lockdown, audience binding, `single`/`multi` scope modes, revocation, and
+  mandatory provisioning claims are normative and live in the [companion
+  spec](2026-08-09-jwt-bootstrap-token-design.md). §3 and §5 below summarize only what
+  the rest of this design depends on.
+- The client-side signer abstraction, which lives in the sibling `cinc-api` repo (a
+  `Signer` interface behind `Config`); it is referenced here only where the two must
+  agree on the wire.
 
 ## Design
 
@@ -135,36 +145,46 @@ modern equivalent of Mixlib folding it into the canonical string), so a proxy ca
 strip or forge the negotiated version — the scheme *protects* the version header, it is
 not *selected by* it.
 
-### 3. Node registration via JWT bootstrap token
+### 3. Node registration via JWT bootstrap token — see companion spec
 
-Replace the shared validator `.pem` with a short-lived, scoped, single-use JWT.
+Replace the shared validator `.pem` with a short-lived, tightly scoped JWT presented at
+a new endpoint `POST /organizations/{org}/register`. Auth for *this call only* is
+`Authorization: Bearer <jwt>` — the token is the credential, exactly as the validator
+key is today; the request carries no Chef signing headers. The node generates its own
+Ed25519 keypair locally, sends the **public** half, and the server performs the same
+store writes the validator path does today (client record, creator ACL,
+`clients`-group wiring — `internal/api/organizations.go`, `authz_enforce.go`). No
+private key is ever generated or returned server-side. Every later request is signed by
+the node's own key under `http-sig-v1`.
 
-**New endpoint `POST /organizations/{org}/register`.** Auth for *this call only* is
-`Authorization: Bearer <jwt>` — the token is the credential, exactly as the
-validator key is today; the request carries no Chef signing headers. Flow:
+The bootstrap credential has enough security surface of its own — JOSE header
+lockdown, claim allowlisting, audience binding, use semantics, revocation — that it
+gets a dedicated normative document:
 
-1. Node generates its own keypair locally (Ed25519); the private key never leaves
-   the node.
-2. Node calls `/register` with the bearer token and its **public key** in the body.
-3. Server verifies the JWT (signature via the server's own signing key, `exp`/`nbf`,
-   `aud`, and `jti` not already spent), then performs the same store writes the
-   validator path does today — create the `clients` record with the node's public
-   key, plus the creator ACL / `clients`-group wiring
-   (`internal/api/organizations.go`, `authz_enforce.go`). It marks `jti` spent
-   (reusing the §4 nonce store).
-4. No private key is ever generated or returned server-side — the node already holds
-   its key.
-5. Every later request is signed by the node's own key under `http-sig-v1`.
+**→ [JWT bootstrap tokens for node
+registration](2026-08-09-jwt-bootstrap-token-design.md)**
 
-**Token minting:** `cinc-zero token create --org <o> --ttl 15m --node-name <n>` (and
-an authenticated `POST /organizations/{org}/registration_tokens` for automation).
-Tokens are EdDSA-signed by a server key; verification needs no shared secret.
+The parts of it this document depends on:
+
+- The token profile is **fail-closed**: an allowlisted JOSE header (`alg`, `typ`
+  only — `jwk`/`x5c`/`kid`/anything unknown is a rejection), an allowlisted claim set,
+  asymmetric `alg` only (`none` and the HMAC family are never accepted), and `iss`/`aud`
+  binding so a token minted for one server cannot be replayed at another.
+- Two scope modes: **`single`** (one named node, burned on first use, `jti` spent in the
+  §4 replay store) and **`multi`** (a bounded name pattern for a bounded window, with a
+  mint-time registry, optional use cap, per-use audit, and real revocation). `single` is
+  the default.
+- Registration **never overwrites** an existing client; provisioning intent is mandatory
+  and carried inside the signed token (§5).
+- It consumes this document's §4 replay store for `jti` spends, and the
+  `--no-auth`-hardening rule it specifies applies server-wide.
+
+The validator path is preserved behind `--allow-validator-bootstrap`.
 
 **Attestation (future rung, same endpoint):** because registration is now "present a
-verifiable credential", a cloud instance identity document or TPM attestation can be
-an alternative `Authorization` scheme at `/register`, giving a zero-secret bootstrap
-on supported platforms. Out of scope to implement now; the endpoint is shaped to
-allow it.
+verifiable credential", a cloud instance identity document or TPM attestation can be an
+alternative `Authorization` scheme at `/register`, giving a zero-secret bootstrap on
+supported platforms. Out of scope to implement now; the endpoint is shaped to allow it.
 
 ### 4. Nonce replay protection
 
@@ -174,35 +194,34 @@ nonces; the store is memory-backed by default and, under `--storage sqlite`, may
 persisted (or simply allowed to lapse on restart within the TTL). Legacy Mixlib
 requests keep timestamp-only behavior — nonces cannot be retrofitted onto them.
 
-### 5. Optional environment / run-list (or policy) claims in the token
+### 5. Mandatory environment / run-list (or policy) claims — see companion spec
 
-The bootstrap token may carry **optional** provisioning claims so a node comes up
-pre-assigned with no separate `knife` step, and — because they are inside the signed
-token — as tamper-proof operator intent rather than node-supplied plaintext.
+The bootstrap token **must** carry the node's provisioning intent, in exactly one of two
+mutually exclusive shapes mirroring Chef's own rule that a node does not carry both a
+run-list and a policy:
 
-Two mutually exclusive shapes, mirroring Chef's own rule that a node does not carry
-both a run-list and a policy:
-
-- **Classic:** `chef_environment` (string) and/or `run_list` (array of
-  `recipe[...]`/`role[...]`).
+- **Classic:** `chef_environment` (`_default` spelled explicitly, not implied) and
+  `run_list`.
 - **Policyfile:** `policy_group` and `policy_name` (both first-class here —
   `internal/api/policies.go`).
 
-A token carrying policy fields *and* `run_list` is refused at mint time. Semantics:
+The server stamps these onto the node at registration, so the first converge is already
+correct — no first-run race, no `knife node run_list set`, and no window in which a node
+self-declares its own environment. A `first_boot_run_list` claim may additionally carry a
+one-shot, first-converge-only run list (the `chef-client -o` case), returned in the `201`
+body and never persisted onto the node.
 
-- **Server-stamped.** On `/register` the server seeds the node object with the
-  token's values, so the node's first converge already has the correct environment /
-  run-list / policy — no first-run race, no `knife node run_list set`.
-- **Token wins.** If the node also supplies these locally, the signed token value is
-  authoritative; a node-supplied value is used only for fields the token omits.
-- **Validated on the way in**, JSON errors per house convention: `chef_environment`
-  must exist (auto-create only behind a flag); `run_list` entries must parse;
-  `policy_group`+`policy_name` must resolve to a real revision in that group — else
-  `412`/`409`.
-- **Initial state, not a lock.** The token sets the node's *starting* state; the node
-  object is normal afterward and may change subject to ACLs. A `constraining` mode
-  (e.g. `allowed_environments`, a `run_list` allowlist) is an opt-in claim for the
-  autoscaler case and can land after the prescriptive form.
+Making these claims mandatory rather than optional is a deliberate change from the first
+draft of this spec: once the bootstrap credential is a structured signed document, there
+is no reason to leave the most important fact about a new node outside the envelope. The
+security value is honestly modest — the higher-value work is closing server-side
+authorization gaps so a registered node cannot simply rewrite its own environment
+afterwards — but the operational value (one round trip, no partially-provisioned node) is
+not.
+
+Full rules, validation statuses, and the `multi`-token semantics are in the companion
+spec: **[JWT bootstrap tokens for node
+registration](2026-08-09-jwt-bootstrap-token-design.md)**, §7.
 
 ### 6. Capability discovery
 
@@ -236,11 +255,12 @@ Each phase is independently shippable and TDD'd:
    `legacyMixlib`; golden vectors prove identical wire output. Pure refactor.
 2. **`http-sig-v1`** — Ed25519 + `Content-Digest` + enforced `expires`/key expiry +
    `keyid` rotation in `resolveAuth`.
-3. **Nonce replay protection** (§4).
-4. **JWT registration** — `/register`, token minting, `jti` single-use; validator
-   path preserved behind `--allow-validator-bootstrap`.
-5. **Optional env/run-list/policy claims** (§5).
-6. **Capability discovery** (§6), then **bearer/OIDC** (§7).
+3. **Nonce replay protection** (§4) — also the `jti` store phase 4 depends on.
+4. **JWT registration** — `/register`, token minting, `single`-then-`multi` scope
+   modes, mandatory provisioning claims; validator path preserved behind
+   `--allow-validator-bootstrap`. Broken into its own slices in the [companion
+   spec](2026-08-09-jwt-bootstrap-token-design.md).
+5. **Capability discovery** (§6), then **bearer/OIDC** (§7).
 
 ## Testing (TDD)
 
@@ -258,19 +278,19 @@ Each phase is independently shippable and TDD'd:
   expired key fails; `keyid` selects the right named key; ECDSA/RSA-PSS vectors.
 - **Nonce:** replayed nonce/`jti` is rejected; distinct nonces pass; entries lapse
   after TTL.
-- **Registration:** valid token registers a client with the node's public key and
-  the same ACL/group wiring as the validator path; expired/spent/wrong-`aud` tokens
-  are 401; no private key is ever returned.
-- **Provisioning claims:** token `chef_environment`/`run_list` (and policy variant)
-  are stamped onto the node; token beats node-supplied values; nonexistent env /
-  unresolved policy / policy+run_list combo are rejected; a claim-less token yields
-  `_default` + empty run-list.
+- **Registration:** valid token registers a client with the node's public key and the
+  same ACL/group wiring as the validator path; expired/spent/wrong-`aud` tokens are
+  401; no private key is ever returned. The full matrix — header and claim allowlists,
+  `alg` lockdown, scope modes, revocation, provisioning claims — lives in the
+  [companion spec](2026-08-09-jwt-bootstrap-token-design.md).
 - **Capabilities:** `/auth/capabilities` unauthenticated and lists what the build
   supports.
 - Full `make test && make vet` green at every phase.
 
 ## Out of scope
 
+- The normative bootstrap-token profile — [companion
+  spec](2026-08-09-jwt-bootstrap-token-design.md).
 - The `cinc-api` client-side `Signer` interface (separate repo/PR; must agree on the
   `http-sig-v1` wire).
 - OIDC/SAML external identity federation beyond the bearer-token seam.
