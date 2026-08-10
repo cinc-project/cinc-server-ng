@@ -2,16 +2,20 @@
 
 **Status:** proposed (design)
 **Date:** 2026-08-09
-**Companion:** [Modern authentication and node registration with Chef
+**Companion:** [Modern authentication with Chef
 backwards-compat](2026-08-02-modern-auth-backwards-compat-design.md) — that spec owns
-the verifier chain, the `http-sig-v1` request-signing scheme, the replay store, and
-capability discovery. This one owns the bootstrap credential and nothing else.
+the verifier chain, the `http-sig-v1` request-signing scheme, capability discovery, and
+the two shared primitives this document consumes: the **replay store** (its §4) and the
+**key model** (its §5). This one owns the bootstrap credential and nothing else.
+
+The dependency is one-way. This document needs those two primitives; that document needs
+nothing from this one. Once they land, the two tracks are independent and may be built
+in parallel or in either order.
 
 This document is normative. **MUST**/**MUST NOT**/**SHALL**/**SHOULD** are
-requirements on the implementation, and each is a test in the registration slice
-(phase 4 of the companion spec's migration sequence). The governing rule throughout
-is **fail closed**: anything not explicitly permitted here is a rejection, including
-fields that do not exist yet.
+requirements on the implementation, and each is a test in the registration slices below.
+The governing rule throughout is **fail closed**: anything not explicitly permitted here
+is a rejection, including fields that do not exist yet.
 
 ## Problem
 
@@ -180,13 +184,11 @@ verification and **MUST NOT** dispatch on the token's own `alg` to select a
 verification routine (the classic confusion bug). Same discipline as `http-sig-v1`:
 algorithm agility is a server-side policy list, never a client assertion.
 
-**Configuration safety.** cinc-zero already refuses `--no-auth` combined with an
-explicit `--enforce-acls` (`cmd/cinc-zero/main.go`). Extend that guard: if the
-configuration otherwise looks like a real server — `--storage sqlite`, an existing
-database, a non-loopback `--addr` — then starting with `--no-auth` **MUST** be a
-startup error, overridable only by an explicit `--insecure` acknowledgement. A server
-that was durable and authenticated yesterday must not come back up wide open after a
-restart or an upgrade because a flag fell out of a unit file.
+**Configuration safety.** The `--no-auth` hardening rule this profile relies on is
+server-wide and is specified in the [companion
+spec](2026-08-02-modern-auth-backwards-compat-design.md) §8: a configuration that
+otherwise looks like a real server refuses to start with `--no-auth` absent an explicit
+`--insecure`.
 
 #### 3a. The server signing key
 
@@ -673,8 +675,13 @@ implement now; the endpoint is shaped to allow it.
 
 ## Migration
 
-This work is phase 4 of the companion spec's sequence and depends on the replay store
-(its §4). It lands as its own reviewable slices:
+This work is **not** a phase of the companion spec's sequence. It depends on that
+document's two shared primitives — the replay store (its §4) and the key model (its §5,
+which is what lets a node's Ed25519 key be stored and resolved at all) — and on nothing
+else in it. Once those land it proceeds on its own schedule, in parallel with
+`http-sig-v1` if that is convenient.
+
+It lands as its own reviewable slices:
 
 0. **Signing key handling** (§3a). Key file creation and load, mode enforcement,
    `--token-signing-key`, the ephemeral-per-process path, the durability coupling

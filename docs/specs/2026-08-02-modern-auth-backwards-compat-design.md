@@ -38,21 +38,27 @@ addressing for clients that *can* adopt something new:
 
 ## Goal
 
-Add a modern authentication and registration story that clients can opt into,
-**strictly additively**, so every existing Chef client keeps working byte-for-byte.
-Concretely: pluggable auth schemes behind one dispatch, a modern signed-request
-scheme (Ed25519, enforced key expiry, real rotation, nonce replay protection), and
-a short-lived JWT **bootstrap token** that replaces the shared validator key for
-node registration — with the validator path preserved behind a flag. The classic
-Mixlib verifier is untouched and remains the default.
+Add a modern **request authentication** story that clients can opt into, **strictly
+additively**, so every existing Chef client keeps working byte-for-byte. Concretely:
+pluggable auth schemes behind one dispatch, a modern signed-request scheme
+(`http-sig-v1`), and the two shared primitives both it and the bootstrap track need —
+a replay store (§4) and a key model that is neither RSA-pinned nor single-key, with
+expiry actually enforced (§5). The classic Mixlib verifier is untouched and remains the
+default.
+
+**Node registration is a separate track.** It is specified in the [JWT bootstrap token
+spec](2026-08-09-jwt-bootstrap-token-design.md) and appears here only as §3's pointer.
+The dependency runs one way — that document consumes this one's §4 and §5, and this one
+does not depend on it at all — so once the shared primitives land, the two tracks can be
+built in parallel and in either order.
 
 Non-goals for this doc:
 
-- The **bootstrap token profile itself** — its JOSE header and claim allowlists,
-  algorithm lockdown, audience binding, `single`/`multi` scope modes, revocation, and
-  mandatory provisioning claims are normative and live in the [companion
-  spec](2026-08-09-jwt-bootstrap-token-design.md). §3 and §5 below summarize only what
-  the rest of this design depends on.
+- **Node registration and the bootstrap token profile** — the endpoint, the JOSE header
+  and claim allowlists, algorithm lockdown, audience binding, `single`/`multi` scope
+  modes, revocation, attribution, and provisioning claims are all normative in the
+  [companion spec](2026-08-09-jwt-bootstrap-token-design.md). Nothing about them is
+  restated here; §3 is a pointer, not a summary.
 - The client-side signer abstraction, which lives in the sibling `cinc-api` repo (a
   `Signer` interface behind `Config`); it is referenced here only where the two must
   agree on the wire.
@@ -123,16 +129,13 @@ bespoke `X-Ops` dialect, so off-the-shelf tooling can speak it:
 
 - **Transport:** `Signature` + `Signature-Input` headers (not `X-Ops-Authorization-N`).
 - **Algorithm agility:** `alg` names the algorithm — **Ed25519** default, ECDSA
-  P-256 and RSA-PSS-SHA256 permitted. This lets `internal/auth/keys.go` grow an
-  Ed25519 path instead of being RSA-pinned.
-- **Key identity + rotation:** `keyid` selects a named, versioned key. This is the
-  change that makes the existing named-key collection real — `resolveAuth` learns
-  to resolve `keyid` against an actor's keys, not just top-level `public_key`.
+  P-256 and RSA-PSS-SHA256 permitted — compared against the stored key's own type,
+  never used to dispatch (§5a).
+- **Key identity + rotation:** `keyid` selects a named key (§5b).
 - **Integrity:** body covered via `Content-Digest` (RFC 9530), actually included in
   the signature base (today's `X-Ops-Content-Hash` is decorative on verify).
-- **Enforced expiry:** the `expires` covered parameter and the stored key
-  `expiration_date` are **checked** — an expired key fails verification (closing the
-  `internal/api/keys.go` gap).
+- **Enforced expiry:** the `expires` covered parameter is checked here, and the stored
+  key's `expiration_date` is checked per §5e.
 - **Replay:** a server-issued single-use `nonce` in addition to the timestamp
   (§4).
 
@@ -176,92 +179,198 @@ modern equivalent of Mixlib folding it into the canonical string), so a proxy ca
 strip or forge the negotiated version — the scheme *protects* the version header, it is
 not *selected by* it.
 
-### 3. Node registration via JWT bootstrap token — see companion spec
+### 3. Node registration — a separate track
 
-Replace the shared validator `.pem` with a short-lived, tightly scoped JWT presented at
-a new endpoint `POST /organizations/{org}/register`. Auth for *this call only* is
-`Authorization: Bearer <jwt>` — the token is the credential, exactly as the validator
-key is today; the request carries no Chef signing headers. The node generates its own
-Ed25519 keypair locally, sends the **public** half, and the server performs the same
-store writes the validator path does today (client record, creator ACL,
-`clients`-group wiring — `internal/api/organizations.go`, `authz_enforce.go`). No
-private key is ever generated or returned server-side. Every later request is signed by
-the node's own key under `http-sig-v1`.
-
-The bootstrap credential has enough security surface of its own — JOSE header
-lockdown, claim allowlisting, audience binding, use semantics, revocation — that it
-gets a dedicated normative document:
+Registration is deliberately **not** specified here. Replacing the shared validator
+`.pem` with a short-lived, scoped credential is its own problem with its own threat
+model, and it is normative in:
 
 **→ [JWT bootstrap tokens for node
 registration](2026-08-09-jwt-bootstrap-token-design.md)**
 
-The parts of it this document depends on:
+The only relationship between the two documents is that registration **consumes** this
+one's §4 replay store (to spend a token's `jti` exactly once) and §5 key model (to store
+the Ed25519 key a node registers). That dependency is one-way: nothing in this document
+requires registration to exist, and a fleet bootstrapped by validator keys can adopt
+`http-sig-v1` without it. Once §4 and §5 land, the two tracks proceed independently.
 
-- The token profile is **fail-closed**: an allowlisted JOSE header (`alg`, `typ`
-  only — `jwk`/`x5c`/`kid`/anything unknown is a rejection), an allowlisted claim set,
-  asymmetric `alg` only (`none` and the HMAC family are never accepted), and `iss`/`aud`
-  binding so a token minted for one server cannot be replayed at another.
-- Two scope modes: **`single`** (one named node, burned on first use, `jti` spent in the
-  §4 replay store) and **`multi`** (a bounded name pattern for a bounded window, with a
-  mint-time registry, optional use cap, per-use audit, and real revocation). `single` is
-  the default.
-- Registration **never overwrites** an existing client; provisioning intent is mandatory
-  and carried inside the signed token (§5).
-- Every registration is **attributable**: the minting actor rides in a mandatory
-  `minter` claim, and both modes write an audit record in the same transaction as the
-  client create.
-- The token **signing key lives outside the store**, in its own mode-enforced file, so a
-  read of the SQLite database is not a capability to mint bootstrap credentials.
-- It consumes this document's §4 replay store for `jti` spends, and the
-  `--no-auth`-hardening rule it specifies applies server-wide.
+Two notes for a reader of this document only: `/register` is a cinc-zero extension that
+no Chef client speaks, and the validator path is preserved behind
+`--allow-validator-bootstrap`, so nothing in either document changes how an existing
+node bootstraps.
 
-`/register` is a cinc-zero extension that no Chef client speaks; its consumer is the
-`cinc-api` client library, which gains a `Register` call alongside its `http-sig-v1`
-`Signer`. The differential harness allowlists the extension routes.
+### 4. The replay store
 
-The validator path is preserved behind `--allow-validator-bootstrap`.
+A TTL-bounded set of spent identifiers with atomic first-writer-wins semantics,
+answering exactly one question: *has this identifier been used before, and if so what
+happened the first time?* `http-sig-v1` spends request nonces against it; the bootstrap
+track spends token `jti`s. Legacy Mixlib requests keep timestamp-only behavior — nonces
+cannot be retrofitted onto them.
 
-**Attestation (future rung, same endpoint):** because registration is now "present a
-verifiable credential", a cloud instance identity document or TPM attestation can be an
-alternative `Authorization` scheme at `/register`, giving a zero-secret bootstrap on
-supported platforms. Out of scope to implement now; the endpoint is shaped to allow it.
+It is specified as a contract rather than a mechanism because it has two consumers that
+must not be able to interfere with each other:
 
-### 4. Nonce replay protection
+```go
+// internal/replay
 
-A TTL-bounded seen-set sized to the skew window, consulted by `http-sig-v1` (request
-nonces) and by `/register` (token `jti`). A `GET /auth/nonce` issues short-lived
-nonces; the store is memory-backed by default and, under `--storage sqlite`, may be
-persisted (or simply allowed to lapse on restart within the TTL). Legacy Mixlib
-requests keep timestamp-only behavior — nonces cannot be retrofitted onto them.
+// Record is an opaque, small payload the winner of a spend leaves behind for
+// any later caller presenting the same key. Consumers define the encoding.
+type Record []byte
 
-### 5. Mandatory environment / run-list (or policy) claims — see companion spec
+type Store interface {
+    // Spend atomically records rec under key if key is absent, and reports
+    // whether this caller won. On a loss it returns the record the winner
+    // left, so the caller can distinguish a retry of the original from a
+    // replay by someone else.
+    //
+    // Spend MUST be a compare-and-set. A read-then-write implementation is a
+    // defect, not an optimization: two concurrent presentations of the same
+    // single-use credential must not both win.
+    Spend(key string, rec Record, ttl time.Duration) (won bool, prior Record, err error)
+}
+```
 
-The bootstrap token **must** carry the node's provisioning intent, in exactly one of two
-mutually exclusive shapes mirroring Chef's own rule that a node does not carry both a
-run-list and a policy:
+Deliberately minimal: there is no `Seen`, because a caller that only wants to test
+membership is a caller about to race, and no `Delete`, because entries leave only by
+expiry.
 
-- **Classic:** `chef_environment` (`_default` spelled explicitly, not implied) and
-  `run_list`.
-- **Policyfile:** `policy_group` and `policy_name` (both first-class here —
-  `internal/api/policies.go`).
+- **Namespacing.** Keys are prefixed by consumer (`sig:` for request nonces, `jti:` for
+  bootstrap tokens) so a registration can never burn a request nonce or the reverse.
+- **Fail closed.** A store error **MUST** cause the caller to reject. This differs from
+  the server's convention of reporting store faults as `500` during actor resolution
+  (`server/auth.go`), and deliberately: the question here is "is this credential fresh",
+  and a store that cannot answer has not said yes.
+- **TTL** is set by the caller and **MUST** be at least the remaining validity of what
+  is being spent — a signature's `expires`, a token's `exp`. An entry that lapses while
+  its credential is still valid reopens replay for the difference.
+- **Durability is a consumer concern.** Memory-backed by default, persisted under
+  `--storage sqlite`. Each consumer **MUST** state what it does when the store is not
+  durable rather than assuming persistence; a restart that forgets spends reopens replay
+  for everything still inside its window. (`http-sig-v1`'s answer: a restart is
+  indistinguishable from the skew window elapsing, which is acceptable because request
+  signatures are short-lived by construction. The bootstrap track's answer is a
+  per-process signing key, in its own spec.)
 
-The server stamps these onto the node at registration, so the first converge is already
-correct — no first-run race, no `knife node run_list set`, and no window in which a node
-self-declares its own environment. A `first_boot_run_list` claim may additionally carry a
-one-shot, first-converge-only run list (the `chef-client -o` case), returned in the `201`
-body and never persisted onto the node.
+**Implementation constraints.** The bootstrap consumer touches this store once per node,
+ever. `http-sig-v1` touches it on *every authenticated request*, which makes it the one
+piece of shared mutable state on the hot read path — a fleet check-in is roughly seven
+reads to one write, and every one of those reads would now take a write here.
 
-Making these claims mandatory rather than optional is a deliberate change from the first
-draft of this spec: once the bootstrap credential is a structured signed document, there
-is no reason to leave the most important fact about a new node outside the envelope. The
-security value is honestly modest — the higher-value work is closing server-side
-authorization gaps so a registered node cannot simply rewrite its own environment
-afterwards — but the operational value (one round trip, no partially-provisioned node) is
-not.
+- The memory implementation **MUST** be sharded by key hash, not a single mutex-guarded
+  map, or the read path acquires a global serialization point at exactly the fleet sizes
+  this project already benchmarks (`cmd/fleetsim`, `cmd/loadtest`).
+- Sizing is *window × request rate*, which is one more reason `http-sig-v1` must not
+  inherit the ±900s legacy skew window.
+- Collection is lazy on access plus a periodic sweep, and **MUST NOT** hold a global
+  lock across the set.
+- Eviction of a *live* entry **MUST** be a fault (fail closed), never "not seen". A
+  silently evicting cache is a replay vulnerability wearing a performance costume.
 
-Full rules, validation statuses, and the `multi`-token semantics are in the companion
-spec: **[JWT bootstrap tokens for node
-registration](2026-08-09-jwt-bootstrap-token-design.md)**, §7.
+### 5. The key model
+
+Three changes that `http-sig-v1` needs, that the bootstrap track needs in order to
+register a node's Ed25519 key, and that neither owns.
+
+**5a. Algorithm agility.** Actor keys become a sum type rather than `*rsa.PublicKey`:
+Ed25519, ECDSA P-256, and RSA (PSS and PKCS#1 v1.5) parse and store through one path
+(`internal/auth/keys.go`, `internal/auth/cache.go`, and `parseActorRecord`/`resolveAuth`
+in `server/auth.go`, all of which are RSA-typed today and generate hardcoded 2048-bit
+keys). Ed25519 is the default for newly generated keys.
+
+The governing rule is the same one the bootstrap profile applies to JOSE `alg`: **the
+stored key's own type selects the verification algorithm.** A caller may *name* an
+algorithm, in which case the server compares it against the key and its configured
+allowlist and rejects a mismatch — but the named value **MUST NOT** dispatch to a
+verification routine. Algorithm agility is a server-side policy list, never a client
+assertion. Legacy Mixlib verification is untouched and stays RSA-only, reading the same
+records through the same resolution path.
+
+**5b. Named keys, resolved by identifier.** The keys collection served by
+`internal/api/keys.go` becomes real. It is real storage today that no verification path
+consults — `parseActorRecord` reads only the record's top-level `public_key` — so a key
+added through `POST .../keys` cannot actually sign a request.
+
+- The identifier is `<scope>/<actor>#<key-name>` — `acme/web-01#default`,
+  `users/alice#laptop`. It names both the actor and the key, so a consumer needs no
+  second identity header.
+- Resolution order mirrors today's `resolveAuth`: org clients first when the path is
+  org-scoped, then global users.
+- The top-level `public_key` stays valid and is equivalent to the key named `default`,
+  so every existing actor keeps working unchanged.
+- An actor has a bounded number of keys (`--max-keys-per-actor`, default 5). Unbounded
+  key lists amplify trial verification and quietly keep retired credentials alive.
+- Resolution **MUST NOT** be an existence oracle: an unknown actor and an unknown key
+  name fail identically.
+
+**5c. Expiry enforcement.** Broken out into §5e — it is the one change here that breaks
+on upgrade, and it needs its own accounting.
+
+**5d. Rotation and lockout.** Multi-key actors make rotation possible; this is the flow,
+which is otherwise merely implied by the existence of the keys API:
+
+- Rotation is *add, then remove*: an actor signs with its current key to add a new one,
+  switches, then deletes the old. Both are valid in between, which is what makes the
+  switch safe.
+- Adding an already-expired key is a `400`.
+- **Lockout recovery.** Once expiry is enforced, an actor whose keys have all expired
+  cannot sign the request that would add a new one. That is a consequence of the design,
+  not a bug, and it needs a documented way out: an actor with update rights on the
+  target (an org admin, or `pivotal`) adds a key on its behalf through the existing keys
+  API, and the server **SHOULD** surface expiring-soon keys in its status output so the
+  cliff is visible before it is reached.
+
+### 5e. Enforcing `expiration_date` — a breaking change, and a gap that must be closed
+
+This is called out separately because both halves of it are true and neither should be
+allowed to hide the other.
+
+**It is a real security gap, and closing it is not optional.** `expiration_date` is
+accepted from the request body, stored, and returned by the key API
+(`internal/api/keys.go`) — and no verification path has ever read it. The practical
+consequences are worse than "a field is ignored":
+
+- **Key expiry does not work.** An operator who sets an expiry on a key, or who reads
+  one back from the API, is being told a credential is time-bounded when it is not. The
+  API reports `expired` and `expiration_date` as facts; they are decoration.
+- **It is a silent failure of a control people rely on.** Expiry is how a credential
+  issued to a contractor, a CI job, or a decommissioned host is supposed to stop
+  working without anyone having to remember to delete it. Here, nothing stops working,
+  and nothing says so.
+- **Everything else in this design leans on it.** `http-sig-v1` advertises enforced
+  expiry (§2) and the whole rotation story (§5d) assumes an old key eventually stops
+  being usable. Without enforcement, rotation is addition with extra steps.
+
+A field that claims to bound a credential's lifetime and does not is a vulnerability,
+not a rough edge. It gets fixed.
+
+**And it will break existing deployments on upgrade.** The field is written verbatim
+from the request body with no validation and defaults to the string `"infinity"`. Any
+store baked before this change — including `dev/cinc-dev.db` and any user's durable
+server — may hold past dates, or values that are not dates at all. The moment
+enforcement lands, those actors stop authenticating, on a restart nobody would connect
+to a security fix. An upgrade that silently locks a fleet out of its own server is how a
+correct change acquires a bad reputation.
+
+So the break is **managed, not avoided**:
+
+- **Validate on write, going forward.** `expiration_date` **MUST** be `"infinity"` or an
+  RFC 3339 timestamp; anything else is a `400` at the keys API. After this, enforcement
+  only ever reads values the server itself accepted.
+- **Migrate what already exists**, through the schema migration engine
+  ([spec](2026-06-29-schema-migration-engine-design.md)): parseable values are rewritten
+  canonically, unparseable ones become `"infinity"` — which preserves today's *effective*
+  behavior exactly, since the field is currently ignored — and the migration **MUST**
+  report how many keys it touched and how many were already expired. That count is the
+  operator's warning that an upgrade is about to change who can authenticate.
+- **Fail closed at verification.** After migration an unparseable value cannot
+  legitimately exist, so verification treats one as expired. There is no lenient parse
+  path; the leniency is spent once, in the migration, where it is counted and visible.
+- **Give operators one lever.** `--ignore-key-expiry` restores the old behavior for a
+  single upgrade cycle, logs loudly at startup, and is documented as temporary. An
+  operator surprised by a fleet-wide authentication failure needs an answer that is not
+  "downgrade the server".
+- **Announce it.** This is a `CHANGELOG`-worthy behavior change and belongs in release
+  notes, not only in a spec.
 
 ### 6. Capability discovery
 
@@ -319,23 +428,52 @@ Hashing the password store is not otherwise in scope for this document (see Out 
 scope) — but it becomes in scope for whichever change implements §7, and that change
 owns it.
 
+### 8. Server configuration safety
+
+A server-wide rule, specified here rather than in the bootstrap spec because it governs
+the server's configuration rather than any one credential.
+
+cinc-zero already refuses `--no-auth` combined with an explicit `--enforce-acls`
+(`cmd/cinc-zero/main.go`). Extend that guard: if the configuration otherwise looks like
+a real server — `--storage sqlite`, an existing database — then starting with
+`--no-auth` **MUST** be a startup error, overridable only by an explicit `--insecure`
+acknowledgement. A server that was durable and authenticated yesterday must not come
+back up wide open after a restart or an upgrade because a flag fell out of a unit file.
+
+The signal is deliberately **durability, not the listen address**. A non-loopback
+`--addr` is the normal case for the container and CI usage this project exists to
+serve — binding `0.0.0.0` with memory storage is the chef-zero experience working as
+intended — and a guard that fires there would train everyone to paste `--insecure` into
+a Dockerfile, which is the reflex the guard exists to prevent. A non-loopback bind
+**SHOULD** print a loud startup banner instead.
+
+Under `--no-auth` the modern schemes are not "relaxed"; their code paths are skipped
+entirely, so no partially-authenticating branch exists to be reached by accident.
+
 ## Migration sequence
 
-Each phase is independently shippable and TDD'd:
+Each phase is independently shippable and TDD'd. Phases 1–3 are the **shared
+primitives**: they are what the bootstrap track waits on, and after them the two tracks
+have no dependency on each other and may proceed in parallel or in either order.
 
 1. **Verifier-chain refactor, no behavior change.** Wrap today's verify path as
    `legacyMixlib`; golden vectors prove identical wire output. Pure refactor.
-2. **`http-sig-v1`** — Ed25519 + `Content-Digest` + enforced `expires`/key expiry +
-   `keyid` rotation in `resolveAuth`.
-3. **Nonce replay protection** (§4) — also the `jti` store phase 4 depends on.
-4. **JWT registration** — `/register`, token minting, `single`-then-`multi` scope
-   modes, mandatory provisioning claims; validator path preserved behind
-   `--allow-validator-bootstrap`. Broken into its own slices in the [companion
-   spec](2026-08-09-jwt-bootstrap-token-design.md).
+2. **Key model** (§5) — de-RSA the parse/store/cache/resolve path and add Ed25519
+   (§5a); `keyid` resolution and named keys (§5b); rotation and lockout recovery (§5d);
+   then expiry enforcement with its validation, migration, and grace flag (§5e), which
+   is sequenced last within this phase because it is the only part that changes who can
+   authenticate.
+3. **The replay store** (§4) — interface, sharded memory implementation, SQLite
+   backing, GC. Independent of phase 2 and may land beside it.
+4. **`http-sig-v1`** — the wire scheme itself, on top of phases 2 and 3.
 5. **Capability discovery** (§6), then **bearer/OIDC** (§7) — gated on hashed password
    storage landing first or in the same change (§7). That gate is a hard ordering, not
    a preference: shipping §7 over a plaintext password store would make a store read an
    any-user token-minting capability.
+
+**Node registration** is not a phase of this sequence. It depends on phases 2 and 3 and
+is otherwise independent; its own slices are in the [companion
+spec](2026-08-09-jwt-bootstrap-token-design.md).
 
 ## Testing (TDD)
 
@@ -354,21 +492,39 @@ Each phase is independently shippable and TDD'd:
   because it is covered by the signature base.
 - **`http-sig-v1`:** Ed25519 round-trip verify; tampered `Content-Digest` fails;
   expired key fails; `keyid` selects the right named key; ECDSA/RSA-PSS vectors.
-- **Nonce:** replayed nonce/`jti` is rejected; distinct nonces pass; entries lapse
-  after TTL.
-- **Registration:** valid token registers a client with the node's public key and the
-  same ACL/group wiring as the validator path; expired/spent/wrong-`aud` tokens are
-  401; no private key is ever returned. The full matrix — header and claim allowlists,
-  `alg` lockdown, scope modes, revocation, provisioning claims — lives in the
-  [companion spec](2026-08-09-jwt-bootstrap-token-design.md).
+- **Replay store (§4):** `Spend` is atomic — N concurrent spends of one key yield
+  exactly one winner and every loser receives the winner's record; entries lapse at TTL
+  and not before; `sig:` and `jti:` keys with the same suffix are distinct; an injected
+  store error makes the caller reject rather than admit; eviction of a live entry is a
+  fault, not "not seen"; concurrent spends of distinct keys do not serialize (a
+  contention benchmark, so a regression to one mutex is visible).
+- **Key model (§5):** Ed25519/ECDSA/RSA all round-trip parse→store→cache→resolve; a
+  named algorithm disagreeing with the stored key's type is rejected and never selects
+  the routine (assert with an Ed25519 key claiming RSA); `keyid` selects the right named
+  key; `default` and the top-level `public_key` are equivalent; an actor with only a
+  top-level key is untouched; unknown actor and unknown key name fail identically;
+  `--max-keys-per-actor` is enforced; add-then-remove rotation keeps the actor
+  authenticated throughout.
+- **Key expiry (§5e)** — the breaking change, tested as one: an expired key fails
+  verification; adding an expired key is `400`; a non-RFC-3339, non-`"infinity"` value
+  is `400` on write; a store seeded with past dates, `"infinity"`, and garbage migrates
+  with garbage becoming `"infinity"`; **every actor that authenticated before the
+  migration still authenticates after it** unless its key was genuinely expired; the
+  migration reports the counts it touched and expired; `--ignore-key-expiry` restores
+  the old behavior and logs at startup.
 - **Capabilities:** `/auth/capabilities` unauthenticated and lists what the build
   supports.
 - Full `make test && make vet` green at every phase.
 
+Registration is tested in the [companion
+spec](2026-08-09-jwt-bootstrap-token-design.md)'s own matrix, not here.
+
 ## Out of scope
 
-- The normative bootstrap-token profile — [companion
-  spec](2026-08-09-jwt-bootstrap-token-design.md).
+- **Node registration in its entirety** — the `/register` endpoint, the bootstrap token
+  profile, provisioning claims, attribution, and the token signing key all live in the
+  [companion spec](2026-08-09-jwt-bootstrap-token-design.md). This document supplies the
+  two primitives that spec consumes (§4, §5) and says nothing else about it.
 - The `cinc-api` client-side `Signer` interface and its `Register` call (separate
   repo/PR; must agree on the `http-sig-v1` wire and the companion spec's §5).
 - OIDC/SAML external identity federation beyond the bearer-token seam.
