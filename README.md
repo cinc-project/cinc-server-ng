@@ -1,17 +1,20 @@
 # cinc-server-ng
 
-A lightweight, drop-in alternative to
-[Chef Infra Server](https://docs.chef.io/server/), implemented in Go. It speaks
-the real Chef Infra Server API and authenticates unmodified `chef-client` /
-`knife` / `cinc` clients using genuine
+A fast, drop-in replacement for **both**
+[Chef Infra Server](https://docs.chef.io/server/) and
+[chef-zero](https://github.com/chef/chef-zero), implemented in Go: one binary
+that covers the throwaway local test server *and* full-scale production. It
+speaks the real Chef Infra Server API and authenticates unmodified `chef-client`
+/ `knife` / `cinc` clients using genuine
 [Mixlib::Authentication](https://github.com/chef/mixlib-authentication) signed
-requests. Run it fully **in memory** for instant, disposable test servers, or
-back it with **SQLite** for durable state that survives restarts. The same
-server scales from a throwaway CI fixture to lightweight production
-infrastructure. It ships as a single static binary, with no Ruby runtime and no
-external database to operate. Packaged as a minimal container image, it drops
-cleanly into modern orchestration such as Kubernetes (a persistent volume for the
-SQLite database is all the state it needs).
+requests. Run it fully **in memory** for instant, disposable test servers (the
+job chef-zero does, without the Ruby), or back it with **SQLite** for durable
+state that survives restarts and serves a production fleet. The same server
+spans a CI fixture and the fleet it ships to, with no change of software. It
+is a single static binary, with no Ruby runtime and no external database to
+operate. Packaged as a minimal container image, it drops cleanly into modern
+orchestration such as Kubernetes (a persistent volume for the SQLite database is
+all the state it needs).
 
 ## Why cinc-server-ng
 
@@ -23,6 +26,22 @@ is verified byte-for-byte against the real gem, so unmodified `chef-client`,
 `knife`, and `cinc` clients just work. **Policyfiles and policy groups are
 first-class**, and WebUI-key impersonation lets a console like cinc-console sign
 on a user's behalf.
+
+**One server for local testing and production.** chef-zero, the in-memory Ruby
+server behind `chef-client --local-mode`, `knife -z`, and Test Kitchen's
+`chef_zero` provisioner, is deliberately a test-only tool, and a real Chef Infra
+Server is a multi-service stack you would never stand up in a unit test. This is
+one binary for both. It covers chef-zero's disposable, start-it-and-throw-it-away
+job (in-memory backend, ~100 ms boot, embeddable directly in Go tests) and then
+keeps going: it verifies Mixlib signatures rather than trusting the caller,
+enforces ACLs so `403`-dependent behavior is exercised instead of assumed, treats
+Policyfiles as first-class, persists to SQLite when the state must outlive the
+process, and exposes metrics for running it under real fleet load. Measured
+against chef-zero 15.1.11 it is ~28-39x faster per request and ~70-220x at
+concurrency 10 ([benchmarks](docs/benchmarks/v0.4.0.md)). The practical payoff:
+the server you test against and the server your fleet checks in to are the same
+software, so "passes against chef-zero, breaks against the real server" stops
+being a category of bug.
 
 **Fast under fleet load.** Go handles requests concurrently across all cores,
 with none of the global-lock contention that single-threaded Ruby servers hit.
@@ -59,6 +78,8 @@ adminID  := srv.AdminName()           // "pivotal"
 ```
 
 For tests that don't want to sign requests, set `Options{DisableAuth: true}`.
+This is the chef-zero-in-your-test-suite pattern with no Ruby, no gems, and no
+subprocess: the server runs inside your test binary and disappears with it.
 
 As a Go library the zero value is permissive: ACLs and group membership are
 stored but not enforced, so every authenticated actor is permitted and test
@@ -108,9 +129,10 @@ synthesized manifest.
 
 ## Persistence and storage
 
-By default cinc-server-ng keeps all state in memory: the ephemeral "zero" experience
-that needs no disk and resets on exit. To persist state across restarts, point it
-at a SQLite database:
+By default cinc-server-ng keeps all state in memory: the ephemeral chef-zero
+experience that needs no disk and resets on exit. To persist state across
+restarts, and to run the same binary for a production fleet, point it at a
+SQLite database:
 
 ```sh
 ./cinc-server-ng --storage sqlite --db ./cinc.db
@@ -128,7 +150,7 @@ transactions (group commit), amortizing SQLite's per-commit cost. Under
 concurrent fleet load this is worth roughly 2.5x write throughput and about an
 order of magnitude in tail latency (p99 5.06ms → 488µs on a 16-writer
 workload). It costs a few microseconds on a write that finds no batch to join,
-so a lone serialized writer — a CI fixture doing one thing at a time — can turn
+so a lone serialized writer (a CI fixture doing one thing at a time) can turn
 it off with `--sqlite-group-commit=false`.
 
 The storage layer is pluggable behind a small `store.Backend` interface
@@ -175,9 +197,9 @@ is keeping up with a fleet:
 
 | Metric | Why it matters |
 | --- | --- |
-| `cinc_server_ng_http_requests_total{outcome}` | Request rate split by `2xx`/`3xx`/`4xx`/`5xx`, with `401` broken out — rejected credentials mean something different from bad requests. |
+| `cinc_server_ng_http_requests_total{outcome}` | Request rate split by `2xx`/`3xx`/`4xx`/`5xx`, with `401` broken out, because rejected credentials mean something different from bad requests. |
 | `cinc_server_ng_http_request_duration_seconds` | Latency as a histogram. A mean hides the stalls; the buckets do not. |
-| `cinc_server_ng_store_reads_total` / `_writes_total` / `_deletes_total` | Read amplification is what limits throughput on a durable backend — the check-in path costs several reads per write, so watch the ratio, not just the totals. |
+| `cinc_server_ng_store_reads_total` / `_writes_total` / `_deletes_total` | Read amplification is what limits throughput on a durable backend: the check-in path costs several reads per write, so watch the ratio, not just the totals. |
 | `cinc_server_ng_store_scans_total` | Collection scans. A rising rate means work that grows with the size of your data. |
 | `cinc_server_ng_search_queries_total{resolution}` | `indexed` vs `scanned`. A query the planner cannot handle silently falls back to scanning the whole collection; this is how you find out. |
 | `cinc_server_ng_search_indexed_documents` | Documents held in the inverted search indexes. |
@@ -221,8 +243,8 @@ answering a different question.
 correct. Fast, broad, and unable to tell you that idea is wrong.
 
 **Conformance** (`make conformance`) drives the real `knife` CLI against an
-in-process server, so a genuine signed-request lifecycle has to work end to end
-— reads, writes, search, policyfiles, authorization, and the cookbook
+in-process server, so a genuine signed-request lifecycle has to work end to end:
+reads, writes, search, policyfiles, authorization, and the cookbook
 sandbox/upload flow. It runs with ACL enforcement on, matching what the binary
 ships with; testing the permissive configuration would leave every
 authorization path unexercised by a real client. CI sets
@@ -232,14 +254,14 @@ success is worse than no job at all.
 
 **Differential** (`make differential`) issues the same requests to cinc-server-ng and
 to a real Chef Infra Server and diffs the responses. This is the only suite that
-can find a response we have confidently got wrong, because clients are lenient —
+can find a response we have confidently got wrong, because clients are lenient:
 `knife` will accept a missing field, an extra field, or the wrong type, so "the
 client did not error" says little about fidelity. It needs a full Chef Infra
 Server, so it runs on demand and weekly rather than per-PR (see
 `.github/workflows/differential.yml`).
 
-Responses cannot match byte for byte — different hosts, different generated
-identifiers, different keys — so they are normalized first. Those rules are kept
+Responses cannot match byte for byte (different hosts, different generated
+identifiers, different keys), so they are normalized first. Those rules are kept
 deliberately narrow, in `differential/normalize.go`: every rule erases a
 difference, so an over-broad one hides the bugs the suite exists to find. A
 value is only replaced when it is unequal *by construction*.
@@ -247,7 +269,7 @@ value is only replaced when it is unequal *by construction*.
 Anything left over is either a bug or an accepted deviation recorded in
 `differential/known.go` with a reason. **That list, not a percentage, is the
 compatibility statement.** "100% compatible" is not a claim anyone can check;
-"here are the ways we differ, and why each is acceptable" is — and an
+"here are the ways we differ, and why each is acceptable" is, and an
 unexplained difference fails the run, so the list only grows deliberately.
 
 ## Development
