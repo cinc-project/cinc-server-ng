@@ -535,3 +535,10 @@ spec](2026-08-09-jwt-bootstrap-token-design.md)'s own matrix, not here.
   prerequisite for the §7 bearer scheme, which turns the password check into a
   token-minting authority. Whichever change implements §7 owns it (§7).
 - The webui impersonation key — deferred to its own spec, risk named in §1.
+- **Local CLI tooling.** Everything specified here is an HTTP API or a server startup
+  flag. `cinc-zero` may later grow subcommands — for registration tokens, user creation,
+  key management — and when it does they **SHOULD** be thin authenticated clients of
+  these APIs rather than a second implementation against the store, which under the
+  default memory backend could not reach a running server's state at all. Creating users
+  and managing keys already have APIs (`POST /users`, the keys collection in §5b); no
+  new actor-creation mechanism is introduced by this design.
