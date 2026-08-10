@@ -78,10 +78,46 @@ key is today; the request carries no Chef signing headers.
    plus the creator ACL / `clients`-group wiring (`internal/api/organizations.go`,
    `authz_enforce.go`) — stamps the node per §7, and records the use: a `single` token
    has its `jti` atomically spent in the companion spec's §4 replay store; a `multi`
-   token has its use counted and audited against its registry entry (§6).
+   token has its use counted against its registry entry (§6). Either way, an audit
+   record naming the minting actor is written in the same transaction as the create
+   (§6c).
 4. No private key is ever generated or returned server-side — the node already holds
    its key.
 5. Every later request is signed by the node's own key under `http-sig-v1`.
+
+#### 1a. Who speaks this endpoint
+
+`/register` is a **cinc-zero extension**, not part of the Chef Infra Server API.
+`chef-client`, `knife`, and `cinc` will never call it: they know one bootstrap, and it
+is the validator key. Nothing in this document changes that, which is why the validator
+path is preserved (§ Migration) rather than replaced.
+
+The consumer is the **`cinc-api` client library** (the sibling Go repo that already owns
+the client-side `Signer` for `http-sig-v1`, companion spec §2). It gains a `Register`
+call that performs the whole flow — generate an Ed25519 keypair, `POST /register` with
+the public half and the bearer token, persist the private key as the node's
+`client.pem`, and hand the caller the `201` body including any `first_boot_run_list`.
+Bootstrap wrappers embed `cinc-api`; the wire contract in §5 is the normative
+description they implement against.
+
+Two consequences of being an extension:
+
+- **Differential testing.** A real Chef Infra Server `404`s `/register`,
+  `/registration_tokens`, and `/registration_log`, so the differential harness
+  (`differential/`, `-tags differential`) **MUST** carry an explicit allowlist of
+  cinc-zero extension routes that are exempt from response comparison. Adding a route
+  to that allowlist is a deliberate act, so the default remains "every route must match
+  a real server."
+- **Org creation is unchanged.** `POST /organizations` continues to create the
+  `<org>-validator` client and return its `private_key` in the `201`
+  (`internal/api/organizations.go`) whatever `--allow-validator-bootstrap` is set to.
+  That flag governs whether the validator credential is **accepted at bootstrap**, not
+  whether the organization API tells the truth about its own shape — `knife` and
+  anything else parsing that response keep working, and the response stays
+  differential-testable against a real server. An operator who has disabled validator
+  bootstrap holds a validator key that no longer authenticates; that is the intended
+  reading, and `--allow-validator-bootstrap=false` **SHOULD** say so in the startup
+  banner.
 
 ### 2. Threat model
 
@@ -100,6 +136,8 @@ What the token defends against, in the order the mitigations are specified:
 | One token used to create arbitrary clients or call arbitrary API | Scope is one endpoint, one org, and one name (or bounded pattern) (§6) |
 | Long-lived credential smeared across a fleet (today's validator) | Short TTL, per-node keypair, revocable registry for `multi` (§6, §8) |
 | Provisioning intent forged by the node | Intent is inside the signed token and mandatory (§7) |
+| A rogue enrollment is indistinguishable from a legitimate one | Mandatory `minter` claim plus a per-registration audit record, written in both modes in the same transaction as the client create (§4, §6c) |
+| The server's token signing key is compromised | Key lives outside the store in its own mode-checked file, so a store read is not a minting capability; rotation invalidates every outstanding token at once; a forged `multi` token additionally fails for want of a registry entry (§3a, §6b, §8) |
 
 ### 3. Token format — locked-down JOSE header
 
@@ -150,6 +188,64 @@ startup error, overridable only by an explicit `--insecure` acknowledgement. A s
 that was durable and authenticated yesterday must not come back up wide open after a
 restart or an upgrade because a flag fell out of a unit file.
 
+#### 3a. The server signing key
+
+The key that signs bootstrap tokens is the highest-value secret this design
+introduces, and it is a **new** one: today's validator key is asymmetric in the
+server's favor — only its public half is ever persisted server-side
+(`internal/api/organizations.go`), the private half being handed to the operator once
+at org creation. A token signing key inverts that, so its handling is normative.
+
+**Storage.** The signing key **MUST NOT** be written to the `store.Backend`. A read of
+the SQLite file is already serious, but it must not also be a capability to mint
+bootstrap tokens for every org on the server. Instead:
+
+- The key lives in its own file, default `<db>.token-key` alongside `--db`, overridable
+  with `--token-signing-key <path>`.
+- It is an Ed25519 private key in PKCS#8 PEM, generated on first use.
+- It **MUST** be created with mode `0600`. On startup the server **MUST** refuse to
+  load a key file that is group- or world-readable, and **MUST** refuse to create one
+  in a world-writable directory. A permissions failure is a startup error, not a
+  warning — a key this powerful silently readable by every local user is the failure
+  mode worth being loud about.
+- Under memory storage with no `--token-signing-key`, no file is written and the key is
+  **ephemeral per process**, per §6a.
+
+**Durability is coupled to the replay store.** A persisted signing key **MUST NOT** be
+used with a non-durable replay store. Persisting the key while forgetting which `jti`s
+were spent would let every unexpired token replay across a restart — precisely the hole
+§6a's per-process key exists to close. Configuring `--token-signing-key` without
+`--storage sqlite` is therefore a startup error.
+
+**Rotation.** The server holds an ordered active key set — current plus previous — and
+verification is trial verification against it (§3). `cinc-zero token rotate-key`
+promotes a fresh key to current and demotes the incumbent to previous; a second
+rotation drops the old previous. Because the `multi` TTL ceiling is 24h, an operator
+retiring a key **SHOULD** leave it in the previous slot for at least that long before
+rotating again, or accept that outstanding tokens die — which for `single`, at a
+15-minute TTL, is a handful of retried bootstraps.
+
+**Blast radius, stated plainly.** Whoever holds this key can mint any token this
+profile permits, for any org, indefinitely. The mitigations are partial and asymmetric,
+and it is worth being explicit about which:
+
+- `multi` **is** backstopped. A forged `multi` token is rejected for want of a
+  mint-time registry entry (§6b), even with a perfect signature — the same check that
+  makes revocation possible. Signing-key compromise alone does not buy pattern-scoped
+  enrollment.
+- `single` **is not**, by construction. It is stateless at mint precisely so a
+  thousand-node wave costs no writes, which means a forged `single` token is
+  indistinguishable from a legitimate one. Signing-key compromise is therefore
+  unlimited, silent, single-node-at-a-time enrollment for as long as it goes unnoticed
+  — bounded in practice only by the `minter` claim and audit trail (§6c) looking wrong
+  to somebody reading it.
+- The blunt lever is rotation, which invalidates every outstanding token at once (§8).
+
+**HA and rolling upgrades.** Two servers that share an `iss`/`aud` identity must share
+the key file, distributed out of band; this is the deployment §9's `ver` claim exists
+for. Neither server may generate its own — a node bootstrapping against whichever
+backend a VIP picked would otherwise fail roughly half the time.
+
 ### 4. Claim set
 
 The claim set is likewise an allowlist: **any claim not in this table MUST cause
@@ -166,6 +262,7 @@ rejection**, and every claim marked required **MUST** be present.
 | `max_uses` | MAY | `use: "multi"` only: positive integer cap on successful registrations (§6). |
 | `org` | MUST | The organization named in the request path. |
 | `jti` | MUST | ≥128 bits of CSPRNG entropy, unique. Spent on use for `single`; the registry/revocation handle for `multi` (§6, §8). |
+| `minter` | MUST | The authenticated actor that minted this token, as the server named it at mint time (§10). Attribution only: it is never consulted to select a verification key, to widen scope, or to authorize anything (§6c). |
 | `iat` | MUST | Issued-at. |
 | `nbf` | MUST | Not-before. |
 | `exp` | MUST | `exp - iat` **MUST NOT** exceed the server's maximum TTL for the token's `use` mode (§6). |
@@ -187,8 +284,22 @@ is lost if the leeway swallows it.
 
 ### 5. Verification algorithm
 
-On `POST /organizations/{org}/register`, in this order, any failure being a `401` with
-the house JSON error body and no distinguishing detail in the message:
+On `POST /organizations/{org}/register`, in exactly this order. The order is normative
+rather than expository: an authorization check placed after a check that touches org
+data leaks that data to a caller who was never entitled to ask.
+
+Failures fall into three tiers, and the tier boundaries are the point of the ordering:
+
+- **Steps 1–5 — credential validity.** Every failure is a `401` with the house JSON
+  error body and *no* distinguishing detail. A caller cannot tell a bad signature from
+  an illegal header from an unknown claim from an expired token.
+- **Steps 6–7 — scope and standing.** A name outside the token's scope is `403`, which
+  leaks nothing: the holder can read their own token's `sub`/`name_pattern`. A `multi`
+  token that is unknown or revoked is `401`.
+- **Steps 8–10 — the registration itself.** These touch org data and use specific
+  statuses (`409`, `412`, `429`), because a caller who has proven they hold a valid,
+  unrevoked, in-scope token is entitled to know why their own registration failed. A
+  lost single-use race remains `401`.
 
 1. Reject unless the request bears exactly one `Authorization: Bearer` credential.
 2. Parse the JOSE header; reject on any parameter outside §3's table; reject unless
@@ -202,22 +313,32 @@ the house JSON error body and no distinguishing detail in the message:
    bounded leeway, and `exp - iat` ≤ the max TTL for this `use` mode.
 6. Check the requested client name against the token's scope: for `single`, it **MUST**
    equal `sub`; for `multi`, it **MUST** match `name_pattern`. A mismatch is `403`.
-7. Validate the provisioning claims (§7) — a bad environment/run-list/policy is
+7. **Standing (`multi` only).** Look up the registry entry for `jti`; reject with `401`
+   if it is absent or revoked (§6b). This is a read-only lookup and **MUST** precede
+   every step below: revocation is an authorization decision, and a revoked credential
+   is not entitled to learn which environments exist or which policy revisions resolve.
+   `single` tokens have no registry and skip this step — their equivalent standing
+   check is the `jti` spend at step 9, which cannot run earlier because it is a write.
+8. Validate the provisioning claims (§7) — a bad environment/run-list/policy is
    `412`/`409`, not `401`.
-8. Record the use, atomically (§6):
-   - `single` — compare-and-set spend of `jti` in the replay store. Lost race ⇒ `401`.
-   - `multi` — look up the registry entry for `jti`; reject if absent or revoked
-     (`401`); increment the use counter under the same transaction as the client
-     create, refusing if it would exceed `max_uses` (`429`); append an audit record.
-9. Create the client, ACL, and group wiring; stamp the node (§7); return `201`. The
-   create **MUST** fail with `409` if a client of that name already exists — no
-   bootstrap token, of either mode, may overwrite the key of an existing identity.
+9. Record the use, atomically (§6):
+   - `single` — compare-and-set spend of `jti` in the replay store. A lost race ⇒
+     `401`, except for the byte-identical retry of §6a, which replays the recorded
+     `201` rather than creating anything.
+   - `multi` — increment the use counter under the same transaction as the client
+     create, refusing with `429` if it would exceed `max_uses`.
+10. Create the client, ACL, and group wiring; stamp the node (§7), and append the
+    registration audit record (§6c) **in the same transaction as the create**; return
+    `201`. The create **MUST** fail with `409` if a client of that name already exists
+    — no bootstrap token, of either mode, may overwrite the key of an existing
+    identity.
 
-Steps 1–6 **MUST NOT** consult the store, so an unauthenticated caller cannot use
-`/register` as an oracle for which orgs or nodes exist. Provisioning validation (step
-7) and the registry lookup (step 8) do read the store, but only after the signature
-and every scope check have passed, so their distinguishable statuses are reachable
-exclusively by a legitimate token holder.
+Steps 1–6 **MUST NOT** consult the store at all, so an unauthenticated caller cannot
+use `/register` as an oracle for which orgs or nodes exist. Step 7 reads only the token
+registry, keyed by a `jti` taken from an already signature-verified token, and reveals
+nothing about org contents. Only steps 8–10 read or write org data, and only for a
+caller who holds a valid, in-scope, unrevoked token — so every distinguishable status
+in this endpoint is reachable exclusively by a legitimate token holder.
 
 **Transport.** The token is a bearer credential: it **MUST** be sent over TLS. When
 the server is listening on a non-loopback address without TLS it **SHOULD** refuse to
@@ -273,8 +394,9 @@ Two consequences worth stating outright:
   survive a restart, which would reopen replay for the remainder of a token's TTL.
   Therefore, when the replay store is not durable, the server **MUST** derive a fresh
   token signing key per process: a restart invalidates every in-flight token instead of
-  forgetting which ones were spent. Under `--storage sqlite` the signing key and the
-  spend set are both persisted.
+  forgetting which ones were spent. Under `--storage sqlite` the spend set is persisted
+  and the signing key lives in its own mode-checked file beside the database (§3a) —
+  never in the store itself.
 
 #### 6b. `use: "multi"` — a bounded name pattern, for a bounded window
 
@@ -303,10 +425,11 @@ until it expires — so it carries compensating controls that `single` does not 
 - **Optional use cap.** `max_uses`, when present, is enforced under the same
   transaction as the client create; the request that would exceed it gets `429`. An
   autoscaling group with a known maximum size should set it.
-- **Per-use audit.** Every successful registration appends `(jti, client name, public
-  key fingerprint, timestamp)` to the token's registry entry, so "which nodes did this
-  credential enroll" is answerable — the question the validator key cannot answer at
-  all.
+- **Per-use audit, indexed by token.** Every successful registration writes the audit
+  record of §6c, and for `multi` the use is *additionally* reflected on the registry
+  entry (use count, and the entry as the lookup key for its registrations), so "which
+  nodes did *this credential* enroll" is answerable directly from the thing an operator
+  is deciding whether to revoke.
 - **Longer but still bounded TTL.** Default 1h, ceiling 24h
   (`--max-multi-token-ttl`). The ceiling is a hard clamp at mint; there is no
   never-expires option, because that is the validator key with extra steps.
@@ -316,6 +439,55 @@ until it expires — so it carries compensating controls that `single` does not 
 `multi` is not the default and the CLI **MUST NOT** produce one implicitly: `use:
 "multi"` requires `--use multi` (or the equivalent field on the mint endpoint), and
 absence of `use` is a rejection, never a silent default (§4).
+
+#### 6c. Attribution and audit (both modes)
+
+The Problem statement charges the validator key with being **unattributable** — every
+registration looks the same, so a rogue enrollment is indistinguishable from a
+legitimate one. Short TTLs and per-node scope do not fix that by themselves: they
+narrow what a stolen credential can do, not who authorized the credential. Attribution
+is its own requirement and applies to **both** modes.
+
+Two mechanisms, one at mint and one at use:
+
+- **`minter` is a mandatory claim (§4).** The authenticated actor that minted the token
+  is named inside the signed envelope, so it travels with the credential and cannot be
+  altered without invalidating it. It is attribution only: the verifier **MUST NOT**
+  consult it to select a key, widen scope, or authorize anything. Because §4 is a
+  closed allowlist, a claim like this cannot be added later without a `ver` bump — it
+  is specified now for that reason as much as any other.
+- **A registration audit record is written on every successful registration**, in
+  either mode, **in the same transaction as the client create** (§5 step 10). A crash
+  between the two must not be able to produce an enrolled node with no record of who
+  authorized it.
+
+The record is appended to the org's `registration_log` collection and carries:
+
+| Field | Notes |
+|---|---|
+| `client_name` | The identity created. |
+| `public_key_fingerprint` | SHA-256 of the registered public key — the same value the `single` retry rule compares (§6a). |
+| `jti` | Links the enrollment to a specific minted credential. |
+| `minter` | From the token claim: who authorized this class of enrollment. |
+| `use` | `single` or `multi`. |
+| `provisioning` | The environment/run-list or policy stamped on the node (§7). |
+| `timestamp` | Server clock at the create. |
+
+`cinc-zero token audit --org <o>` reads it, as does an authenticated `GET
+/organizations/{org}/registration_log` requiring the same authority as minting (§10).
+Retention is bounded — `--registration-log-retention`, default 30 days, garbage
+collected alongside expired registry entries (§8) — so the log does not grow without
+limit on a long-lived server.
+
+This preserves §6a's stateless-at-mint property exactly: the write happens at
+registration, not at mint, so a thousand-node provisioning wave still costs zero writes
+to issue and exactly one extra append per node to enroll. What it buys is the question
+the validator key cannot answer at all — *who authorized the credential that enrolled
+this machine, and with what key* — for the default mode as well as the weaker one. It
+is also the only thing standing between a compromised signing key and completely silent
+enrollment (§3a): a forged `single` token must still name *some* `minter`, and a
+`minter` that never minted, or a burst of enrollments attributed to a dormant operator,
+is the anomaly that surfaces it.
 
 ### 7. Mandatory provisioning claims
 
@@ -394,9 +566,11 @@ burned on first use. The window in which a revocation list would have anything t
 is bounded by `exp` and usually closed by the node's own successful registration
 seconds after minting. There is deliberately no per-token revocation for `single` —
 adding a mint-time write to the hot path of a thousand-node provisioning wave would buy
-almost nothing. The blunt lever remains: rotating the server's token signing key
+almost nothing. The blunt lever remains: rotating the server's token signing key (§3a)
 invalidates every outstanding token at once, at the cost of interrupting pending
-bootstraps.
+bootstraps. What `single` retains instead of revocation is *attribution* — every
+enrollment it produces is logged with its `jti` and `minter` (§6c), so a credential
+that cannot be recalled can at least be accounted for after the fact.
 
 **`multi`: the weakness is real, so revocation is mandatory.** A `multi` token is
 valid for hours and for any matching name, so "expire it early" is a requirement, not a
@@ -416,8 +590,8 @@ provides, and it is paid only by `multi`. If that cost is unwelcome, the answer 
 use `single` tokens, which is why they are the default.
 
 Contrast with what both modes replace: the validator key has no `exp` at all, is
-identical on every node ever bootstrapped, cannot say which nodes it enrolled, and its
-"revocation" is a fleet-wide re-bootstrap.
+identical on every node ever bootstrapped, cannot say which nodes it enrolled or who
+authorized them, and its "revocation" is a fleet-wide re-bootstrap.
 
 ### 9. Profile versioning
 
@@ -444,9 +618,9 @@ discovering it when an autoscaling group fails to enroll.
 
 ### 10. Minting
 
-Tokens are EdDSA-signed by a server key; verification needs no shared secret. Both
-modes are minted by `cinc-zero token create` or, for automation, an authenticated
-`POST /organizations/{org}/registration_tokens`:
+Tokens are EdDSA-signed by the server's signing key (§3a); verification needs no shared
+secret. Both modes are minted by `cinc-zero token create` or, for automation, an
+authenticated `POST /organizations/{org}/registration_tokens`:
 
 ```
 # single (default): one named node, burned on first use
@@ -470,10 +644,25 @@ verify-side checks are defense in depth, not the only gate. Minting a `multi` to
 additionally writes its registry record (§6b) and **MUST** fail closed if that write
 fails: no registry entry, no token.
 
-Minting is itself a privileged operation. The mint endpoint **MUST** require an
-authenticated actor with create rights on the org's `clients` container — the same
-authority the validator key represents today — and the minting actor is recorded in the
-registry entry for `multi` tokens.
+Minting is itself a privileged operation, and it is more than that: a token is that
+authority made **offline and transferable** for the length of its TTL. An actor who
+today must be online and signing for each client create can instead mint one credential
+and hand it around. That is the point of the feature, and the reason attribution is
+mandatory rather than optional.
+
+- The mint endpoint **MUST** require an authenticated actor with create rights on the
+  org's `clients` container — the same authority the validator key represents today.
+  An unauthorized mint is `403`.
+- The minting actor **MUST** be recorded in the token's `minter` claim, in **both**
+  modes (§4, §6c), and additionally in the registry entry for `multi` tokens (§6b).
+- `cinc-zero token create` mints locally and so has no authenticated HTTP actor. Its
+  authority is filesystem access to the signing key (§3a), which is why that file's
+  mode is enforced. It **MUST** still populate `minter`, as `local:<os-username>`, so a
+  CLI mint is never the one path that produces an unattributed token. It is a startup
+  error for the CLI to mint against a server whose signing key it cannot read; there is
+  no fallback that generates one.
+- The same authority gates reading `GET /organizations/{org}/registration_log` (§6c):
+  whoever may mint enrollment credentials may see what was enrolled.
 
 ### 11. Attestation (future rung, same endpoint)
 
@@ -487,24 +676,35 @@ implement now; the endpoint is shaped to allow it.
 This work is phase 4 of the companion spec's sequence and depends on the replay store
 (its §4). It lands as its own reviewable slices:
 
-1. **Token type + mint path, `single` only.** Header/claim allowlists, `alg` policy,
-   TTL ceiling, `cinc-zero token create`. No endpoint yet; unit-tested against
-   hand-built tokens including every malformed shape in the testing section.
-2. **`POST /register`.** Verification algorithm (§5), client + ACL + group writes
-   identical to the validator path, `409` on existing client, atomic `jti` spend,
-   retry-safe spend record.
+0. **Signing key handling** (§3a). Key file creation and load, mode enforcement,
+   `--token-signing-key`, the ephemeral-per-process path, the durability coupling
+   startup error, and `token rotate-key` with the current/previous set. Nothing else
+   can be built honestly before the key has a home, and it is testable on its own.
+1. **Token type + mint path, `single` only.** Header/claim allowlists (including
+   `minter`), `alg` policy, TTL ceiling, `cinc-zero token create`. No endpoint yet;
+   unit-tested against hand-built tokens including every malformed shape in the testing
+   section.
+2. **`POST /register`.** Verification algorithm (§5) in its normative order, client +
+   ACL + group writes identical to the validator path, `409` on existing client, atomic
+   `jti` spend, retry-safe spend record, and the §6c audit record written in the same
+   transaction as the create.
 3. **Mandatory provisioning claims** (§7), including `first_boot_run_list` in the
    `201` body.
-4. **`use: "multi"`** — pattern matching, mint-time registry, use counting and
-   `max_uses`, per-use audit, `token revoke`/`token list`, rate limiting. Deliberately
-   last of the token work: the `single` path must be solid before the weaker
-   credential exists at all.
-5. **Config guards** — `--allow-validator-bootstrap` (default on, so nothing breaks),
+4. **`use: "multi"`** — pattern matching, mint-time registry, the §5 step 7 standing
+   check, use counting and `max_uses`, `token revoke`/`token list`, rate limiting.
+   Deliberately last of the token work: the `single` path must be solid before the
+   weaker credential exists at all.
+5. **Audit surface** (§6c) — `registration_log` reads via CLI and the authenticated
+   endpoint, retention GC. The records themselves land in slice 2; this is the surface
+   for reading them.
+6. **Config guards** — `--allow-validator-bootstrap` (default on, so nothing breaks),
    the `--no-auth`-looks-like-a-real-server startup error, TLS/bearer guard,
-   `--allow-unrestricted-bootstrap-tokens`.
+   `--allow-unrestricted-bootstrap-tokens`, `--registration-log-retention`.
 
 The validator path stays working and tested throughout; retiring it is a later,
-operator-scheduled decision, not part of this work.
+operator-scheduled decision, not part of this work. `cinc-api` gains its `Register`
+call (§1a) alongside slice 2 — the endpoint and its only consumer land together, so the
+wire contract is exercised end-to-end rather than only by server-side tests.
 
 ## Testing (TDD)
 
@@ -534,6 +734,35 @@ Claims:
   absence in particular must not default to `single`.
 - `single` token carrying `name_pattern` or `max_uses` ⇒ `401`; `multi` token carrying
   `sub` ⇒ `401`; a token carrying both `sub` and `name_pattern`, or neither ⇒ `401`.
+- `minter` absent ⇒ `401`, in both modes. A `minter` naming a nonexistent or
+  unprivileged actor still verifies (it is attribution, not authorization) — assert it
+  changes no access decision, and that it is recorded verbatim in the audit record.
+
+Signing key (§3a):
+
+- A key file with mode `0644` (or in a world-writable directory) is a startup error,
+  not a warning; `0600` loads.
+- `--token-signing-key` without `--storage sqlite` is a startup error (persisted key +
+  non-durable spend set would reopen replay across a restart).
+- Memory storage with no key path: a token minted before a restart fails after it, and
+  the key file is never created.
+- The signing key never appears in the store — assert no collection in any org or the
+  global space contains the private key material, on both backends.
+- `token rotate-key`: tokens signed by the previous key still verify (trial
+  verification against current+previous); tokens signed by a key rotated out twice do
+  not.
+
+Verification ordering (§5) — the order is normative, so it is tested as such:
+
+- A **revoked** `multi` token naming a nonexistent environment ⇒ `401`, *not* `412`:
+  step 7's standing check precedes step 8's provisioning validation, so a revoked
+  credential learns nothing about org contents.
+- Failures from steps 1–5 produce byte-identical response bodies: assert a bad
+  signature, an illegal header parameter, an unknown claim, and an expired token are
+  indistinguishable to the caller.
+- Failures from steps 1–6 perform no store access at all (assert with a counting or
+  failing backend): a token for a nonexistent org fails identically to one for an
+  existing org, so `/register` is not an existence oracle.
 
 Scope shared by both modes:
 
@@ -549,8 +778,8 @@ Scope shared by both modes:
 - Byte-identical retry (same `sub`, same key fingerprint) returns the same `201`; same
   `jti` with a different public key ⇒ `401`.
 - Restart with a memory-backed store invalidates outstanding tokens (fresh per-process
-  signing key); with `--storage sqlite`, the signing key and spend set survive and a
-  pre-restart token is still rejected as spent.
+  signing key); with `--storage sqlite`, the key file and the spend set both survive
+  and a pre-restart token is still rejected as spent.
 - Minting writes nothing to the store (assert no registry entry appears).
 
 `use: "multi"`:
@@ -571,21 +800,38 @@ Scope shared by both modes:
 - Revocation: `token revoke <jti>` makes the next registration `401` while an already
   registered node keeps working; `token list` shows pattern, `exp`, use count, and
   minting actor.
-- Audit: each successful registration appends `(jti, client name, key fingerprint,
-  timestamp)`; the entries match the clients actually created.
+- Audit: the registry entry reflects each use, and its recorded registrations match the
+  clients actually created (the record itself is covered under §6c below).
 - Registry entries are collected after `exp`, and a token whose entry has been
   collected fails `401` rather than succeeding.
 - Mint fails closed: a registry write error yields no token to the caller.
 - Mint requires an authenticated actor with create rights on `clients`; an
   unauthorized mint attempt is `403`.
 
+Attribution and audit (§6c) — both modes:
+
+- Every successful registration writes exactly one `registration_log` record with the
+  full field set, and its `minter` equals the actor that minted the token.
+- The record is written in the same transaction as the client create: a store failure
+  injected at the audit write leaves **no** client behind, and one injected at the
+  client create leaves no audit record. There is no ordering in which an enrolled node
+  exists without a record of who authorized it.
+- A `single` registration is as attributable as a `multi` one — same record, same
+  fields — even though `single` wrote nothing at mint.
+- `cinc-zero token create` populates `minter` as `local:<os-username>`; a CLI-minted
+  token's enrollment is attributable in the log.
+- `GET /organizations/{org}/registration_log` requires the same authority as minting;
+  an unauthorized read is `403`, and the endpoint never returns key material beyond the
+  fingerprint.
+- Retention: records older than `--registration-log-retention` are collected; the
+  collection does not remove records still inside the window.
+
 Registration result:
 
 - Valid token registers a client with the node's public key and the same ACL and group
   wiring as the validator path (assert against the validator-path fixtures).
-- No private key is ever returned in any response body.
-- Steps 1–6 touch no store: a token for a nonexistent org fails identically to one for
-  an existing org (no existence oracle).
+- No private key is ever returned in any response body (the audit record carries a
+  fingerprint only).
 
 Provisioning claims:
 
@@ -606,6 +852,13 @@ Configuration and compatibility:
   chef-zero experience, with `/register` requiring no token.
 - The existing validator bootstrap end-to-end (`server/bootstrap_e2e_test.go`) stays
   green with `--allow-validator-bootstrap` at its default.
+- `POST /organizations` returns the same `201` body — `clientname` and a usable
+  `private_key` — with `--allow-validator-bootstrap` both on and off (§1a); only
+  *acceptance* at bootstrap changes, and a validator-signed bootstrap under
+  `--allow-validator-bootstrap=false` is refused.
+- The differential harness allowlists `/register`, `/registration_tokens`, and
+  `/registration_log` as cinc-zero extensions (§1a); a route added to that allowlist
+  without an entry is a harness failure, so the exemption cannot grow silently.
 - Full `make test && make vet` green at every slice.
 
 ## Out of scope
