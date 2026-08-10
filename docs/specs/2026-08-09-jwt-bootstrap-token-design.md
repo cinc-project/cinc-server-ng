@@ -220,9 +220,10 @@ were spent would let every unexpired token replay across a restart — precisely
 `--storage sqlite` is therefore a startup error.
 
 **Rotation.** The server holds an ordered active key set — current plus previous — and
-verification is trial verification against it (§3). `cinc-zero token rotate-key`
-promotes a fresh key to current and demotes the incumbent to previous; a second
-rotation drops the old previous. Because the `multi` TTL ceiling is 24h, an operator
+verification is trial verification against it (§3). Rotation promotes a fresh key to
+current and demotes the incumbent to previous; a second rotation drops the old previous.
+It is a **host operation on the key file**, not an API call — no endpoint moves or
+generates that key material over HTTP (§10a). Because the `multi` TTL ceiling is 24h, an operator
 retiring a key **SHOULD** leave it in the previous slot for at least that long before
 rotating again, or accept that outstanding tokens die — which for `single`, at a
 15-minute TTL, is a handful of retried bootstraps.
@@ -475,8 +476,8 @@ The record is appended to the org's `registration_log` collection and carries:
 | `provisioning` | The environment/run-list or policy stamped on the node (§7). |
 | `timestamp` | Server clock at the create. |
 
-`cinc-zero token audit --org <o>` reads it, as does an authenticated `GET
-/organizations/{org}/registration_log` requiring the same authority as minting (§10).
+It is read through an authenticated `GET /organizations/{org}/registration_log`,
+requiring the same authority as minting (§10).
 Retention is bounded — `--registration-log-retention`, default 30 days, garbage
 collected alongside expired registry entries (§8) — so the log does not grow without
 limit on a long-lived server.
@@ -578,12 +579,11 @@ that cannot be recalled can at least be accounted for after the fact.
 valid for hours and for any matching name, so "expire it early" is a requirement, not a
 nicety. The registry entry written at mint (§6b) is the revocation handle:
 
-- `cinc-zero token revoke <jti>` (and an authenticated `DELETE
-  /organizations/{org}/registration_tokens/{jti}`) sets the revoked flag; verification
-  **MUST** reject a revoked token thereafter.
-- `cinc-zero token list --org <o>` enumerates outstanding `multi` tokens with their
-  pattern, `exp`, use count, and minting actor, so an operator can see what is
-  outstanding before deciding what to revoke.
+- An authenticated `DELETE /organizations/{org}/registration_tokens/{jti}` sets the
+  revoked flag; verification **MUST** reject a revoked token thereafter (§5 step 7).
+- `GET /organizations/{org}/registration_tokens` enumerates outstanding `multi` tokens
+  with their pattern, `exp`, use count, and minting actor, so an operator can see what
+  is outstanding before deciding what to revoke.
 - Registry entries are garbage-collected once `exp` passes, so the revocation list is
   bounded by the number of live `multi` tokens — a handful — not by history.
 
@@ -614,30 +614,45 @@ invalidates the tokens in flight from the old one. For `single` tokens, with a
 feature — a security-relevant upgrade *should* not leave old-format credentials
 honored. Nobody should be running a provisioning wave through a server upgrade and
 expecting it not to be interrupted. `multi` tokens live longer and so are likelier to
-be caught by it, which is exactly what `token list` (§8) is for: an operator can see
+be caught by it, which is exactly what the token listing (§8) is for: an operator can see
 what a version-bumping upgrade will invalidate and re-mint deliberately, rather than
 discovering it when an autoscaling group fails to enroll.
 
 ### 10. Minting
 
 Tokens are EdDSA-signed by the server's signing key (§3a); verification needs no shared
-secret. Both modes are minted by `cinc-zero token create` or, for automation, an
-authenticated `POST /organizations/{org}/registration_tokens`:
+secret. **Minting is an API operation.** Both modes are minted by an authenticated
+`POST /organizations/{org}/registration_tokens`, which is the only interface this
+document specifies:
 
+```http
+POST /organizations/acme/registration_tokens
 ```
-# single (default): one named node, burned on first use
-cinc-zero token create --org acme --node-name web-01 \
-    --environment production --run-list 'role[base],recipe[nginx]' --ttl 15m
-
-# multi: an autoscaling group, bounded by pattern, window, and count
-cinc-zero token create --org acme --use multi --name-pattern 'web-' \
-    --policy-group production --policy-name web --ttl 4h --max-uses 50
+```json
+{ "use": "single", "node_name": "web-01", "ttl": "15m",
+  "chef_environment": "production",
+  "run_list": ["role[base]", "recipe[nginx]"] }
+```
+```json
+{ "use": "multi", "name_prefix": "web-", "ttl": "4h", "max_uses": 50,
+  "policy_group": "production", "policy_name": "web" }
 ```
 
-`--name-pattern` takes the literal prefix; the CLI forms the `name_pattern` claim as
-`<org>/<prefix>*` (so `--org acme --name-pattern web-` yields `acme/web-*`).
-`--node-name` and `--name-pattern` are mutually exclusive, and each is only valid for
-its mode — a `--use multi` without `--name-pattern` is an error, not a wildcard.
+The response carries the compact token, its `jti`, and its `exp`. The token is returned
+**once** and never stored in retrievable form — the server keeps only what §6b and §6c
+require (a registry entry for `multi`, nothing for `single`).
+
+Request-shape rules, enforced at mint:
+
+- `node_name` and `name_prefix` are mutually exclusive, and each is valid only for its
+  mode. `use: "multi"` without `name_prefix` is an error, never a wildcard; `use` is
+  required and never defaults (§4).
+- `name_prefix` takes the literal prefix and the server forms the `name_pattern` claim
+  as `<org>/<prefix>*` — `acme` + `web-` yields `acme/web-*`. The pattern is built
+  server-side so a caller cannot smuggle in interior wildcards or regex metacharacters
+  (§6b).
+- `ttl` is clamped to the per-mode ceiling (§6a, §6b); a request exceeding it is
+  refused rather than silently truncated.
 
 The mint path **MUST** enforce every constraint the verify path does — the per-mode TTL
 ceiling, mutually exclusive provisioning shapes, well-formed `sub`/`name_pattern`,
@@ -655,16 +670,50 @@ mandatory rather than optional.
 - The mint endpoint **MUST** require an authenticated actor with create rights on the
   org's `clients` container — the same authority the validator key represents today.
   An unauthorized mint is `403`.
-- The minting actor **MUST** be recorded in the token's `minter` claim, in **both**
+- The authenticated actor **MUST** be recorded in the token's `minter` claim, in **both**
   modes (§4, §6c), and additionally in the registry entry for `multi` tokens (§6b).
-- `cinc-zero token create` mints locally and so has no authenticated HTTP actor. Its
-  authority is filesystem access to the signing key (§3a), which is why that file's
-  mode is enforced. It **MUST** still populate `minter`, as `local:<os-username>`, so a
-  CLI mint is never the one path that produces an unattributed token. It is a startup
-  error for the CLI to mint against a server whose signing key it cannot read; there is
-  no fallback that generates one.
+  Because minting is an authenticated API call, there is no path that produces a token
+  with no actor behind it.
 - The same authority gates reading `GET /organizations/{org}/registration_log` (§6c):
   whoever may mint enrollment credentials may see what was enrolled.
+
+#### 10a. The full endpoint set, and where the minting actor comes from
+
+Everything this document requires an operator to be able to do is an authenticated HTTP
+operation:
+
+| Operation | Endpoint | Authority |
+|---|---|---|
+| Mint a token | `POST /organizations/{org}/registration_tokens` | create on the org's `clients` container |
+| List outstanding `multi` tokens | `GET /organizations/{org}/registration_tokens` | same |
+| Revoke a `multi` token | `DELETE /organizations/{org}/registration_tokens/{jti}` | same |
+| Read the registration audit log | `GET /organizations/{org}/registration_log` | same |
+| Register a node | `POST /organizations/{org}/register` | the bootstrap token itself (§5) |
+
+The actor that mints is created through the **existing** user and organization APIs —
+`POST /users`, then org association, then membership in a group holding create on
+`clients` (`internal/api/actor.go`, `internal/api/association*.go`). This document adds
+no new way to create an actor and does not need one; the `pivotal` superuser created at
+startup (`server/server.go`) is sufficient to bootstrap the first one.
+
+Signing-key rotation (§3a) is the one operator action that is deliberately **not** an
+API: the key is a file on the server host, and rotating it is a host operation. No
+endpoint moves or generates that key material over HTTP.
+
+**Local CLI tooling is out of scope here, and explicitly anticipated.** `cinc-zero` may
+grow subcommands — token minting, revocation, listing, audit reads, user creation — and
+when it does, they **SHOULD** be thin authenticated clients of the endpoints above
+rather than a second implementation. That distinction matters for more than tidiness:
+
+- A CLI acting directly on the store would be a **second writer** to a database the
+  running server owns, and under the default memory backend it could not work at all —
+  the signing key is per-process (§6a) and the registry lives in the server's heap, so a
+  separate process shares neither.
+- Going through the API keeps attribution honest: `minter` is a real authenticated
+  actor, not a local OS username asserted by whoever ran the binary.
+
+So the API is the contract, and any CLI is a convenience over it. Nothing in this
+document depends on that tooling existing.
 
 ### 11. Attestation (future rung, same endpoint)
 
@@ -685,12 +734,12 @@ It lands as its own reviewable slices:
 
 0. **Signing key handling** (§3a). Key file creation and load, mode enforcement,
    `--token-signing-key`, the ephemeral-per-process path, the durability coupling
-   startup error, and `token rotate-key` with the current/previous set. Nothing else
+   startup error, and host-side rotation with the current/previous set. Nothing else
    can be built honestly before the key has a home, and it is testable on its own.
-1. **Token type + mint path, `single` only.** Header/claim allowlists (including
-   `minter`), `alg` policy, TTL ceiling, `cinc-zero token create`. No endpoint yet;
-   unit-tested against hand-built tokens including every malformed shape in the testing
-   section.
+1. **Token type and the mint path, `single` only.** Header/claim allowlists (including
+   `minter`), `alg` policy, TTL ceiling, and `POST /organizations/{org}/registration_tokens`
+   with its authorization check. Unit-tested against hand-built tokens including every
+   malformed shape in the testing section.
 2. **`POST /register`.** Verification algorithm (§5) in its normative order, client +
    ACL + group writes identical to the validator path, `409` on existing client, atomic
    `jti` spend, retry-safe spend record, and the §6c audit record written in the same
@@ -698,12 +747,11 @@ It lands as its own reviewable slices:
 3. **Mandatory provisioning claims** (§7), including `first_boot_run_list` in the
    `201` body.
 4. **`use: "multi"`** — pattern matching, mint-time registry, the §5 step 7 standing
-   check, use counting and `max_uses`, `token revoke`/`token list`, rate limiting.
-   Deliberately last of the token work: the `single` path must be solid before the
-   weaker credential exists at all.
-5. **Audit surface** (§6c) — `registration_log` reads via CLI and the authenticated
-   endpoint, retention GC. The records themselves land in slice 2; this is the surface
-   for reading them.
+   check, use counting and `max_uses`, the token listing and revocation endpoints, rate
+   limiting. Deliberately last of the token work: the `single` path must be solid before
+   the weaker credential exists at all.
+5. **Audit surface** (§6c) — the authenticated `registration_log` endpoint and retention
+   GC. The records themselves land in slice 2; this is the surface for reading them.
 6. **Config guards** — `--allow-validator-bootstrap` (default on, so nothing breaks),
    the `--no-auth`-looks-like-a-real-server startup error, TLS/bearer guard,
    `--allow-unrestricted-bootstrap-tokens`, `--registration-log-retention`.
@@ -755,9 +803,10 @@ Signing key (§3a):
   the key file is never created.
 - The signing key never appears in the store — assert no collection in any org or the
   global space contains the private key material, on both backends.
-- `token rotate-key`: tokens signed by the previous key still verify (trial
-  verification against current+previous); tokens signed by a key rotated out twice do
-  not.
+- Rotation: tokens signed by the previous key still verify (trial verification against
+  current+previous); tokens signed by a key rotated out twice do not. No endpoint
+  exposes or replaces the key — assert the key material appears in no response body on
+  any route.
 
 Verification ordering (§5) — the order is normative, so it is tested as such:
 
@@ -804,9 +853,10 @@ Scope shared by both modes:
 - A validly signed `multi` token whose `jti` has no registry entry ⇒ `401` (covers a
   token minted before a registry wipe, and a token forged with a leaked signing key
   but never minted).
-- Revocation: `token revoke <jti>` makes the next registration `401` while an already
-  registered node keeps working; `token list` shows pattern, `exp`, use count, and
-  minting actor.
+- Revocation: `DELETE .../registration_tokens/{jti}` makes the next registration `401`
+  while an already registered node keeps working; the listing endpoint shows pattern,
+  `exp`, use count, and minting actor. Both require the mint authority; an unauthorized
+  caller is `403`.
 - Audit: the registry entry reflects each use, and its recorded registrations match the
   clients actually created (the record itself is covered under §6c below).
 - Registry entries are collected after `exp`, and a token whose entry has been
@@ -825,8 +875,8 @@ Attribution and audit (§6c) — both modes:
   exists without a record of who authorized it.
 - A `single` registration is as attributable as a `multi` one — same record, same
   fields — even though `single` wrote nothing at mint.
-- `cinc-zero token create` populates `minter` as `local:<os-username>`; a CLI-minted
-  token's enrollment is attributable in the log.
+- `minter` always names a real authenticated actor: there is no mint path that produces
+  a token without one, so no registration can land in the log unattributed.
 - `GET /organizations/{org}/registration_log` requires the same authority as minting;
   an unauthorized read is `403`, and the endpoint never returns key material beyond the
   fingerprint.
@@ -877,3 +927,11 @@ Configuration and compatibility:
 - Retiring the validator path by default — gated behind an operator flag, not removed.
 - First-boot node *attributes* (only `first_boot_run_list` is specified).
 - Constraining claims (`allowed_environments`, run-list allowlists) — later rung.
+- **Local CLI tooling.** This document specifies an API and nothing else. `cinc-zero`
+  may later grow subcommands for minting, revoking, listing, and reading the audit log,
+  and they **SHOULD** be thin authenticated clients of the endpoints in §10a rather than
+  a second implementation against the store — see §10a for why acting on the store
+  directly cannot work under the default memory backend. No feature here depends on such
+  tooling existing.
+- **Creating the actors that mint.** Users, org association, and group membership use
+  the existing APIs (§10a); this document adds no new way to create an actor.
