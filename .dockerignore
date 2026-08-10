@@ -2,6 +2,6 @@
 .github
 bin/
 dist/
-/cinc-zero
+/cinc-server-ng
 *.pem
 .DS_Store
