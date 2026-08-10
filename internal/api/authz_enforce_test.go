@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // testOrg returns a fresh, seeded org "acme" for authorization unit tests.

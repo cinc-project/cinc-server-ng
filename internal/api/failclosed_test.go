@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // classifyRequest is an allowlist, and an unrecognized route used to be

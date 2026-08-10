@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/api"
-	"github.com/tas50/cinc-zero/internal/auth"
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/api"
+	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // authMiddleware verifies the Mixlib signed-header authentication on every

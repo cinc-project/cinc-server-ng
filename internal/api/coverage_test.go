@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // TestPutKeyReplaceNamedKey covers replacing an existing named key: the stored

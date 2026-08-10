@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/auth"
 )
 
 // signedAs builds a request signed as an arbitrary actor (name + PEM key),

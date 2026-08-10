@@ -3,8 +3,8 @@ package store_test
 import (
 	"testing"
 
-	"github.com/tas50/cinc-zero/internal/store"
-	"github.com/tas50/cinc-zero/internal/store/backendtest"
+	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store/backendtest"
 )
 
 // TestMemoryBackendConformance runs the shared Backend conformance suite against

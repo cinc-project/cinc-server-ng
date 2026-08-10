@@ -20,13 +20,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/api"
-	"github.com/tas50/cinc-zero/internal/auth"
-	"github.com/tas50/cinc-zero/internal/metrics"
-	"github.com/tas50/cinc-zero/internal/repo"
-	"github.com/tas50/cinc-zero/internal/state"
-	"github.com/tas50/cinc-zero/internal/store"
-	"github.com/tas50/cinc-zero/internal/store/sqlite"
+	"github.com/tas50/cinc-server-ng/internal/api"
+	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/metrics"
+	"github.com/tas50/cinc-server-ng/internal/repo"
+	"github.com/tas50/cinc-server-ng/internal/state"
+	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store/sqlite"
 )
 
 // Options configures a Server. The zero value is usable: it creates a single

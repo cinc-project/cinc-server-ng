@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // Run exercises the full Backend contract against a fresh backend produced by

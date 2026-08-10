@@ -1,4 +1,4 @@
-module github.com/tas50/cinc-zero
+module github.com/tas50/cinc-server-ng
 
 go 1.26.3
 

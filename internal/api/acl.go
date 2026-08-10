@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // Every object exposes a well-formed five-permission ACL that tooling such as

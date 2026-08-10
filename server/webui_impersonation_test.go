@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/auth"
 )
 
 // webuiSignedAs signs a request with the server's webui key (the admin key by

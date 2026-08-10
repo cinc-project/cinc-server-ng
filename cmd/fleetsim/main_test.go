@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/server"
+	"github.com/tas50/cinc-server-ng/server"
 )
 
 func TestRunDrivesConvergingNotStuck(t *testing.T) {

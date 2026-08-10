@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/server"
+	"github.com/tas50/cinc-server-ng/server"
 )
 
 // requireEnvVar makes a missing knife a failure rather than a skip. CI sets it,

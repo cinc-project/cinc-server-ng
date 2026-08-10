@@ -7,7 +7,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // API holds the dependencies shared by all handlers.

@@ -1,7 +1,7 @@
 # cinc-zero build automation
 
-BINARY      := cinc-zero
-CMD_PKG     := ./cmd/cinc-zero
+BINARY      := cinc-server-ng
+CMD_PKG     := ./cmd/cinc-server-ng
 LDFLAGS_PKG := main
 DIST_DIR    ?= dist
 PLATFORMS   := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64

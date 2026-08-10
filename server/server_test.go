@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/auth"
 )
 
 // putUser writes a global user with the given public key directly into the

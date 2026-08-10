@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // ohaiUptime renders a duration in seconds the way Ohai's uptime plugin does

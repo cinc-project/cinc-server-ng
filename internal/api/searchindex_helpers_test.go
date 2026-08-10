@@ -1,6 +1,6 @@
 package api
 
-import "github.com/tas50/cinc-zero/internal/search"
+import "github.com/tas50/cinc-server-ng/internal/search"
 
 // Thin aliases so index tests can drive the planner without importing the
 // search package into every case.

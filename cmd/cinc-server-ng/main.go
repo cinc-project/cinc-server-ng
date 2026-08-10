@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/tas50/cinc-zero/server"
+	"github.com/tas50/cinc-server-ng/server"
 )
 
 // Build metadata, injected at link time via -ldflags (see the Makefile).
