@@ -118,7 +118,7 @@ at a SQLite database:
 
 `--storage` accepts `memory` (default) or `sqlite`; `--storage sqlite` requires
 `--db <path>`. Both flags also read from the environment
-(`CINC_ZERO_STORAGE`, `CINC_ZERO_DB`), which is handy in containers. SQLite uses
+(`CINC_SERVER_NG_STORAGE`, `CINC_SERVER_NG_DB`), which is handy in containers. SQLite uses
 the pure-Go [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) driver,
 so the static binary and `scratch`/`distroless` images keep working with
 `CGO_ENABLED=0`.
@@ -226,7 +226,7 @@ in-process server, so a genuine signed-request lifecycle has to work end to end
 sandbox/upload flow. It runs with ACL enforcement on, matching what the binary
 ships with; testing the permissive configuration would leave every
 authorization path unexercised by a real client. CI sets
-`CINC_ZERO_REQUIRE_CONFORMANCE=1`, which turns "knife is unusable" from a skip
+`CINC_SERVER_NG_REQUIRE_CONFORMANCE=1`, which turns "knife is unusable" from a skip
 into a failure: a conformance job that quietly executes nothing while reporting
 success is worse than no job at all.
 

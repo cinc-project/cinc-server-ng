@@ -4,7 +4,7 @@ name: Conformance
 # cinc-zero server, validating end-to-end fidelity of signed requests, search,
 # authorization, policyfiles, and the cookbook sandbox/upload flow.
 #
-# CINC_ZERO_REQUIRE_CONFORMANCE turns "knife is unusable" from a skip into a
+# CINC_SERVER_NG_REQUIRE_CONFORMANCE turns "knife is unusable" from a skip into a
 # failure. Without it, a broken Workstation install would leave this job green
 # having executed nothing at all.
 
@@ -39,5 +39,5 @@ jobs:
 
       - name: Run conformance suite
         env:
-          CINC_ZERO_REQUIRE_CONFORMANCE: "1"
+          CINC_SERVER_NG_REQUIRE_CONFORMANCE: "1"
         run: go test -tags conformance ./conformance/ -v

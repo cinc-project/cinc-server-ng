@@ -68,8 +68,8 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.StringVar(&f.repo, "repo", "", "path to a chef-repo to load into the first org at startup")
 	fs.StringVar(&f.state, "state", "", "path to a full server-state directory to load at startup")
 	fs.StringVar(&f.webuiKey, "webui-key", "", "path to a webui public/private key for X-Ops-Request-Source: web impersonation (defaults to the admin key)")
-	fs.StringVar(&f.storage, "storage", envOr("CINC_ZERO_STORAGE", "memory"), "storage backend: memory (ephemeral) or sqlite (durable)")
-	fs.StringVar(&f.db, "db", os.Getenv("CINC_ZERO_DB"), "sqlite database file path (required when --storage sqlite)")
+	fs.StringVar(&f.storage, "storage", envOr("CINC_SERVER_NG_STORAGE", "memory"), "storage backend: memory (ephemeral) or sqlite (durable)")
+	fs.StringVar(&f.db, "db", os.Getenv("CINC_SERVER_NG_DB"), "sqlite database file path (required when --storage sqlite)")
 	fs.BoolVar(&f.groupCommit, "sqlite-group-commit", true, "batch concurrent sqlite writes into shared transactions: much higher write throughput and far better tail latency under fleet load, at a few microseconds more on a serialized single-client write; pass --sqlite-group-commit=false to opt out")
 	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
 
@@ -208,7 +208,7 @@ func run(args []string, out io.Writer) error {
 }
 
 // envOr returns the value of environment variable key, or def when it is unset
-// or empty. It lets storage flags default from CINC_ZERO_* (handy in containers).
+// or empty. It lets storage flags default from CINC_SERVER_NG_* (handy in containers).
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

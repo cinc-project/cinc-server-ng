@@ -49,7 +49,7 @@ test:
 ## conformance: drive the real knife CLI (from Cinc Workstation) against
 ## cinc-zero; needs knife installed (see https://omnitruck.cinc.sh/install.sh)
 conformance:
-	CINC_ZERO_REQUIRE_CONFORMANCE=1 go test -tags conformance ./conformance/ -v
+	CINC_SERVER_NG_REQUIRE_CONFORMANCE=1 go test -tags conformance ./conformance/ -v
 
 ## differential: compare responses against a real Chef Infra Server. Needs both
 ## servers running and DIFF_* configured; see .github/workflows/differential.yml.

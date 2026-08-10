@@ -9,10 +9,10 @@ cinc-zero is a lightweight, drop-in alternative Chef Infra Server in Go. It spea
 - `make build` — compile the `cinc-zero` binary (version metadata via ldflags); it lands at `./cinc-zero` in the repo root.
 - `make test` — `go test ./... -race -cover` (the full suite).
 - `make vet` / `make fmt` — `go vet ./...` / `gofmt -w .`.
-- `make conformance` — drives the real `knife` CLI against an in-process server (ACL enforcement **on**, as the binary ships); needs Cinc Workstation and is gated behind `-tags conformance`. It skips when knife is unusable unless `CINC_ZERO_REQUIRE_CONFORMANCE=1` (which CI and the make target set), which turns that into a failure.
+- `make conformance` — drives the real `knife` CLI against an in-process server (ACL enforcement **on**, as the binary ships); needs Cinc Workstation and is gated behind `-tags conformance`. It skips when knife is unusable unless `CINC_SERVER_NG_REQUIRE_CONFORMANCE=1` (which CI and the make target set), which turns that into a failure.
 - `make differential` — compares responses against a real Chef Infra Server (`-tags differential`, needs both servers; see `.github/workflows/differential.yml`). The harness itself is unit-tested without a real server by comparing two cinc-zero instances, so `go test ./differential/` runs in the normal suite.
 - Single test: `go test ./internal/api/ -run TestName -v` (most logic lives in `internal/api`).
-- `make run ARGS="--enforce-acls --orgs acme"` — build and run; flags: `--addr`, `--orgs` (CSV), `--admin`, `--no-auth`, `--enforce-acls`, `--repo`, `--key-out`, `--storage` (`memory` default / `sqlite`), `--db` (SQLite path; required for `--storage sqlite`; env `CINC_ZERO_STORAGE`/`CINC_ZERO_DB`), `--init` (seed the store and exit without serving — used to pre-bake a DB).
+- `make run ARGS="--enforce-acls --orgs acme"` — build and run; flags: `--addr`, `--orgs` (CSV), `--admin`, `--no-auth`, `--enforce-acls`, `--repo`, `--key-out`, `--storage` (`memory` default / `sqlite`), `--db` (SQLite path; required for `--storage sqlite`; env `CINC_SERVER_NG_STORAGE`/`CINC_SERVER_NG_DB`), `--init` (seed the store and exit without serving — used to pre-bake a DB).
 - `make dev-db` bakes `dev/test-repo` into `dev/cinc-dev.db` (git-ignored); `make run-dev` serves the seed in-memory (no auth), `make run-dev-sqlite` serves the durable SQLite copy with auth on. Developer setup, test accounts, and cinc-console wiring live in `docs/DEVELOPMENT.md`.
 
 Always run `make test && make vet` before committing. Development is strict TDD: write a failing test first.

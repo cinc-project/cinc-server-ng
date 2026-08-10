@@ -29,7 +29,7 @@ import (
 // requireEnvVar makes a missing knife a failure rather than a skip. CI sets it,
 // because a conformance job that silently executes nothing while reporting
 // success is worse than having no conformance job at all.
-const requireEnvVar = "CINC_ZERO_REQUIRE_CONFORMANCE"
+const requireEnvVar = "CINC_SERVER_NG_REQUIRE_CONFORMANCE"
 
 // unavailable reports that knife cannot be used: it fails when conformance is
 // required, and skips otherwise so a local `go test ./...` stays usable.

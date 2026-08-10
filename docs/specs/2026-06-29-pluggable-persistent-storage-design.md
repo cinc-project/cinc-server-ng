@@ -203,8 +203,8 @@ New flags on `cmd/cinc-zero` and fields on `server.Options`:
 
 | Flag | Env | Default | Meaning |
 |------|-----|---------|---------|
-| `--storage` | `CINC_ZERO_STORAGE` | `memory` | `memory` or `sqlite` |
-| `--db` | `CINC_ZERO_DB` | `` | SQLite file path (or, later, a DSN) |
+| `--storage` | `CINC_SERVER_NG_STORAGE` | `memory` | `memory` or `sqlite` |
+| `--db` | `CINC_SERVER_NG_DB` | `` | SQLite file path (or, later, a DSN) |
 
 No flags → memory, identical to today. `--storage sqlite` with no `--db` is an error
 (no implicit file location, to avoid surprise writes). `server.Options` grows a
