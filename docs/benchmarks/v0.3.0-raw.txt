@@ -11,7 +11,7 @@ PUT node               5.900     2.194     2.565          449          463
 search *:*            44.711    37.952    39.796           26           27
 search filtered       42.191    28.476    30.302           35           36
 
-== cinc-zero v0.3.0 (no-auth) (http://127.0.0.1:8902/organizations/acme, auth=false) ==
+== cinc-server-ng v0.3.0 (no-auth) (http://127.0.0.1:8902/organizations/acme, auth=false) ==
 seeded 500 nodes (500 newly created)
 operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
 GET node               0.280     0.052     0.064        18181        63724
@@ -20,7 +20,7 @@ PUT node               0.888     0.067     0.108        13634        33006
 search *:*            21.571     1.098     1.150          896         5008
 search filtered        2.382     0.650     0.687         1514         6871
 
-== cinc-zero v0.3.0 (auth) (http://127.0.0.1:8903/organizations/acme, auth=true) ==
+== cinc-server-ng v0.3.0 (auth) (http://127.0.0.1:8903/organizations/acme, auth=true) ==
 seeded 500 nodes (500 newly created)
 operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
 GET node               0.538     0.104     0.148         8983        27345

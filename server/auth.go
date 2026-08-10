@@ -27,7 +27,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// The cookbook file store is exempt from Mixlib signing: in real Chef
 		// the sandbox hands back pre-signed bookshelf URLs that
-		// knife/chef-client/cinc-client PUT/GET without signing them. cinc-zero
+		// knife/chef-client/cinc-client PUT/GET without signing them. cinc-server-ng
 		// reproduces that shape, so authorization rides on the URL — the grant
 		// the server issued, scoped to this org, checksum, and operation.
 		if org, checksum, ok := fileStorePath(r.URL.Path); ok {

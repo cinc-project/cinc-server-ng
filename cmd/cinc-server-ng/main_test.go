@@ -121,7 +121,7 @@ func TestVersionSubcommand(t *testing.T) {
 			t.Fatalf("run(%v) returned error: %v", args, err)
 		}
 		out := buf.String()
-		for _, want := range []string{"cinc-zero", "v1.2.3", "abc1234", "2026-05-30"} {
+		for _, want := range []string{"cinc-server-ng", "v1.2.3", "abc1234", "2026-05-30"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("run(%v) output %q missing %q", args, out, want)
 			}

@@ -1,8 +1,8 @@
-// Package differential compares cinc-zero's API responses against a real Chef
+// Package differential compares cinc-server-ng's API responses against a real Chef
 // Infra Server by issuing the same requests to both and diffing what comes
 // back.
 //
-// Every other test in this repository asserts cinc-zero against its own idea of
+// Every other test in this repository asserts cinc-server-ng against its own idea of
 // correct. A conformance suite gets closer — a real client either works or does
 // not — but clients are lenient: knife will happily accept a response with a
 // missing field, an extra field, or the wrong type, so "the client did not

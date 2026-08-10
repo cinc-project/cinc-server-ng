@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# benchmark.sh — measure cinc-zero HTTP performance and (if available) compare
+# benchmark.sh — measure cinc-server-ng HTTP performance and (if available) compare
 # against the chef-zero gem.
 #
-# It builds cinc-zero, starts it in both modes (no-auth and real Mixlib auth),
+# It builds cinc-server-ng, starts it in both modes (no-auth and real Mixlib auth),
 # optionally starts chef-zero (multi-org) for comparison, seeds each with an
 # identical node set, and runs cmd/loadtest against each. Results are printed
 # and written to a file.
@@ -41,15 +41,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "building cinc-zero..."
+echo "building cinc-server-ng..."
 make build >/dev/null
-VERSION="$(./cinc-zero --version 2>/dev/null || git describe --tags --always 2>/dev/null || echo dev)"
+VERSION="$(./cinc-server-ng --version 2>/dev/null || git describe --tags --always 2>/dev/null || echo dev)"
 
 run() { go run ./cmd/loadtest -seed "$SEED" -warm "$WARM" -dur "$DUR" -conc "$CONC" "$@"; }
 wait_up() { for _ in $(seq 1 50); do curl -sf -o /dev/null "$1" && return 0; sleep 0.1; done; return 1; }
 
 {
-  echo "### cinc-zero benchmark — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "### cinc-server-ng benchmark — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "version: $VERSION"
   echo "host:    $(uname -msr)"
   echo "go:      $(go version | awk '{print $3}')"
@@ -57,18 +57,18 @@ wait_up() { for _ in $(seq 1 50); do curl -sf -o /dev/null "$1" && return 0; sle
   echo "params:  seed=$SEED warm=$WARM dur=${DUR}ms conc=$CONC"
   echo
 
-  # cinc-zero, no auth (engine-only, comparable to chef-zero's non-verifying auth)
-  ./cinc-zero --addr "127.0.0.1:$PORT_NOAUTH" --orgs acme --no-auth >"$TMP/noauth.log" 2>&1 &
+  # cinc-server-ng, no auth (engine-only, comparable to chef-zero's non-verifying auth)
+  ./cinc-server-ng --addr "127.0.0.1:$PORT_NOAUTH" --orgs acme --no-auth >"$TMP/noauth.log" 2>&1 &
   PIDS+=($!)
   wait_up "http://127.0.0.1:$PORT_NOAUTH/_status"
-  run -base "http://127.0.0.1:$PORT_NOAUTH/organizations/acme" -label "cinc-zero $VERSION (no-auth)"
+  run -base "http://127.0.0.1:$PORT_NOAUTH/organizations/acme" -label "cinc-server-ng $VERSION (no-auth)"
   echo
 
-  # cinc-zero, real Mixlib auth
-  ./cinc-zero --addr "127.0.0.1:$PORT_AUTH" --orgs acme --admin pivotal --key-out "$KEY" >"$TMP/auth.log" 2>&1 &
+  # cinc-server-ng, real Mixlib auth
+  ./cinc-server-ng --addr "127.0.0.1:$PORT_AUTH" --orgs acme --admin pivotal --key-out "$KEY" >"$TMP/auth.log" 2>&1 &
   PIDS+=($!)
   wait_up "http://127.0.0.1:$PORT_AUTH/_status"
-  run -base "http://127.0.0.1:$PORT_AUTH/organizations/acme" -user pivotal -keypem "$KEY" -label "cinc-zero $VERSION (auth)"
+  run -base "http://127.0.0.1:$PORT_AUTH/organizations/acme" -user pivotal -keypem "$KEY" -label "cinc-server-ng $VERSION (auth)"
   echo
 
   # chef-zero, if available

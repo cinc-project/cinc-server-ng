@@ -24,7 +24,7 @@ import (
 //
 // Requests are pre-signed outside the timer: signing is an RSA *private* key
 // operation that happens on the client (the node), and paying it in the loop
-// would measure chef-client rather than cinc-zero.
+// would measure chef-client rather than cinc-server-ng.
 
 const benchFleetNodes = 512
 

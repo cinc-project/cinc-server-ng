@@ -16,11 +16,11 @@ import (
 
 // The harness is only worth anything if it is neither noisy nor vacuous: it
 // must report nothing when two servers agree, and must report a real difference
-// when they do not. Both are checked here against cinc-zero instances, so the
+// when they do not. Both are checked here against cinc-server-ng instances, so the
 // mechanism is verified without needing a real Chef Infra Server — which only
 // CI has.
 
-// startTarget runs a cinc-zero server and returns it as a comparison target.
+// startTarget runs a cinc-server-ng server and returns it as a comparison target.
 func startTarget(t *testing.T, name string, wrap func(http.Handler) http.Handler) *differential.Target {
 	t.Helper()
 	srv, err := server.New(server.Options{Orgs: []string{"acme"}})

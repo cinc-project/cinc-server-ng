@@ -2,7 +2,7 @@
 // dev fixture for the fictional company ACME: ~1000 realistically-named nodes
 // across many functional tiers, the roles and cookbooks those nodes run, extra
 // environments, and richer apps/secrets/users data bags. It writes them as an
-// additive cinc-zero "--state" tree (default dev/seed.gen, git-ignored) that
+// additive cinc-server-ng "--state" tree (default dev/seed.gen, git-ignored) that
 // `make dev-db` bakes on top of the committed base seed.
 //
 // Output is deterministic: every value derives from a fixed RNG seed or from the
@@ -10,7 +10,7 @@
 // "automatic" attributes are cloned from the committed base nodes' real fauxhai
 // dumps, one template per platform, then stamped with per-node identity.
 //
-// This is a development tool; it is not built into the cinc-zero binary.
+// This is a development tool; it is not built into the cinc-server-ng binary.
 package main
 
 import (

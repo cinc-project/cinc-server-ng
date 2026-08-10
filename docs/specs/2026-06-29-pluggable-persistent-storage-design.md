@@ -1,11 +1,11 @@
-# Pluggable, Persistent Storage for cinc-zero
+# Pluggable, Persistent Storage for cinc-server-ng
 
 **Status:** Draft for review
 **Date:** 2026-06-29
 
 ## Summary
 
-Turn cinc-zero's storage layer into a pluggable backend so the same single-process
+Turn cinc-server-ng's storage layer into a pluggable backend so the same single-process
 server can run fully in memory (today's "zero" experience, unchanged and still the
 default) or persist all state durably to SQLite — with PostgreSQL/RDS reachable
 later by a driver swap, not a rewrite. Persistence is what separates a disposable
@@ -199,7 +199,7 @@ back to the scan. This spec only ensures the scan path stays correct.
 
 ### Configuration
 
-New flags on `cmd/cinc-zero` and fields on `server.Options`:
+New flags on `cmd/cinc-server-ng` and fields on `server.Options`:
 
 | Flag | Env | Default | Meaning |
 |------|-----|---------|---------|
@@ -233,7 +233,7 @@ We document the per-backend recipe rather than shipping a backup subsystem.
 ### Container story
 
 ```
-docker run -v cinc-data:/data cinc-zero \
+docker run -v cinc-data:/data cinc-server-ng \
   --storage sqlite --db /data/cinc.db --addr 0.0.0.0:443
 ```
 

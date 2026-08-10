@@ -15,7 +15,7 @@ import (
 // The file store cannot use Mixlib signing: chef-client, knife, and cinc fetch
 // and upload cookbook file bodies at a URL the server hands them, without
 // signing those requests, because a real Chef Infra Server issues pre-signed
-// bookshelf URLs there. cinc-zero reproduces that shape rather than leaving the
+// bookshelf URLs there. cinc-server-ng reproduces that shape rather than leaving the
 // endpoint open — the URL itself carries the authorization.
 //
 // A grant is scoped to one organization, one checksum, and one operation, and

@@ -1,4 +1,4 @@
-# dev/test-repo — a ready-to-run cinc-zero server state
+# dev/test-repo — a ready-to-run cinc-server-ng server state
 
 This directory is a **full server-state** fixture: a populated `acme`
 organization plus the global users and authz group that a plain chef-repo
@@ -7,7 +7,7 @@ can't express. Boot a realistic dev/demo server from it with:
 ```sh
 make run-dev
 # equivalently:
-cinc-zero --no-auth --state dev/test-repo --key-out dev-admin.pem
+cinc-server-ng --no-auth --state dev/test-repo --key-out dev-admin.pem
 ```
 
 It is loaded by the experimental `--state` flag (`server.Options.StatePath`),
@@ -22,7 +22,7 @@ a ready login. Run **with auth on** (not `--no-auth`) so the console's
 webui-signed `authenticate_user` is exercised:
 
 ```sh
-cinc-zero --state dev/test-repo --key-out webui.pem   # admin key doubles as the webui key
+cinc-server-ng --state dev/test-repo --key-out webui.pem   # admin key doubles as the webui key
 ```
 
 | user | password | access | notes |
@@ -39,7 +39,7 @@ the logged-in user, so `tim` can edit everything and `jack` can only browse.
 Passwords are stashed out-of-band on load, mirroring `POST /users`: the
 `password` field is moved into the `passwords` collection and stripped from the
 stored user record, so it is never returned by the API. As elsewhere in
-cinc-zero the password is kept in memory as-is rather than hashed.
+cinc-server-ng the password is kept in memory as-is rather than hashed.
 
 ## Layout
 

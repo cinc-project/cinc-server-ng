@@ -16,7 +16,7 @@ import (
 
 // PasswordsCollection is the store collection holding actor passwords,
 // out-of-band from the actor record (real Chef stores these hashed and never
-// returns them; cinc-zero keeps them in memory). authenticate_user reads it.
+// returns them; cinc-server-ng keeps them in memory). authenticate_user reads it.
 const PasswordsCollection = "passwords"
 
 // StashPassword moves a "password" field out of an actor object into the

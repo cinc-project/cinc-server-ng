@@ -1,4 +1,4 @@
-// Command cinc-zero runs the in-memory Chef Infra Server as a standalone
+// Command cinc-server-ng runs the in-memory Chef Infra Server as a standalone
 // process for use in test pipelines.
 package main
 
@@ -52,10 +52,10 @@ type cliFlags struct {
 // (experimental knobs). --state is hidden while its on-disk format settles.
 var hiddenFlags = map[string]bool{"state": true}
 
-// parseFlags defines the cinc-zero flag set, writing usage to out, and parses
+// parseFlags defines the cinc-server-ng flag set, writing usage to out, and parses
 // args into cliFlags. The usage printer suppresses any flag in hiddenFlags.
 func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
-	fs := flag.NewFlagSet("cinc-zero", flag.ContinueOnError)
+	fs := flag.NewFlagSet("cinc-server-ng", flag.ContinueOnError)
 	fs.SetOutput(out)
 
 	var f cliFlags
@@ -74,7 +74,7 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
 
 	fs.Usage = func() {
-		fmt.Fprintf(out, "Usage of cinc-zero:\n")
+		fmt.Fprintf(out, "Usage of cinc-server-ng:\n")
 		fs.VisitAll(func(fl *flag.Flag) {
 			if hiddenFlags[fl.Name] {
 				return
@@ -105,7 +105,7 @@ func run(args []string, out io.Writer) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "version", "--version", "-version":
-			fmt.Fprintf(out, "cinc-zero %s (commit %s, built %s)\n", version, commit, buildDate)
+			fmt.Fprintf(out, "cinc-server-ng %s (commit %s, built %s)\n", version, commit, buildDate)
 			return nil
 		}
 	}
@@ -177,7 +177,7 @@ func run(args []string, out io.Writer) error {
 	if err := srv.Start(); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "cinc-zero listening on %s\n", srv.URL())
+	fmt.Fprintf(out, "cinc-server-ng listening on %s\n", srv.URL())
 	fmt.Fprintf(out, "  orgs: %s\n  admin user: %s (auth %s, acl-enforcement %s)\n",
 		f.orgsCSV, srv.AdminName(), authState(f.noAuth), enforceState(f.enforceACLs))
 	if f.storage == "sqlite" {

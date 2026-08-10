@@ -127,7 +127,7 @@ func Script(actor string) []Step {
 		{Name: "cookbook artifact missing", Method: "GET", Path: "/cookbook_artifacts/diff-absent"},
 		{Name: "universe", Method: "GET", Path: "/universe"},
 		// The sandbox handshake issues the URLs a client uploads cookbook file
-		// bodies to. cinc-zero serves those itself with a pre-signed grant,
+		// bodies to. cinc-server-ng serves those itself with a pre-signed grant,
 		// where a real server hands out bookshelf URLs, so the shape of what
 		// comes back is expected to differ (see known.go).
 		{Name: "sandbox create", Method: "POST", Path: "/sandboxes",

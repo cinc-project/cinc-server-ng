@@ -1,7 +1,7 @@
 //go:build conformance
 
 // Package conformance drives the real knife CLI (from Cinc Workstation) against
-// an in-process cinc-zero server, exercising the full signed-request lifecycle:
+// an in-process cinc-server-ng server, exercising the full signed-request lifecycle:
 // reads, writes, search, authorization, policyfiles, and the cookbook
 // sandbox/upload flow. It is gated behind the "conformance" build tag.
 //
@@ -58,7 +58,7 @@ func knifeBin(t *testing.T) string {
 	return bin
 }
 
-// harness runs knife against a cinc-zero server that enforces ACLs.
+// harness runs knife against a cinc-server-ng server that enforces ACLs.
 type harness struct {
 	knife   string
 	dir     string

@@ -27,7 +27,7 @@ and "forward-only … downgrading is not supported" — this spec makes that tru
 
 1. **The SQL schema** — the shape of the tables (columns, indexes, new tables).
    This is what the engine versions. Most changes are additive DDL.
-2. **The JSON body format** — the opaque bytes in `objects.body`. cinc-zero stores
+2. **The JSON body format** — the opaque bytes in `objects.body`. cinc-server-ng stores
    exactly what a Chef client sent and serves it back, so the body format tracks
    the *Chef API*, not our schema. Body rewrites are rare and avoided in favour of
    fidelity; when genuinely needed they are expressed as a migration that streams
@@ -119,7 +119,7 @@ func applyMigrations(db *sql.DB, migs []migration) error {
 		last = migs[len(migs)-1].version
 	}
 	if current > last {
-		return fmt.Errorf("database schema is version %d but this cinc-zero only knows up to %d; upgrade the binary", current, last)
+		return fmt.Errorf("database schema is version %d but this cinc-server-ng only knows up to %d; upgrade the binary", current, last)
 	}
 	for _, m := range migs {
 		if m.version <= current {

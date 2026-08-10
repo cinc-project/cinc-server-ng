@@ -1,4 +1,4 @@
-# cinc-zero — In-Memory Chef Infra Server (Design)
+# cinc-server-ng — In-Memory Chef Infra Server (Design)
 
 Date: 2026-05-30
 Status: Approved — building
@@ -25,8 +25,8 @@ should talk to it unmodified.
 ## Package layout
 
 ```
-cinc-zero/
-  cmd/cinc-zero/         # CLI wrapper (flags, signals)
+cinc-server-ng/
+  cmd/cinc-server-ng/         # CLI wrapper (flags, signals)
   server/                # public embeddable API: New(opts) *Server; Start/Stop/URL/AdminKey
   internal/router/       # chi router; full Chef API surface
   internal/api/          # one file per resource group
@@ -105,7 +105,7 @@ clients/ cookbooks/ cookbook_artifacts/`; insert into store and index. Matches
 
 ### Delivery
 - Library: `srv,_ := cinczero.New(cinczero.Options{...}); srv.Start(); defer srv.Stop()` → `srv.URL()`, `srv.AdminKey()`
-- CLI: `cinc-zero --port 8889 --repo ./repo --org test` writes knife-ready key/config
+- CLI: `cinc-server-ng --port 8889 --repo ./repo --org test` writes knife-ready key/config
 - Docker: distroless image running the CLI
 
 ## Testing

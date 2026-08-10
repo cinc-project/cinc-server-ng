@@ -1,7 +1,7 @@
 name: Conformance
 
 # Drives the real knife CLI (from Cinc Workstation) against an in-process
-# cinc-zero server, validating end-to-end fidelity of signed requests, search,
+# cinc-server-ng server, validating end-to-end fidelity of signed requests, search,
 # authorization, policyfiles, and the cookbook sandbox/upload flow.
 #
 # CINC_SERVER_NG_REQUIRE_CONFORMANCE turns "knife is unusable" from a skip into a
@@ -16,7 +16,7 @@ on:
 
 jobs:
   conformance:
-    name: knife against cinc-zero
+    name: knife against cinc-server-ng
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
