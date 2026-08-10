@@ -65,40 +65,40 @@ func newInstruments(a *API) *instruments {
 	in := &instruments{
 		registry: r,
 		started:  time.Now(),
-		requests: r.Counter("cinc_zero_http_requests_total",
+		requests: r.Counter("cinc_server_ng_http_requests_total",
 			"HTTP requests served, by response class", "outcome",
 			outcomeOK, outcomeRedirect, outcomeClientError, outcomeServerError, outcomeUnauthorized),
-		latency: r.Histogram("cinc_zero_http_request_duration_seconds",
+		latency: r.Histogram("cinc_server_ng_http_request_duration_seconds",
 			"HTTP request latency", latencyBuckets),
-		searches: r.Counter("cinc_zero_search_queries_total",
+		searches: r.Counter("cinc_server_ng_search_queries_total",
 			"Search queries, by how they were resolved", "resolution",
 			searchPlanned, searchScanned),
 	}
 
 	counts := a.store.Counts()
 	if counts != nil {
-		r.CounterFunc("cinc_zero_store_reads_total",
+		r.CounterFunc("cinc_server_ng_store_reads_total",
 			"Single-object store reads. Compare with writes: the check-in path is read-dominated, "+
 				"and read amplification is what limits throughput on a durable backend.",
 			func() float64 { return float64(counts.Reads.Load()) })
-		r.CounterFunc("cinc_zero_store_writes_total", "Object writes performed",
+		r.CounterFunc("cinc_server_ng_store_writes_total", "Object writes performed",
 			func() float64 { return float64(counts.Writes.Load()) })
-		r.CounterFunc("cinc_zero_store_deletes_total", "Object deletes performed",
+		r.CounterFunc("cinc_server_ng_store_deletes_total", "Object deletes performed",
 			func() float64 { return float64(counts.Deletes.Load()) })
-		r.CounterFunc("cinc_zero_store_scans_total",
+		r.CounterFunc("cinc_server_ng_store_scans_total",
 			"Collection scans performed. A scan reads a whole collection, so a rising rate here "+
 				"means work that grows with the size of the data.",
 			func() float64 { return float64(counts.Scans.Load()) })
 	}
 
-	r.Gauge("cinc_zero_search_indexed_documents",
+	r.Gauge("cinc_server_ng_search_indexed_documents",
 		"Documents currently held in the inverted search indexes",
 		func() float64 { return float64(a.searchIdx.documents()) })
-	r.Gauge("cinc_zero_uptime_seconds", "Seconds since this server started",
+	r.Gauge("cinc_server_ng_uptime_seconds", "Seconds since this server started",
 		func() float64 { return time.Since(in.started).Seconds() })
-	r.Gauge("cinc_zero_goroutines", "Goroutines currently running",
+	r.Gauge("cinc_server_ng_goroutines", "Goroutines currently running",
 		func() float64 { return float64(runtime.NumGoroutine()) })
-	r.Gauge("cinc_zero_heap_bytes", "Heap memory currently allocated", func() float64 {
+	r.Gauge("cinc_server_ng_heap_bytes", "Heap memory currently allocated", func() float64 {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 		return float64(m.HeapAlloc)

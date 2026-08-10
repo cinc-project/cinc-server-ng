@@ -175,13 +175,13 @@ is keeping up with a fleet:
 
 | Metric | Why it matters |
 | --- | --- |
-| `cinc_zero_http_requests_total{outcome}` | Request rate split by `2xx`/`3xx`/`4xx`/`5xx`, with `401` broken out — rejected credentials mean something different from bad requests. |
-| `cinc_zero_http_request_duration_seconds` | Latency as a histogram. A mean hides the stalls; the buckets do not. |
-| `cinc_zero_store_reads_total` / `_writes_total` / `_deletes_total` | Read amplification is what limits throughput on a durable backend — the check-in path costs several reads per write, so watch the ratio, not just the totals. |
-| `cinc_zero_store_scans_total` | Collection scans. A rising rate means work that grows with the size of your data. |
-| `cinc_zero_search_queries_total{resolution}` | `indexed` vs `scanned`. A query the planner cannot handle silently falls back to scanning the whole collection; this is how you find out. |
-| `cinc_zero_search_indexed_documents` | Documents held in the inverted search indexes. |
-| `cinc_zero_uptime_seconds`, `cinc_zero_goroutines`, `cinc_zero_heap_bytes` | Process health. |
+| `cinc_server_ng_http_requests_total{outcome}` | Request rate split by `2xx`/`3xx`/`4xx`/`5xx`, with `401` broken out — rejected credentials mean something different from bad requests. |
+| `cinc_server_ng_http_request_duration_seconds` | Latency as a histogram. A mean hides the stalls; the buckets do not. |
+| `cinc_server_ng_store_reads_total` / `_writes_total` / `_deletes_total` | Read amplification is what limits throughput on a durable backend — the check-in path costs several reads per write, so watch the ratio, not just the totals. |
+| `cinc_server_ng_store_scans_total` | Collection scans. A rising rate means work that grows with the size of your data. |
+| `cinc_server_ng_search_queries_total{resolution}` | `indexed` vs `scanned`. A query the planner cannot handle silently falls back to scanning the whole collection; this is how you find out. |
+| `cinc_server_ng_search_indexed_documents` | Documents held in the inverted search indexes. |
+| `cinc_server_ng_uptime_seconds`, `cinc_server_ng_goroutines`, `cinc_server_ng_heap_bytes` | Process health. |
 
 Instrumentation is measured rather than assumed: it costs about 150ns per
 request, which is ~3% of the cheapest possible request (no auth, in-memory) and

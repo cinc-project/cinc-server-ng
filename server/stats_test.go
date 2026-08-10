@@ -83,7 +83,7 @@ func TestStatsCountsRequestsByOutcome(t *testing.T) {
 	}
 
 	stats := gatherStats(t, srv)
-	reqs, ok := stats["cinc_zero_http_requests_total"]
+	reqs, ok := stats["cinc_server_ng_http_requests_total"]
 	if !ok {
 		t.Fatal("no request counter in /_stats")
 	}
@@ -97,7 +97,7 @@ func TestStatsCountsRequestsByOutcome(t *testing.T) {
 		t.Errorf("401 = %v, want the rejected unsigned request", got)
 	}
 
-	lat, ok := stats["cinc_zero_http_request_duration_seconds"]
+	lat, ok := stats["cinc_server_ng_http_request_duration_seconds"]
 	if !ok {
 		t.Fatal("no latency histogram in /_stats")
 	}
@@ -113,8 +113,8 @@ func TestStatsReportsStoreWork(t *testing.T) {
 	base := srv.URL() + "/organizations/acme"
 
 	before := gatherStats(t, srv)
-	beforeReads := value(t, before["cinc_zero_store_reads_total"], "")
-	beforeWrites := value(t, before["cinc_zero_store_writes_total"], "")
+	beforeReads := value(t, before["cinc_server_ng_store_reads_total"], "")
+	beforeWrites := value(t, before["cinc_server_ng_store_writes_total"], "")
 
 	if code := statusOf(t, signed(t, srv, "POST", base+"/nodes", `{"name":"web01"}`)); code != 201 {
 		t.Fatalf("create node = %d", code)
@@ -126,10 +126,10 @@ func TestStatsReportsStoreWork(t *testing.T) {
 	}
 
 	after := gatherStats(t, srv)
-	if got := value(t, after["cinc_zero_store_reads_total"], ""); got <= beforeReads {
+	if got := value(t, after["cinc_server_ng_store_reads_total"], ""); got <= beforeReads {
 		t.Errorf("reads did not advance: %v then %v", beforeReads, got)
 	}
-	if got := value(t, after["cinc_zero_store_writes_total"], ""); got <= beforeWrites {
+	if got := value(t, after["cinc_server_ng_store_writes_total"], ""); got <= beforeWrites {
 		t.Errorf("writes did not advance: %v then %v", beforeWrites, got)
 	}
 }
@@ -148,7 +148,7 @@ func TestStatsReportsSearchResolution(t *testing.T) {
 		t.Fatalf("search = %d", code)
 	}
 
-	searches := gatherStats(t, srv)["cinc_zero_search_queries_total"]
+	searches := gatherStats(t, srv)["cinc_server_ng_search_queries_total"]
 	if got := value(t, searches, "indexed"); got < 1 {
 		t.Errorf("indexed searches = %v, want at least 1", got)
 	}
@@ -178,11 +178,11 @@ func TestStatsServesPrometheusTextOnRequest(t *testing.T) {
 	}
 	body := string(raw)
 	for _, want := range []string{
-		"# TYPE cinc_zero_http_requests_total counter",
-		`cinc_zero_http_requests_total{outcome="2xx"}`,
-		"# TYPE cinc_zero_http_request_duration_seconds histogram",
-		"cinc_zero_http_request_duration_seconds_bucket{le=",
-		"# TYPE cinc_zero_uptime_seconds gauge",
+		"# TYPE cinc_server_ng_http_requests_total counter",
+		`cinc_server_ng_http_requests_total{outcome="2xx"}`,
+		"# TYPE cinc_server_ng_http_request_duration_seconds histogram",
+		"cinc_server_ng_http_request_duration_seconds_bucket{le=",
+		"# TYPE cinc_server_ng_uptime_seconds gauge",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("text exposition missing %q:\n%s", want, body)
