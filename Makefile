@@ -1,7 +1,7 @@
-# cinc-zero build automation
+# cinc-server-ng build automation
 
-BINARY      := cinc-zero
-CMD_PKG     := ./cmd/cinc-zero
+BINARY      := cinc-server-ng
+CMD_PKG     := ./cmd/cinc-server-ng
 LDFLAGS_PKG := main
 DIST_DIR    ?= dist
 PLATFORMS   := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
@@ -19,7 +19,7 @@ LDFLAGS := -X $(LDFLAGS_PKG).version=$(VERSION) \
 
 all: build
 
-## build: compile the cinc-zero binary with version metadata
+## build: compile the cinc-server-ng binary with version metadata
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD_PKG)
 
@@ -38,7 +38,7 @@ dist:
 	done
 	cd "$(DIST_DIR)" && shasum -a 256 *.tar.gz > SHA256SUMS
 
-## install: install cinc-zero into the Go bin directory
+## install: install cinc-server-ng into the Go bin directory
 install:
 	go install -ldflags "$(LDFLAGS)" $(CMD_PKG)
 
@@ -47,9 +47,9 @@ test:
 	go test ./... -race -cover
 
 ## conformance: drive the real knife CLI (from Cinc Workstation) against
-## cinc-zero; needs knife installed (see https://omnitruck.cinc.sh/install.sh)
+## cinc-server-ng; needs knife installed (see https://omnitruck.cinc.sh/install.sh)
 conformance:
-	CINC_ZERO_REQUIRE_CONFORMANCE=1 go test -tags conformance ./conformance/ -v
+	CINC_SERVER_NG_REQUIRE_CONFORMANCE=1 go test -tags conformance ./conformance/ -v
 
 ## differential: compare responses against a real Chef Infra Server. Needs both
 ## servers running and DIFF_* configured; see .github/workflows/differential.yml.
@@ -73,11 +73,11 @@ clean:
 	rm -rf $(BINARY) $(DIST_DIR)
 	go clean
 
-## run: build and run cinc-zero (pass flags via ARGS="...")
+## run: build and run cinc-server-ng (pass flags via ARGS="...")
 run: build
 	./$(BINARY) $(ARGS)
 
-## run-dev: build and run cinc-zero pre-loaded with the dev/test-repo seed (no auth, key written to ./dev-admin.pem)
+## run-dev: build and run cinc-server-ng pre-loaded with the dev/test-repo seed (no auth, key written to ./dev-admin.pem)
 run-dev: build
 	./$(BINARY) --no-auth --state dev/test-repo --key-out dev-admin.pem $(ARGS)
 

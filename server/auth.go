@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/api"
-	"github.com/tas50/cinc-zero/internal/auth"
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/api"
+	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // authMiddleware verifies the Mixlib signed-header authentication on every
@@ -27,7 +27,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// The cookbook file store is exempt from Mixlib signing: in real Chef
 		// the sandbox hands back pre-signed bookshelf URLs that
-		// knife/chef-client/cinc-client PUT/GET without signing them. cinc-zero
+		// knife/chef-client/cinc-client PUT/GET without signing them. cinc-server-ng
 		// reproduces that shape, so authorization rides on the URL — the grant
 		// the server issued, scoped to this org, checksum, and operation.
 		if org, checksum, ok := fileStorePath(r.URL.Path); ok {

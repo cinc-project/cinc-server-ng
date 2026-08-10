@@ -1,7 +1,7 @@
 name: release
 
 # Publish a multi-arch container image when a GitHub Release is published.
-# The image goes to GHCR under the repository owner: ghcr.io/<owner>/cinc-zero.
+# The image goes to GHCR under the repository owner: ghcr.io/<owner>/cinc-server-ng.
 on:
   release:
     types: [published]
@@ -37,7 +37,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ghcr.io/${{ github.repository_owner }}/cinc-zero
+          images: ghcr.io/${{ github.repository_owner }}/cinc-server-ng
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -65,9 +65,9 @@ jobs:
 
       # A second, Sigstore-signed SLSA provenance attestation recorded in GitHub's
       # transparency log and pushed alongside the image. Verify with:
-      #   gh attestation verify oci://ghcr.io/<owner>/cinc-zero:<tag> --owner <owner>
+      #   gh attestation verify oci://ghcr.io/<owner>/cinc-server-ng:<tag> --owner <owner>
       - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/cinc-zero
+          subject-name: ghcr.io/${{ github.repository_owner }}/cinc-server-ng
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true

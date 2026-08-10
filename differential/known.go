@@ -22,20 +22,20 @@ type Accepted struct {
 }
 
 // accepted is the seed list. It deliberately contains only deviations that are
-// evident from cinc-zero's own source; the rest are expected to be discovered
+// evident from cinc-server-ng's own source; the rest are expected to be discovered
 // by the first run against a real server and triaged individually, which is the
 // point of the exercise.
 var accepted = []Accepted{
 	{
 		Step:  "license",
 		Field: "*",
-		Reason: "cinc-zero has no entitlement system and always reports an unlimited, " +
+		Reason: "cinc-server-ng has no entitlement system and always reports an unlimited, " +
 			"non-exceeded license, where a real server reports actual node licensing.",
 	},
 	{
 		Step:  "sandbox create",
 		Field: "checksums*",
-		Reason: "cinc-zero serves cookbook file bodies itself, handing out a pre-signed URL " +
+		Reason: "cinc-server-ng serves cookbook file bodies itself, handing out a pre-signed URL " +
 			"on its own address; a real server hands out a bookshelf URL. The flow is the " +
 			"same and clients use whatever URL they are given, but the URL cannot match.",
 	},

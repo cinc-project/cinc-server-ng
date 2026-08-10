@@ -5,14 +5,14 @@ Status: Proposed — awaiting review
 
 ## Goal
 
-A standalone, compile-and-run utility that makes an existing cinc-zero fleet
+A standalone, compile-and-run utility that makes an existing cinc-server-ng fleet
 behave like a live datacenter: most nodes "check in" on a ~30-minute cadence,
 continuously refreshing their last-seen time, while a stuck **2%** never report
 — modelling the broken hosts every real fleet carries. It generates realistic,
 steady-state traffic (not peak load — that's what `cmd/loadtest` is for).
 
 This is a development/demo tool. Like `cmd/loadtest`, it is **not** built into
-the `cinc-zero` binary.
+the `cinc-server-ng` binary.
 
 ## Domain model
 

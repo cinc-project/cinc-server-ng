@@ -1,4 +1,4 @@
-# Developing cinc-zero
+# Developing cinc-server-ng
 
 Building, testing, the dev fixtures, and running a fully-populated local server
 you can point a management console at.
@@ -6,7 +6,7 @@ you can point a management console at.
 ## Build and test
 
 ```sh
-make build          # compile ./cinc-zero (version metadata via ldflags)
+make build          # compile ./cinc-server-ng (version metadata via ldflags)
 make test           # go test ./... -race -cover (the full suite)
 make vet            # go vet ./...
 make fmt            # gofmt -w .
@@ -22,7 +22,7 @@ byte-for-byte compatibility with Chef clients.
 ## Conformance
 
 A build-tagged suite drives the real **`knife` CLI** (from Cinc Workstation)
-against an in-process cinc-zero server, exercising signed reads/writes, search,
+against an in-process cinc-server-ng server, exercising signed reads/writes, search,
 and the cookbook sandbox/upload flow:
 
 ```sh
@@ -114,7 +114,7 @@ curl -X POST http://127.0.0.1:8889/authenticate_user \
 [cinc-console](https://github.com/tas50/cinc-console) (a web management console
 for Chef Infra Server) signs requests on a user's behalf using the **webui key**
 via the
-`X-Ops-Request-Source: web` mechanism, which cinc-zero supports. By default the
+`X-Ops-Request-Source: web` mechanism, which cinc-server-ng supports. By default the
 webui key **is** the bootstrap admin key, i.e. the `dev-admin.pem` written above —
 no extra setup. (To use a distinct key instead, pass `--webui-key <path>`.)
 

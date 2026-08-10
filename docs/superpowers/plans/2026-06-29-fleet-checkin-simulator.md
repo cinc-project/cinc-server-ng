@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A standalone `cmd/fleetsim` tool that discovers a cinc-zero fleet and drives realistic steady-state check-in traffic — most nodes refresh `ohai_time` on a chef-client-style cadence, a deterministic 2% never check in.
+**Goal:** A standalone `cmd/fleetsim` tool that discovers a cinc-server-ng fleet and drives realistic steady-state check-in traffic — most nodes refresh `ohai_time` on a chef-client-style cadence, a deterministic 2% never check in.
 
 **Architecture:** One goroutine per converging node, each self-scheduling its check-ins via `sleep(initialSplay)` then a loop of `checkin(); sleep(interval + rand[0,splay))/speed`. Each check-in does `GET /nodes/{name}` → stamp `automatic.ohai_time = now` → `PUT /nodes/{name}`. A single admin actor signs requests (unsigned when no key). Logic is split into pure, unit-testable functions plus one `run()` orchestrator with an end-to-end test against an in-process `server.New`.
 
@@ -10,10 +10,10 @@
 
 ## Global Constraints
 
-- Module path: `github.com/tas50/cinc-zero`.
+- Module path: `github.com/tas50/cinc-server-ng`.
 - Go version floor: `go 1.26.3` (per `go.mod`).
 - RNG: use `math/rand` (v1), matching `cmd/seedgen`. Never `math/rand/v2`.
-- Not built into the `cinc-zero` binary — this is a dev tool like `cmd/loadtest`.
+- Not built into the `cinc-server-ng` binary — this is a dev tool like `cmd/loadtest`.
 - Errors are surfaced, never silently swallowed: discovery failure is fatal; per-check-in errors are counted + logged but non-fatal.
 - `ohai_time` is always stamped with real wall-clock `time.Now().Unix()`, regardless of `--speed`.
 - Run `go test ./cmd/fleetsim/ && go vet ./cmd/fleetsim/` before each commit; `make test && make vet` before the final commit.
@@ -295,7 +295,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/auth"
 )
 
 // signer holds the single admin actor used to sign every request. A nil signer
@@ -617,7 +617,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/server"
+	"github.com/tas50/cinc-server-ng/server"
 )
 
 func TestRunDrivesConvergingNotStuck(t *testing.T) {
@@ -684,13 +684,13 @@ Expected: FAIL — `undefined: config` / `undefined: run`
 
 ```go
 // Command fleetsim drives realistic steady-state check-in traffic against a
-// cinc-zero org. It discovers the existing fleet, marks a deterministic 2% as
+// cinc-server-ng org. It discovers the existing fleet, marks a deterministic 2% as
 // "stuck" (they never check in, so their ohai_time goes stale), and drives every
 // other node on a chef-client-style cadence: a check-in every interval plus up
 // to splay of jitter, with the whole schedule compressed by --speed. Each
 // check-in does GET /nodes/{name} -> stamp automatic.ohai_time = now -> PUT.
 //
-// This is a development tool; it is not built into the cinc-zero binary.
+// This is a development tool; it is not built into the cinc-server-ng binary.
 //
 // Example:
 //

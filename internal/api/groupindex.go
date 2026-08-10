@@ -5,7 +5,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // Reverse index of group membership.

@@ -1,7 +1,7 @@
 //go:build conformance
 
 // Package conformance drives the real knife CLI (from Cinc Workstation) against
-// an in-process cinc-zero server, exercising the full signed-request lifecycle:
+// an in-process cinc-server-ng server, exercising the full signed-request lifecycle:
 // reads, writes, search, authorization, policyfiles, and the cookbook
 // sandbox/upload flow. It is gated behind the "conformance" build tag.
 //
@@ -23,13 +23,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/server"
+	"github.com/tas50/cinc-server-ng/server"
 )
 
 // requireEnvVar makes a missing knife a failure rather than a skip. CI sets it,
 // because a conformance job that silently executes nothing while reporting
 // success is worse than having no conformance job at all.
-const requireEnvVar = "CINC_ZERO_REQUIRE_CONFORMANCE"
+const requireEnvVar = "CINC_SERVER_NG_REQUIRE_CONFORMANCE"
 
 // unavailable reports that knife cannot be used: it fails when conformance is
 // required, and skips otherwise so a local `go test ./...` stays usable.
@@ -58,7 +58,7 @@ func knifeBin(t *testing.T) string {
 	return bin
 }
 
-// harness runs knife against a cinc-zero server that enforces ACLs.
+// harness runs knife against a cinc-server-ng server that enforces ACLs.
 type harness struct {
 	knife   string
 	dir     string

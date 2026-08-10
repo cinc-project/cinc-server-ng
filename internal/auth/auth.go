@@ -1,6 +1,6 @@
 // Package auth implements verification of Chef's Mixlib::Authentication
 // signed-header protocol (versions 1.0, 1.1, and 1.3), so unmodified
-// chef-client / knife / cinc clients can authenticate to cinc-zero with real
+// chef-client / knife / cinc clients can authenticate to cinc-server-ng with real
 // RSA key pairs.
 package auth
 

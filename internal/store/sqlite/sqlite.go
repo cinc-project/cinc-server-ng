@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 	_ "modernc.org/sqlite"
 )
 
@@ -450,7 +450,7 @@ func applyMigrations(db *sql.DB, migs []migration) error {
 		last = migs[len(migs)-1].version
 	}
 	if current > last {
-		return fmt.Errorf("database schema is version %d but this cinc-zero only knows up to %d; upgrade the binary", current, last)
+		return fmt.Errorf("database schema is version %d but this cinc-server-ng only knows up to %d; upgrade the binary", current, last)
 	}
 	for _, m := range migs {
 		if m.version <= current {

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // ctxKey is the private type for context keys set by this package.

@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/differential"
-	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-server-ng/differential"
+	"github.com/tas50/cinc-server-ng/internal/auth"
 )
 
 // Environment the workflow supplies.
@@ -63,7 +63,7 @@ func TestAgainstRealChefServer(t *testing.T) {
 		Name: "chef-infra-server", BaseURL: referenceURL, User: user, Key: key, CACert: ca,
 	}
 	candidate := &differential.Target{
-		Name: "cinc-zero", BaseURL: candidateURL, User: user, Key: key,
+		Name: "cinc-server-ng", BaseURL: candidateURL, User: user, Key: key,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)

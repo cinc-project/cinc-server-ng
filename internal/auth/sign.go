@@ -13,7 +13,7 @@ import (
 // version 1.3 (SHA256 / RSASSA-PKCS1-v1.5), setting the X-Ops-* headers the
 // way a real chef-client would. It is the signing counterpart to Verify and is
 // used both for end-to-end tests and as a convenience for library callers that
-// want to talk to a cinc-zero server.
+// want to talk to a cinc-server-ng server.
 func SignRequest(r *http.Request, userID, timestamp string, body []byte, key *rsa.PrivateKey) error {
 	p := &Parsed{
 		Version:     "1.3",

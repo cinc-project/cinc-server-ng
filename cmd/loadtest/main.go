@@ -1,4 +1,4 @@
-// Command loadtest is a small HTTP benchmark harness for comparing cinc-zero
+// Command loadtest is a small HTTP benchmark harness for comparing cinc-server-ng
 // against other Chef Infra Server implementations (notably the chef-zero gem).
 // It seeds an organization with nodes, then measures, per operation:
 //
@@ -12,7 +12,7 @@
 // the throughput numbers reflect the server's signature-verification cost rather
 // than the client's RSA-signing cost.
 //
-// This is a development tool; it is not built into the cinc-zero binary.
+// This is a development tool; it is not built into the cinc-server-ng binary.
 //
 // Example:
 //
@@ -37,7 +37,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/auth"
 )
 
 var (
@@ -79,7 +79,7 @@ func main() {
 	fmt.Printf("== %s (%s, auth=%v) ==\n", *label, *base, signer.on)
 	seed(*seedN)
 
-	// The cold sample of each op is its first request after seeding. cinc-zero's
+	// The cold sample of each op is its first request after seeding. cinc-server-ng's
 	// match-all (*:*) search returns whole objects without flattening, so the
 	// "search *:*" op does not warm the node flatten cache: the later "search
 	// filtered" cold therefore measures a genuine cold index build rather than

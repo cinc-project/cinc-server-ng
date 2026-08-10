@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/auth"
-	"github.com/tas50/cinc-zero/internal/store"
-	"github.com/tas50/cinc-zero/internal/store/sqlite"
+	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store/sqlite"
 )
 
 // Fleet check-in benchmarks measured through the *whole* server stack —
@@ -24,7 +24,7 @@ import (
 //
 // Requests are pre-signed outside the timer: signing is an RSA *private* key
 // operation that happens on the client (the node), and paying it in the loop
-// would measure chef-client rather than cinc-zero.
+// would measure chef-client rather than cinc-server-ng.
 
 const benchFleetNodes = 512
 

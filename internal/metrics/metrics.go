@@ -2,7 +2,7 @@
 // sampled gauges, and histograms, rendered either as the JSON metric families
 // Chef's /_stats endpoint returns or as Prometheus text exposition.
 //
-// It is deliberately tiny rather than a Prometheus client dependency. cinc-zero
+// It is deliberately tiny rather than a Prometheus client dependency. cinc-server-ng
 // ships as a single static binary with one direct dependency, and what a fleet
 // server actually needs to expose — request rate and latency, how much store
 // work a request costs, whether searches are being served from the index — is a

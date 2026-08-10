@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // BenchmarkListObjects measures the node-list endpoint end-to-end through the

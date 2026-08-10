@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // Cookbook directories are loaded by checksumming every file into the blob

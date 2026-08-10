@@ -1,4 +1,4 @@
-// Package store is the data store for cinc-zero. All Chef objects live here,
+// Package store is the data store for cinc-server-ng. All Chef objects live here,
 // namespaced by organization then by collection (e.g. "nodes", "roles") then by
 // key. Values are stored as raw canonical JSON so client payloads round-trip
 // exactly.

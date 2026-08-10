@@ -20,13 +20,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tas50/cinc-zero/internal/api"
-	"github.com/tas50/cinc-zero/internal/auth"
-	"github.com/tas50/cinc-zero/internal/metrics"
-	"github.com/tas50/cinc-zero/internal/repo"
-	"github.com/tas50/cinc-zero/internal/state"
-	"github.com/tas50/cinc-zero/internal/store"
-	"github.com/tas50/cinc-zero/internal/store/sqlite"
+	"github.com/tas50/cinc-server-ng/internal/api"
+	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/tas50/cinc-server-ng/internal/metrics"
+	"github.com/tas50/cinc-server-ng/internal/repo"
+	"github.com/tas50/cinc-server-ng/internal/state"
+	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/store/sqlite"
 )
 
 // Options configures a Server. The zero value is usable: it creates a single
@@ -146,7 +146,7 @@ func buildStore(opts Options) (*store.Store, error) {
 // serverKeysColl is a private global collection holding the PEM-encoded bootstrap
 // private keys (admin and per-org validators). It is not exposed by any API route,
 // so a durable backend can keep stable credentials across restarts. Real Chef
-// Infra Server never stores private keys; cinc-zero is a test server that already
+// Infra Server never stores private keys; cinc-server-ng is a test server that already
 // keeps secrets (e.g. passwords) in its store, and persisting these keys is what
 // makes a restarted SQLite-backed server keep working with existing clients.
 const serverKeysColl = "server_keys"
@@ -181,7 +181,7 @@ func storeServerKey(st *store.Store, name string, key *rsa.PrivateKey) error {
 	return st.Global().Put(serverKeysColl, name, auth.EncodePrivateKeyPEM(key))
 }
 
-// Server is a running (or ready-to-run) cinc-zero instance.
+// Server is a running (or ready-to-run) cinc-server-ng instance.
 type Server struct {
 	opts          Options
 	store         *store.Store

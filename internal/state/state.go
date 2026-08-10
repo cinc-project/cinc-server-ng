@@ -1,4 +1,4 @@
-// Package state loads a complete cinc-zero server's state from an on-disk
+// Package state loads a complete cinc-server-ng server's state from an on-disk
 // directory: global users, every organization, and each org's chef-objects
 // plus authz groups. It is a superset of internal/repo, which loads only a
 // single org's chef-objects; state reuses repo.Load for those and adds the
@@ -27,9 +27,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tas50/cinc-zero/internal/api"
-	"github.com/tas50/cinc-zero/internal/repo"
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/api"
+	"github.com/tas50/cinc-server-ng/internal/repo"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // Summary reports what Load hydrated.

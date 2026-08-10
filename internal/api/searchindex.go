@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/tas50/cinc-zero/internal/search"
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/search"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // The inverted search index.

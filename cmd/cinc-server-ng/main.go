@@ -1,4 +1,4 @@
-// Command cinc-zero runs the in-memory Chef Infra Server as a standalone
+// Command cinc-server-ng runs the in-memory Chef Infra Server as a standalone
 // process for use in test pipelines.
 package main
 
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/tas50/cinc-zero/server"
+	"github.com/tas50/cinc-server-ng/server"
 )
 
 // Build metadata, injected at link time via -ldflags (see the Makefile).
@@ -52,10 +52,10 @@ type cliFlags struct {
 // (experimental knobs). --state is hidden while its on-disk format settles.
 var hiddenFlags = map[string]bool{"state": true}
 
-// parseFlags defines the cinc-zero flag set, writing usage to out, and parses
+// parseFlags defines the cinc-server-ng flag set, writing usage to out, and parses
 // args into cliFlags. The usage printer suppresses any flag in hiddenFlags.
 func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
-	fs := flag.NewFlagSet("cinc-zero", flag.ContinueOnError)
+	fs := flag.NewFlagSet("cinc-server-ng", flag.ContinueOnError)
 	fs.SetOutput(out)
 
 	var f cliFlags
@@ -68,13 +68,13 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.StringVar(&f.repo, "repo", "", "path to a chef-repo to load into the first org at startup")
 	fs.StringVar(&f.state, "state", "", "path to a full server-state directory to load at startup")
 	fs.StringVar(&f.webuiKey, "webui-key", "", "path to a webui public/private key for X-Ops-Request-Source: web impersonation (defaults to the admin key)")
-	fs.StringVar(&f.storage, "storage", envOr("CINC_ZERO_STORAGE", "memory"), "storage backend: memory (ephemeral) or sqlite (durable)")
-	fs.StringVar(&f.db, "db", os.Getenv("CINC_ZERO_DB"), "sqlite database file path (required when --storage sqlite)")
+	fs.StringVar(&f.storage, "storage", envOr("CINC_SERVER_NG_STORAGE", "memory"), "storage backend: memory (ephemeral) or sqlite (durable)")
+	fs.StringVar(&f.db, "db", os.Getenv("CINC_SERVER_NG_DB"), "sqlite database file path (required when --storage sqlite)")
 	fs.BoolVar(&f.groupCommit, "sqlite-group-commit", true, "batch concurrent sqlite writes into shared transactions: much higher write throughput and far better tail latency under fleet load, at a few microseconds more on a serialized single-client write; pass --sqlite-group-commit=false to opt out")
 	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
 
 	fs.Usage = func() {
-		fmt.Fprintf(out, "Usage of cinc-zero:\n")
+		fmt.Fprintf(out, "Usage of cinc-server-ng:\n")
 		fs.VisitAll(func(fl *flag.Flag) {
 			if hiddenFlags[fl.Name] {
 				return
@@ -105,7 +105,7 @@ func run(args []string, out io.Writer) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "version", "--version", "-version":
-			fmt.Fprintf(out, "cinc-zero %s (commit %s, built %s)\n", version, commit, buildDate)
+			fmt.Fprintf(out, "cinc-server-ng %s (commit %s, built %s)\n", version, commit, buildDate)
 			return nil
 		}
 	}
@@ -177,7 +177,7 @@ func run(args []string, out io.Writer) error {
 	if err := srv.Start(); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "cinc-zero listening on %s\n", srv.URL())
+	fmt.Fprintf(out, "cinc-server-ng listening on %s\n", srv.URL())
 	fmt.Fprintf(out, "  orgs: %s\n  admin user: %s (auth %s, acl-enforcement %s)\n",
 		f.orgsCSV, srv.AdminName(), authState(f.noAuth), enforceState(f.enforceACLs))
 	if f.storage == "sqlite" {
@@ -208,7 +208,7 @@ func run(args []string, out io.Writer) error {
 }
 
 // envOr returns the value of environment variable key, or def when it is unset
-// or empty. It lets storage flags default from CINC_ZERO_* (handy in containers).
+// or empty. It lets storage flags default from CINC_SERVER_NG_* (handy in containers).
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

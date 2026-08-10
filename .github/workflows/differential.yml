@@ -1,10 +1,10 @@
 name: Differential
 
-# Compares cinc-zero's API responses against a real Chef Infra Server (the FOSS
+# Compares cinc-server-ng's API responses against a real Chef Infra Server (the FOSS
 # Cinc Server distribution) by issuing the same requests to both and diffing
 # what comes back.
 #
-# Every other suite checks cinc-zero against its own idea of correct. This is
+# Every other suite checks cinc-server-ng against its own idea of correct. This is
 # the only thing that checks it against the real implementation, so it is the
 # only thing that can find a response we have confidently got wrong.
 #
@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   differential:
-    name: cinc-zero vs Chef Infra Server
+    name: cinc-server-ng vs Chef Infra Server
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -125,7 +125,7 @@ jobs:
           # to address the server by that name for verification to succeed.
           echo "DIFF_REFERENCE_URL=https://$(hostname -f)/organizations/$ORG" >> "$GITHUB_ENV"
 
-      - name: Seed cinc-zero with the same identity
+      - name: Seed cinc-server-ng with the same identity
         run: |
           set -euo pipefail
           mkdir -p /tmp/state/users "/tmp/state/organizations/$ORG/groups"
@@ -140,16 +140,16 @@ jobs:
           {"groupname":"admins","users":["$DIFF_USER"],"clients":[],"groups":[]}
           EOF
 
-      - name: Start cinc-zero
+      - name: Start cinc-server-ng
         run: |
           set -euo pipefail
-          go build -o /tmp/cinc-zero ./cmd/cinc-zero
-          /tmp/cinc-zero --addr 127.0.0.1:8889 --orgs "$ORG" --state /tmp/state >/tmp/cinc-zero.log 2>&1 &
+          go build -o /tmp/cinc-server-ng ./cmd/cinc-server-ng
+          /tmp/cinc-server-ng --addr 127.0.0.1:8889 --orgs "$ORG" --state /tmp/state >/tmp/cinc-server-ng.log 2>&1 &
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8889/_status >/dev/null; then exit 0; fi
             sleep 1
           done
-          echo "cinc-zero did not become ready:"; cat /tmp/cinc-zero.log; exit 1
+          echo "cinc-server-ng did not become ready:"; cat /tmp/cinc-server-ng.log; exit 1
 
       - name: Check the reference API is actually routed
         run: |
@@ -182,6 +182,6 @@ jobs:
           DIFF_REFERENCE_CA: /tmp/diff/ca.pem
         run: go test -tags differential ./differential/ -v -timeout 30m
 
-      - name: cinc-zero log
+      - name: cinc-server-ng log
         if: always()
-        run: cat /tmp/cinc-zero.log || true
+        run: cat /tmp/cinc-server-ng.log || true

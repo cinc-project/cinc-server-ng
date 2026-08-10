@@ -12,8 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tas50/cinc-zero/internal/search"
-	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-server-ng/internal/search"
+	"github.com/tas50/cinc-server-ng/internal/store"
 )
 
 // searchCache memoizes the flattened searchable view of stored documents.
@@ -25,7 +25,7 @@ import (
 // whose raw slice still aliases the stored one is known current. A write
 // replaces the slice, so the stale entry simply fails the identity check and is
 // recomputed — no explicit invalidation is needed. Entries for deleted objects
-// linger but are bounded by the set of distinct keys ever searched; cinc-zero
+// linger but are bounded by the set of distinct keys ever searched; cinc-server-ng
 // is a short-lived in-memory test server, so this is acceptable.
 //
 // A search scan reads one entry per stored document, so the hit path must not

@@ -1,11 +1,11 @@
 // Command fleetsim drives realistic steady-state check-in traffic against a
-// cinc-zero org. It discovers the existing fleet, marks a deterministic 2% as
+// cinc-server-ng org. It discovers the existing fleet, marks a deterministic 2% as
 // "stuck" (they never check in, so their ohai_time goes stale), and drives every
 // other node on a chef-client-style cadence: a check-in every interval plus up
 // to splay of jitter, with the whole schedule compressed by --speed. Each
 // check-in does GET /nodes/{name} -> stamp automatic.ohai_time = now -> PUT.
 //
-// This is a development tool; it is not built into the cinc-zero binary.
+// This is a development tool; it is not built into the cinc-server-ng binary.
 //
 // Example:
 //

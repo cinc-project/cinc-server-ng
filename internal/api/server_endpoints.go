@@ -40,7 +40,7 @@ func (a *API) serverAPIVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 // license reports the server license state. A stock Chef Infra Server exposes
-// this endpoint so clients can surface node-limit warnings; cinc-zero is an
+// this endpoint so clients can surface node-limit warnings; cinc-server-ng is an
 // unlimited in-memory test server, so it always reports a valid, non-exceeded
 // license with no nodes counted against it.
 func (a *API) license(w http.ResponseWriter, r *http.Request) {

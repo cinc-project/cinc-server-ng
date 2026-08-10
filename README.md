@@ -1,4 +1,4 @@
-# cinc-zero
+# cinc-server-ng
 
 A lightweight, drop-in alternative to
 [Chef Infra Server](https://docs.chef.io/server/), implemented in Go. It speaks
@@ -13,9 +13,9 @@ external database to operate. Packaged as a minimal container image, it drops
 cleanly into modern orchestration such as Kubernetes (a persistent volume for the
 SQLite database is all the state it needs).
 
-## Why cinc-zero
+## Why cinc-server-ng
 
-**Complete API, including Policyfiles.** cinc-zero implements the full surface a
+**Complete API, including Policyfiles.** cinc-server-ng implements the full surface a
 real client touches: nodes, roles, environments, clients, users, data bags,
 cookbooks, search, authz groups/containers, ACLs, key management, org
 association, and multi-org management. Mixlib authentication (v1.0 / 1.1 / 1.3)
@@ -37,7 +37,7 @@ embed it directly in Go tests as a library.
 **Tiny attack and patch surface.** A production Chef Infra Server is a large
 multi-service stack (Erlang, Ruby, PostgreSQL, a search service, a message
 queue, a reverse proxy) built from thousands of dependencies to track and patch.
-cinc-zero's **only third-party dependencies are the pure-Go SQLite driver and
+cinc-server-ng's **only third-party dependencies are the pure-Go SQLite driver and
 its support libraries**, and those only run when you choose the durable backend;
 everything else is the Go standard library. No extra services to harden, no
 runtime in the image, and the distroless/scratch container has no shell to
@@ -46,7 +46,7 @@ exploit, all while still authenticating with the genuine Mixlib protocol.
 ## Use as a Go library
 
 ```go
-import "github.com/tas50/cinc-zero/server"
+import "github.com/tas50/cinc-server-ng/server"
 
 srv, _ := server.New(server.Options{Orgs: []string{"test"}})
 _ = srv.Start()
@@ -64,7 +64,7 @@ As a Go library the zero value is permissive: ACLs and group membership are
 stored but not enforced, so every authenticated actor is permitted and test
 pipelines stay friction-free. To exercise authorization-dependent behavior
 (requests a real server answers with `403 Forbidden`), set
-`Options{EnforceACL: true}`. (The standalone `cinc-zero` binary takes the
+`Options{EnforceACL: true}`. (The standalone `cinc-server-ng` binary takes the
 opposite, production-leaning default: it **enforces** unless told otherwise; see
 "Use as a binary".) Enforcement matches a real Chef Infra Server: the creator of
 an object is granted full control of it, a registered client joins the org's
@@ -84,8 +84,8 @@ user. The bootstrap admin is a superuser and bypasses ACLs, mirroring Chef's
 ## Use as a binary
 
 ```sh
-go build -o cinc-zero ./cmd/cinc-zero
-./cinc-zero --addr 127.0.0.1:8889 --orgs test --key-out admin.pem
+go build -o cinc-server-ng ./cmd/cinc-server-ng
+./cinc-server-ng --addr 127.0.0.1:8889 --orgs test --key-out admin.pem
 ```
 
 The binary **enforces ACLs by default**. A freshly bootstrapped org behaves like
@@ -108,17 +108,17 @@ synthesized manifest.
 
 ## Persistence and storage
 
-By default cinc-zero keeps all state in memory: the ephemeral "zero" experience
+By default cinc-server-ng keeps all state in memory: the ephemeral "zero" experience
 that needs no disk and resets on exit. To persist state across restarts, point it
 at a SQLite database:
 
 ```sh
-./cinc-zero --storage sqlite --db ./cinc.db
+./cinc-server-ng --storage sqlite --db ./cinc.db
 ```
 
 `--storage` accepts `memory` (default) or `sqlite`; `--storage sqlite` requires
 `--db <path>`. Both flags also read from the environment
-(`CINC_ZERO_STORAGE`, `CINC_ZERO_DB`), which is handy in containers. SQLite uses
+(`CINC_SERVER_NG_STORAGE`, `CINC_SERVER_NG_DB`), which is handy in containers. SQLite uses
 the pure-Go [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) driver,
 so the static binary and `scratch`/`distroless` images keep working with
 `CGO_ENABLED=0`.
@@ -141,7 +141,7 @@ and the bootstrap admin/validator keys are persisted so the key written by
 `--key-out` keeps authenticating after a restart. (The in-memory backend always
 starts fresh.)
 
-**Backups** are delegated to the backend; cinc-zero ships no backup subsystem.
+**Backups** are delegated to the backend; cinc-server-ng ships no backup subsystem.
 For SQLite, take a consistent online copy while the server runs:
 
 ```sh
@@ -175,13 +175,13 @@ is keeping up with a fleet:
 
 | Metric | Why it matters |
 | --- | --- |
-| `cinc_zero_http_requests_total{outcome}` | Request rate split by `2xx`/`3xx`/`4xx`/`5xx`, with `401` broken out — rejected credentials mean something different from bad requests. |
-| `cinc_zero_http_request_duration_seconds` | Latency as a histogram. A mean hides the stalls; the buckets do not. |
-| `cinc_zero_store_reads_total` / `_writes_total` / `_deletes_total` | Read amplification is what limits throughput on a durable backend — the check-in path costs several reads per write, so watch the ratio, not just the totals. |
-| `cinc_zero_store_scans_total` | Collection scans. A rising rate means work that grows with the size of your data. |
-| `cinc_zero_search_queries_total{resolution}` | `indexed` vs `scanned`. A query the planner cannot handle silently falls back to scanning the whole collection; this is how you find out. |
-| `cinc_zero_search_indexed_documents` | Documents held in the inverted search indexes. |
-| `cinc_zero_uptime_seconds`, `cinc_zero_goroutines`, `cinc_zero_heap_bytes` | Process health. |
+| `cinc_server_ng_http_requests_total{outcome}` | Request rate split by `2xx`/`3xx`/`4xx`/`5xx`, with `401` broken out — rejected credentials mean something different from bad requests. |
+| `cinc_server_ng_http_request_duration_seconds` | Latency as a histogram. A mean hides the stalls; the buckets do not. |
+| `cinc_server_ng_store_reads_total` / `_writes_total` / `_deletes_total` | Read amplification is what limits throughput on a durable backend — the check-in path costs several reads per write, so watch the ratio, not just the totals. |
+| `cinc_server_ng_store_scans_total` | Collection scans. A rising rate means work that grows with the size of your data. |
+| `cinc_server_ng_search_queries_total{resolution}` | `indexed` vs `scanned`. A query the planner cannot handle silently falls back to scanning the whole collection; this is how you find out. |
+| `cinc_server_ng_search_indexed_documents` | Documents held in the inverted search indexes. |
+| `cinc_server_ng_uptime_seconds`, `cinc_server_ng_goroutines`, `cinc_server_ng_heap_bytes` | Process health. |
 
 Instrumentation is measured rather than assumed: it costs about 150ns per
 request, which is ~3% of the cheapest possible request (no auth, in-memory) and
@@ -193,14 +193,14 @@ instead of going through HTTP.
 ## Docker
 
 ```sh
-docker build -t cinc-zero .
-docker run -p 8889:8889 cinc-zero
+docker build -t cinc-server-ng .
+docker run -p 8889:8889 cinc-server-ng
 ```
 
 Release images are published to GitHub Container Registry:
 
 ```sh
-docker run -p 8889:8889 ghcr.io/tas50/cinc-zero:latest
+docker run -p 8889:8889 ghcr.io/tas50/cinc-server-ng:latest
 ```
 
 To persist state across container restarts, mount a volume and point SQLite at
@@ -209,7 +209,7 @@ only stateful piece):
 
 ```sh
 docker run -p 8889:8889 -v cinc-data:/data \
-  ghcr.io/tas50/cinc-zero:latest --storage sqlite --db /data/cinc.db
+  ghcr.io/tas50/cinc-server-ng:latest --storage sqlite --db /data/cinc.db
 ```
 
 ## Compatibility with Chef Infra Server
@@ -217,7 +217,7 @@ docker run -p 8889:8889 -v cinc-data:/data \
 Fidelity is the point of this project, so it is tested three ways, each
 answering a different question.
 
-**Unit and API tests** (`make test`) check cinc-zero against its own idea of
+**Unit and API tests** (`make test`) check cinc-server-ng against its own idea of
 correct. Fast, broad, and unable to tell you that idea is wrong.
 
 **Conformance** (`make conformance`) drives the real `knife` CLI against an
@@ -226,11 +226,11 @@ in-process server, so a genuine signed-request lifecycle has to work end to end
 sandbox/upload flow. It runs with ACL enforcement on, matching what the binary
 ships with; testing the permissive configuration would leave every
 authorization path unexercised by a real client. CI sets
-`CINC_ZERO_REQUIRE_CONFORMANCE=1`, which turns "knife is unusable" from a skip
+`CINC_SERVER_NG_REQUIRE_CONFORMANCE=1`, which turns "knife is unusable" from a skip
 into a failure: a conformance job that quietly executes nothing while reporting
 success is worse than no job at all.
 
-**Differential** (`make differential`) issues the same requests to cinc-zero and
+**Differential** (`make differential`) issues the same requests to cinc-server-ng and
 to a real Chef Infra Server and diffs the responses. This is the only suite that
 can find a response we have confidently got wrong, because clients are lenient —
 `knife` will accept a missing field, an extra field, or the wrong type, so "the
@@ -266,4 +266,4 @@ make run-dev-sqlite   # a durable SQLite copy of the same data, auth on (for cin
 
 ## License
 
-cinc-zero is licensed under the [Business Source License 1.1](LICENSE).
+cinc-server-ng is licensed under the [Business Source License 1.1](LICENSE).
