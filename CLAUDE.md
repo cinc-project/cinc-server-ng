@@ -2,7 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-cinc-server-ng is a lightweight, drop-in alternative Chef Infra Server in Go. It speaks the real Chef Infra Server API and authenticates unmodified `chef-client`/`knife`/`cinc` clients via genuine Mixlib::Authentication signed requests. State lives behind a pluggable `store.Backend`: in memory by default (instant, disposable test servers) or in SQLite for durable state that survives restarts (`--storage sqlite --db <path>`), so the same server spans CI fixtures and lightweight production. Fidelity to real Chef Infra Server behavior is the goal; Policyfiles/policy groups are first-class.
+cinc-server-ng is a drop-in alternative Chef Infra Server in Go, built to be **run for real infrastructure** and to double as a disposable in-memory server in CI. It speaks the real Chef Infra Server API and authenticates unmodified `chef-client`/`knife`/`cinc` clients via genuine Mixlib::Authentication signed requests. Fidelity to real Chef Infra Server behavior is the goal; Policyfiles/policy groups are first-class.
+
+State lives behind a pluggable `store.Backend`. **SQLite is the first-class backend** (`--storage sqlite --db <path>`): durable across restarts and binary upgrades, forward-only schema migrations applied at startup, group-commit batched writes. The in-memory backend is the *secondary* mode — it exists so a test run can have a real Chef Infra Server in milliseconds and throw it away.
+
+That ordering matters when weighing tradeoffs: **the durable path is the one to optimize and the one to design for.** The memory backend must stay correct and fast, but a change that helps memory at SQLite's expense is the wrong trade. Both backends share `internal/store/backendtest` so behavior cannot drift between them.
 
 ## Commands
 
@@ -12,8 +16,9 @@ cinc-server-ng is a lightweight, drop-in alternative Chef Infra Server in Go. It
 - `make conformance` — drives the real `knife` CLI against an in-process server (ACL enforcement **on**, as the binary ships); needs Cinc Workstation and is gated behind `-tags conformance`. It skips when knife is unusable unless `CINC_SERVER_NG_REQUIRE_CONFORMANCE=1` (which CI and the make target set), which turns that into a failure.
 - `make differential` — compares responses against a real Chef Infra Server (`-tags differential`, needs both servers; see `.github/workflows/differential.yml`). The harness itself is unit-tested without a real server by comparing two cinc-server-ng instances, so `go test ./differential/` runs in the normal suite.
 - Single test: `go test ./internal/api/ -run TestName -v` (most logic lives in `internal/api`).
-- `make run ARGS="--enforce-acls --orgs acme"` — build and run; flags: `--addr`, `--orgs` (CSV), `--admin`, `--no-auth`, `--enforce-acls`, `--repo`, `--key-out`, `--storage` (`memory` default / `sqlite`), `--db` (SQLite path; required for `--storage sqlite`; env `CINC_SERVER_NG_STORAGE`/`CINC_SERVER_NG_DB`), `--init` (seed the store and exit without serving — used to pre-bake a DB).
-- `make dev-db` bakes `dev/test-repo` into `dev/cinc-dev.db` (git-ignored); `make run-dev` serves the seed in-memory (no auth), `make run-dev-sqlite` serves the durable SQLite copy with auth on. Developer setup, test accounts, and cinc-console wiring live in `docs/DEVELOPMENT.md`.
+- `make run ARGS="--enforce-acls --orgs acme"` — build and run; flags: `--addr`, `--orgs` (CSV), `--admin`, `--no-auth`, `--enforce-acls`, `--repo`, `--key-out`, `--storage`, `--db` (SQLite path; required for `--storage sqlite`; env `CINC_SERVER_NG_STORAGE`/`CINC_SERVER_NG_DB`), `--sqlite-group-commit`, `--init` (seed the store and exit without serving — used to pre-bake a DB).
+  - Note: `--storage` still **defaults to `memory`** even though SQLite is the first-class backend. Flipping that default is a planned change; until then, anything long-lived must pass `--storage sqlite --db <path>` explicitly, and docs should say so rather than implying the default is durable.
+- `make dev-db` bakes `dev/test-repo` into `dev/cinc-dev.db` (git-ignored); `make run-dev-sqlite` serves the durable SQLite copy with auth on (the realistic mode, and what cinc-console wants), `make run-dev` serves the same seed in-memory with no auth. Developer setup, test accounts, and cinc-console wiring live in `docs/DEVELOPMENT.md`.
 
 Always run `make test && make vet` before committing. Development is strict TDD: write a failing test first.
 
@@ -46,4 +51,4 @@ cmd/cinc-server-ng (flag parsing)
 - **API version negotiation** runs ahead of routing (`withAPIVersion`, `server_endpoints.go`): non-numeric `X-Ops-Server-API-Version` → 400, out-of-range → 406.
 - **Tests:** API-layer tests use `newTestAPI(t)` + `do(t, method, url, body)` (no auth, raw store). Server-layer tests use `startServer(t, Options{})` + `signed(t, srv, …)` (full middleware, real signatures). Note `newTestAPI` does **not** seed default groups/ACLs — only `server.New`/`CreateOrganization` do.
 
-The README status table is the authoritative feature map; package doc comments are accurate. Design specs live in `docs/specs/`.
+The README is the authoritative feature overview; package doc comments are accurate. Design specs live in `docs/specs/`.
