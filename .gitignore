@@ -21,4 +21,4 @@ cmd/fleetsim/fleetsim
 cmd/loadtest/loadtest
 
 # don't ship the worktrees dir
-.claude/workstrees/
+.claude/worktrees/
