@@ -56,6 +56,8 @@ Non-goals for this doc:
 - The client-side signer abstraction, which lives in the sibling `cinc-api` repo (a
   `Signer` interface behind `Config`); it is referenced here only where the two must
   agree on the wire.
+- The **webui impersonation key** (`X-Ops-Request-Source: web`). Explicitly deferred to
+  a future spec of its own, with the risk named rather than glossed — see §1.
 
 ## Design
 
@@ -82,6 +84,34 @@ verbatim — the existing golden vectors (`internal/auth`) must still pass uncha
 The webui-impersonation path (`X-Ops-Request-Source: web`) and the HMAC file-store
 grant path (`internal/auth/presign.go`) stay where they are; the chain sits on the
 normal actor-verification branch only.
+
+**Non-goal, deliberately: the webui impersonation key.** It is worth naming the risk
+rather than letting the sentence above pass as a routine exclusion, because by
+lifetime and scope the webui key is the most powerful credential in the server and this
+document does not touch it. Any request signed with that key and carrying
+`X-Ops-Request-Source: web` runs as whatever user `X-Ops-Userid` names
+(`server/auth.go`); the key defaults to the admin key (`server/server.go`), is RSA-only,
+has no expiry, no rotation, and no `keyid`; and `ViaWebUI` is honored as an
+authorization bypass on `/authenticate_user` (`internal/api/authenticate.go`).
+
+To be accurate about the delta: because it defaults to the admin key, holding it grants
+no *authority* beyond what `pivotal` already has. The defects are the two this work
+addresses everywhere else — **attribution** (an impersonated request runs as the target
+user and nothing records that the webui key was the real actor) and **unbounded
+lifetime and scope** (no expiry, no scoping to a set of impersonable users, no way to
+retire it short of replacing the admin key). A reader who has just read the bootstrap
+token's mandatory `minter` claim and per-registration audit log will notice the
+asymmetry immediately, and should.
+
+It stays a non-goal here for a real reason: it is a distinct credential with a distinct
+consumer (a management console), and folding it into the verifier chain in the same
+change that introduces two new schemes would put the riskiest refactor on the critical
+path of the least risky one. **It gets its own spec**, which should cover at minimum:
+disabling impersonation unless a webui key is explicitly configured rather than silently
+aliasing the admin key, refusing to impersonate global admins, logging both the real and
+effective identity on every impersonated request, and giving the key an expiry and a
+rotation path. Until then its behavior is unchanged and
+`server/webui_impersonation_test.go` stays green.
 
 A `--min-sign-version` / `--allow-legacy-sign` flag lets an operator retire SHA-1
 (v1.0/v1.1) or the whole legacy scheme when *they* choose; default permissive.
@@ -136,9 +166,10 @@ Two reasons the scheme must not be selected by the numeric API version:
   verifier chain sniffs `X-Ops-Sign` → legacy vs. `Signature-Input` → modern *before*
   any version parsing.
 
-Consequences: the new routes (`POST /register`, `/auth/capabilities`, `/auth/nonce`,
-`/oauth/token`) are **additive** — they 404 on an old server, which *is* the discovery
-fallback (§6), not a version bump. Scheme negotiation lives in `/auth/capabilities`
+Consequences: the new routes (`POST /register`, `/registration_tokens`,
+`/registration_log`, `/auth/capabilities`, `/auth/nonce`, `/oauth/token`) are
+**additive** — they 404 on an old server, which *is* the discovery fallback (§6), not a
+version bump. Scheme negotiation lives in `/auth/capabilities`
 plus the header discriminator, never in `X-Ops-Server-API-Version`. The one place the
 axes touch: `http-sig-v1`'s signature base **covers** `X-Ops-Server-API-Version` (the
 modern equivalent of Mixlib folding it into the canonical string), so a proxy cannot
@@ -176,8 +207,17 @@ The parts of it this document depends on:
   the default.
 - Registration **never overwrites** an existing client; provisioning intent is mandatory
   and carried inside the signed token (§5).
+- Every registration is **attributable**: the minting actor rides in a mandatory
+  `minter` claim, and both modes write an audit record in the same transaction as the
+  client create.
+- The token **signing key lives outside the store**, in its own mode-enforced file, so a
+  read of the SQLite database is not a capability to mint bootstrap credentials.
 - It consumes this document's §4 replay store for `jti` spends, and the
   `--no-auth`-hardening rule it specifies applies server-wide.
+
+`/register` is a cinc-zero extension that no Chef client speaks; its consumer is the
+`cinc-api` client library, which gains a `Register` call alongside its `http-sig-v1`
+`Signer`. The differential harness allowlists the extension routes.
 
 The validator path is preserved behind `--allow-validator-bootstrap`.
 
@@ -247,6 +287,38 @@ A short-lived bearer scheme (`Authorization: Bearer`) issued by `POST /oauth/tok
 later OIDC federation without touching the signing protocol. Listed for completeness;
 sequenced last.
 
+**Hard prerequisite: passwords must be hashed before this ships.** Today
+`/authenticate_user` compares the submitted password against a plaintext value kept in
+the `passwords` collection (`internal/api/authenticate.go`). The comparison is
+constant-time, which is the right instinct and beside the point: a store read yields
+every user's password directly, in a system whose durable backend is a single SQLite
+file, for credentials users demonstrably reuse elsewhere.
+
+That is tolerable only while the password check is a leaf — it authenticates one
+request and grants nothing that outlives it. §7 changes exactly that: it makes the
+password check the **minting authority for a credential**, so the weakest secret in the
+server becomes the root of the newest one, and a store read escalates from "read the
+data" to "issue valid tokens as any user." The two changes are individually defensible
+and jointly indefensible, which is why the ordering is normative rather than a
+preference:
+
+- §7 **MUST NOT** ship before password storage is hashed with a deliberately slow KDF.
+  Argon2id is the preferred construction; PBKDF2-HMAC-SHA256 via stdlib `crypto/pbkdf2`
+  (Go ≥1.24, and this module is on 1.26) is acceptable and keeps the repo's
+  single-direct-dependency posture. Either is categorically better than what is there.
+- Verification stays constant-time, per-user salts are mandatory, and the parameters are
+  recorded alongside the hash so they can be raised later without a flag day.
+- Existing plaintext entries are migrated on upgrade through the schema-migration engine
+  (`docs/specs/2026-06-29-schema-migration-engine-design.md`) — rehash in place; there
+  is no read path that needs the plaintext.
+- `/authenticate_user` and `/oauth/token` **MUST** be rate-limited per identity. An
+  unthrottled password endpoint is an online guessing oracle whatever the hash costs,
+  and it is currently unthrottled.
+
+Hashing the password store is not otherwise in scope for this document (see Out of
+scope) — but it becomes in scope for whichever change implements §7, and that change
+owns it.
+
 ## Migration sequence
 
 Each phase is independently shippable and TDD'd:
@@ -260,13 +332,19 @@ Each phase is independently shippable and TDD'd:
    modes, mandatory provisioning claims; validator path preserved behind
    `--allow-validator-bootstrap`. Broken into its own slices in the [companion
    spec](2026-08-09-jwt-bootstrap-token-design.md).
-5. **Capability discovery** (§6), then **bearer/OIDC** (§7).
+5. **Capability discovery** (§6), then **bearer/OIDC** (§7) — gated on hashed password
+   storage landing first or in the same change (§7). That gate is a hard ordering, not
+   a preference: shipping §7 over a plaintext password store would make a store read an
+   any-user token-minting capability.
 
 ## Testing (TDD)
 
 - **Legacy preserved:** existing `internal/auth` golden vectors and the
   server-package signed-request tests pass unchanged; the validator bootstrap
   end-to-end (`server/bootstrap_e2e_test.go`) stays green.
+- **Untouched paths stay untouched:** `server/webui_impersonation_test.go` and the
+  file-store grant tests (`internal/auth/presign_test.go`) pass unchanged — the
+  verifier chain must not alter either branch (§1).
 - **Chain dispatch:** a request with `X-Ops-Sign` routes to `legacyMixlib`; a
   `Signature-Input` request routes to `http-sig-v1`; an unmatched request is 401
   (JSON).
@@ -291,10 +369,13 @@ Each phase is independently shippable and TDD'd:
 
 - The normative bootstrap-token profile — [companion
   spec](2026-08-09-jwt-bootstrap-token-design.md).
-- The `cinc-api` client-side `Signer` interface (separate repo/PR; must agree on the
-  `http-sig-v1` wire).
+- The `cinc-api` client-side `Signer` interface and its `Register` call (separate
+  repo/PR; must agree on the `http-sig-v1` wire and the companion spec's §5).
 - OIDC/SAML external identity federation beyond the bearer-token seam.
 - Cloud/TPM attestation implementation (endpoint is shaped for it; not built here).
 - Retiring RSA or SHA-1 by default — gated behind operator flags, not removed.
-- Encrypting the plaintext password store (`internal/api/authenticate.go`) — separate
-  concern.
+- Hashing the plaintext password store (`internal/api/authenticate.go`) — out of scope
+  for the phases specified here, but **not merely a separate concern**: it is a hard
+  prerequisite for the §7 bearer scheme, which turns the password check into a
+  token-minting authority. Whichever change implements §7 owns it (§7).
+- The webui impersonation key — deferred to its own spec, risk named in §1.
