@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-cinc-server-ng is a drop-in replacement for **both** Chef Infra Server and chef-zero, written in Go. It speaks the real Chef Infra Server API and authenticates unmodified `chef-client`/`knife`/`cinc` clients via genuine Mixlib::Authentication signed requests. State lives behind a pluggable `store.Backend`: in memory by default (instant, disposable test servers, the chef-zero role) or in SQLite for durable state that survives restarts (`--storage sqlite --db <path>`), so the same server spans CI fixtures and full-scale production fleets. README prose uses no em dashes. Fidelity to real Chef Infra Server behavior is the goal; Policyfiles/policy groups are first-class.
+cinc-server-ng is a drop-in replacement for **both** Chef Infra Server and chef-zero, written in Go. It speaks the real Chef Infra Server API and authenticates unmodified `chef-client`/`knife`/`cinc` clients via genuine Mixlib::Authentication signed requests. State lives behind a pluggable `store.Backend`: in memory by default (instant, disposable test servers, the chef-zero role) or in SQLite for durable state that survives restarts (`--storage sqlite --db <path>`), so the same server spans CI fixtures and full-scale production fleets. Fidelity to real Chef Infra Server behavior is the goal; Policyfiles/policy groups are first-class.
 
 ## Commands
 
@@ -44,6 +44,7 @@ cmd/cinc-server-ng (flag parsing)
 - **Handler shape:** `org := a.org(w, r)` (writes 404 and returns nil if the org is missing); read path params with `r.PathValue(...)`; resolve the actor (when needed) from context.
 - **Authorization gating is opt-in at the api/server layer** (the `EnforceACL` option / `authz_enforce.go`; the library zero value is permissive), but the standalone `cinc-server-ng` binary enforces by default (`--enforce-acls=false` to opt out; `--no-auth` implies off). When enforcing, object creation grants the creator full control via a per-object ACL (`writeCreatorACL`) and a registered client joins the org's `clients` group (`addClientToOrgGroup`) which has create on the nodes container — mirroring real Chef so the standard chef-client bootstrap works. The bootstrap admin (`pivotal`) is a superuser. Don't assume enforcement in handlers.
 - **API version negotiation** runs ahead of routing (`withAPIVersion`, `server_endpoints.go`): non-numeric `X-Ops-Server-API-Version` → 400, out-of-range → 406.
+- **README prose uses no em dashes.** Use a colon, comma, or parentheses instead. (This applies to `README.md` only, not to code comments or other docs.)
 - **Tests:** API-layer tests use `newTestAPI(t)` + `do(t, method, url, body)` (no auth, raw store). Server-layer tests use `startServer(t, Options{})` + `signed(t, srv, …)` (full middleware, real signatures). Note `newTestAPI` does **not** seed default groups/ACLs — only `server.New`/`CreateOrganization` do.
 
 The README status table is the authoritative feature map; package doc comments are accurate. Design specs live in `docs/specs/`.
