@@ -27,9 +27,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tas50/cinc-server-ng/internal/api"
-	"github.com/tas50/cinc-server-ng/internal/repo"
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/api"
+	"github.com/cinc-project/cinc-server-ng/internal/repo"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // Summary reports what Load hydrated.

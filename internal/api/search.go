@@ -12,8 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tas50/cinc-server-ng/internal/search"
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/search"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // searchCache memoizes the flattened searchable view of stored documents.

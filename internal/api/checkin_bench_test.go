@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
-	"github.com/tas50/cinc-server-ng/internal/store/sqlite"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store/sqlite"
 )
 
 // nodeBody is a representative chef-client node document (the shape fleetsim

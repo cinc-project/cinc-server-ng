@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 )
 
 // TestServerNewMultiOrgValidatorKeysMatch verifies that each org's returned

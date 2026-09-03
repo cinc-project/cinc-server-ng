@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tas50/cinc-server-ng/internal/api"
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/api"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // A global user loaded with a "password" field has it stashed out-of-band (so

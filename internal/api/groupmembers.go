@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // Membership as rows.

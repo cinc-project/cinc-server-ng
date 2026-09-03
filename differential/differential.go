@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 )
 
 // chefClientVersion is announced on every request, as a real client does.

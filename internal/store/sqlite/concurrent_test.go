@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
-	"github.com/tas50/cinc-server-ng/internal/store/sqlite"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store/sqlite"
 )
 
 // TestReadsNotBlockedByOpenWriteTx asserts WAL's defining guarantee: a reader

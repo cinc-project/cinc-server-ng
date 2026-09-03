@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Module path: `github.com/tas50/cinc-server-ng`.
+- Module path: `github.com/cinc-project/cinc-server-ng`.
 - Go version floor: `go 1.26.3` (per `go.mod`).
 - RNG: use `math/rand` (v1), matching `cmd/seedgen`. Never `math/rand/v2`.
 - Not built into the `cinc-server-ng` binary — this is a dev tool like `cmd/loadtest`.
@@ -295,7 +295,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 )
 
 // signer holds the single admin actor used to sign every request. A nil signer
@@ -617,7 +617,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/server"
+	"github.com/cinc-project/cinc-server-ng/server"
 )
 
 func TestRunDrivesConvergingNotStuck(t *testing.T) {

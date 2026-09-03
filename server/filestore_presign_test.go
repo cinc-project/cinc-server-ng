@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 )
 
 // The cookbook file store is exempt from Mixlib signing because real clients

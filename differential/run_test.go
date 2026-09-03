@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/differential"
-	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/differential"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 )
 
 // Environment the workflow supplies.

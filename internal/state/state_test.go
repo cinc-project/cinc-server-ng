@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tas50/cinc-server-ng/internal/api"
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/api"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // writeState writes a set of relative path -> contents files under root,
