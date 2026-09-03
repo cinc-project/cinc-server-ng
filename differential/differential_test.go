@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/differential"
-	"github.com/tas50/cinc-server-ng/internal/auth"
-	"github.com/tas50/cinc-server-ng/server"
+	"github.com/cinc-project/cinc-server-ng/differential"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/server"
 )
 
 // The harness is only worth anything if it is neither noisy nor vacuous: it

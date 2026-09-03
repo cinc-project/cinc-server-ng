@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tas50/cinc-server-ng/internal/store/sqlite"
+	"github.com/cinc-project/cinc-server-ng/internal/store/sqlite"
 )
 
 // Close has to tolerate being called twice. Shutdown paths overlap in practice

@@ -5,7 +5,7 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // The cached reverse index must agree with the uncached scan for every shape of

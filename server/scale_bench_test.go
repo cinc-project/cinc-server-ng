@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 )
 
 // Scale benchmarks: how cost grows with fleet size, rather than what one

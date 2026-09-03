@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 )
 
 // signer holds the single admin actor used to sign every request. A nil signer

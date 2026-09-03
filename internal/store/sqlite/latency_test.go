@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/internal/store/sqlite"
+	"github.com/cinc-project/cinc-server-ng/internal/store/sqlite"
 )
 
 // Sustained-write latency distribution.

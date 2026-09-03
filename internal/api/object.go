@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // listBufPool reuses response buffers across list requests so a large list does

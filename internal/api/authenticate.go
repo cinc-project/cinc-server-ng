@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // authenticate_user validates a user's password. Passwords are stored

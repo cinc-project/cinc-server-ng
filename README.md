@@ -65,7 +65,7 @@ exploit, all while still authenticating with the genuine Mixlib protocol.
 ## Use as a Go library
 
 ```go
-import "github.com/tas50/cinc-server-ng/server"
+import "github.com/cinc-project/cinc-server-ng/server"
 
 srv, _ := server.New(server.Options{Orgs: []string{"test"}})
 _ = srv.Start()
@@ -222,7 +222,7 @@ docker run -p 8889:8889 cinc-server-ng
 Release images are published to GitHub Container Registry:
 
 ```sh
-docker run -p 8889:8889 ghcr.io/tas50/cinc-server-ng:latest
+docker run -p 8889:8889 ghcr.io/cinc-project/cinc-server-ng:latest
 ```
 
 To persist state across container restarts, mount a volume and point SQLite at
@@ -231,7 +231,7 @@ only stateful piece):
 
 ```sh
 docker run -p 8889:8889 -v cinc-data:/data \
-  ghcr.io/tas50/cinc-server-ng:latest --storage sqlite --db /data/cinc.db
+  ghcr.io/cinc-project/cinc-server-ng:latest --storage sqlite --db /data/cinc.db
 ```
 
 ## Compatibility with Chef Infra Server

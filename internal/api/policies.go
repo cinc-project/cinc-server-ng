@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // Policyfile storage:

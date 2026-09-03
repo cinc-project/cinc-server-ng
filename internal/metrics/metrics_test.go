@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tas50/cinc-server-ng/internal/metrics"
+	"github.com/cinc-project/cinc-server-ng/internal/metrics"
 )
 
 func TestCounterCountsAndLabels(t *testing.T) {

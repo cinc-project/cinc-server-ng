@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // Data bags are a two-level namespace: the "data_bags" collection registers the

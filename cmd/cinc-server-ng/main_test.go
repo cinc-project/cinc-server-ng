@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tas50/cinc-server-ng/server"
+	"github.com/cinc-project/cinc-server-ng/server"
 )
 
 // TestStateFlagHiddenFromUsage verifies the experimental --state flag is parsed

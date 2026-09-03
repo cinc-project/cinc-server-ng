@@ -37,7 +37,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tas50/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 )
 
 var (

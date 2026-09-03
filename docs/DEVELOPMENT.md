@@ -111,7 +111,7 @@ curl -X POST http://127.0.0.1:8889/authenticate_user \
 
 ## Connecting cinc-console
 
-[cinc-console](https://github.com/tas50/cinc-console) (a web management console
+[cinc-console](https://github.com/cinc-project/cinc-console) (a web management console
 for Chef Infra Server) signs requests on a user's behalf using the **webui key**
 via the
 `X-Ops-Request-Source: web` mechanism, which cinc-server-ng supports. By default the

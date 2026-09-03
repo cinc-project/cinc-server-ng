@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tas50/cinc-server-ng/internal/store"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // Environment- and role-scoped sub-endpoints: cookbook filtering by an
