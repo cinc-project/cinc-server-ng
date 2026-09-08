@@ -131,6 +131,10 @@ func (a *API) deletePolicy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := deleteACL(org, "policies", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"revisions": revs})
 }
 
@@ -271,13 +275,18 @@ func (a *API) deletePolicyGroup(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, ok, err := org.Delete(policyGroupsColl, r.PathValue("group"))
+	group := r.PathValue("group")
+	raw, ok, err := org.Delete(policyGroupsColl, group)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find policy group "+r.PathValue("group"))
+		writeError(w, http.StatusNotFound, "Cannot find policy group "+group)
+		return
+	}
+	if err := deleteACL(org, policyGroupsColl, group); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)

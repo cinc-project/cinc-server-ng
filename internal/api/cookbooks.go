@@ -512,6 +512,10 @@ func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name+" version "+version)
 		return
 	}
+	if err := deleteVersionedACL(org, "cookbooks", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	var m map[string]any
 	if json.Unmarshal(raw, &m) == nil {
 		if err := gcOrphanedBlobs(org, manifestChecksums(m)); err != nil {
@@ -523,6 +527,27 @@ func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
+}
+
+// deleteVersionedACL drops a versioned object's ACL once its last version is
+// gone. A cookbook's (or artifact's) ACL governs every version it has, so it
+// must survive while any remains — and must not survive the last, or the next
+// upload of that name inherits it.
+func deleteVersionedACL(org *store.Org, coll, name string) error {
+	var remaining bool
+	if err := org.Range(coll, func(key string, _ []byte) bool {
+		if cb, _, ok := strings.Cut(key, "/"); ok && cb == name {
+			remaining = true
+			return false
+		}
+		return true
+	}); err != nil {
+		return err
+	}
+	if remaining {
+		return nil
+	}
+	return deleteACL(org, coll, name)
 }
 
 func (a *API) cookbooksLatest(w http.ResponseWriter, r *http.Request) {

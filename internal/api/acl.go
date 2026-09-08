@@ -93,6 +93,22 @@ func (a *API) grantCreator(r *http.Request, org *store.Org, typ, name string) er
 	return writeCreatorACL(org, typ, name, actor.Name)
 }
 
+// deleteACL removes an object's per-object ACL.
+//
+// An ACL is keyed by object type and name, and loadACL resolves it by that key
+// alone — so one left behind after its object is gone is not inert: it is
+// silently applied to the next object created under the same name. Deletion has
+// to take the ACL with the object, or a grant made to a contractor on last
+// year's "vault" data bag still governs this year's.
+//
+// Objects created through createObject/createActor happen to mask this, since
+// grantCreator overwrites the ACL on create; data bags, cookbooks, policies,
+// groups and containers have no such path and inherit the stale one verbatim.
+func deleteACL(org *store.Org, typ, name string) error {
+	_, _, err := org.Delete("acls", aclKey(typ, name))
+	return err
+}
+
 func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
 	raw, ok, err := org.Get("acls", aclKey(typ, name))
 	if err != nil {

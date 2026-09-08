@@ -101,6 +101,11 @@ func (a *API) deleteDataBag(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Items share the bag's ACL, so the bag's is the only one to drop.
+	if err := deleteACL(org, "data", bag); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	var doc map[string]any
 	if json.Unmarshal(raw, &doc) != nil {
 		writeRaw(w, http.StatusOK, raw)

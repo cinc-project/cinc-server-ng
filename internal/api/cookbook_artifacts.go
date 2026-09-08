@@ -158,6 +158,10 @@ func (a *API) deleteArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook artifact named "+name+" with identifier "+ident)
 		return
 	}
+	if err := deleteVersionedACL(org, "cookbook_artifacts", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	var m map[string]any
 	if json.Unmarshal(raw, &m) == nil {
 		if err := gcOrphanedBlobs(org, manifestChecksums(m)); err != nil {
