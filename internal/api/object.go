@@ -183,6 +183,10 @@ func (a *API) deleteObject(segment string) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 			return
 		}
+		if err := deleteACL(org, segment, name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeRaw(w, http.StatusOK, raw)
 	}
 }

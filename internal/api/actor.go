@@ -421,6 +421,10 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 			return
 		}
+		if err := deleteACL(org, segment, name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		// Registration put the client in the org's "clients" group. Membership
 		// must not outlive the actor: the group grants permission by name, so a
 		// later client registered under the same name would inherit it.
