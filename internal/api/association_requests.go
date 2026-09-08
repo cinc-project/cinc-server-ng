@@ -39,6 +39,12 @@ func (a *API) listOrgInvites(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	// classifyOrgMembership deliberately leaves the read routes unclassified and
+	// defers to the handler's own membership check — so this handler has to make
+	// one. A pending invitation names who the org is recruiting.
+	if !a.orgViewAllowed(w, r, org) {
+		return
+	}
 	out := make([]map[string]any, 0)
 	keys, err := org.Keys(assocReqColl)
 	if err != nil {
@@ -134,7 +140,24 @@ func (a *API) rescindInvite(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, http.StatusOK, raw)
 }
 
+// invitationSelfAllowed reports whether the request's actor may read a user's
+// invitations. A user's pending invitations say which organizations are
+// courting them, which is theirs to see (and the superuser's), not any
+// authenticated caller's. With no actor the endpoint stays open, matching the
+// permissive default the rest of the package uses.
+func (a *API) invitationSelfAllowed(w http.ResponseWriter, r *http.Request, user string) bool {
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.IsGlobalAdmin || actor.Name == user {
+		return true
+	}
+	writeStringError(w, http.StatusForbidden, "You are not allowed to take this action.")
+	return false
+}
+
 func (a *API) listUserInvites(w http.ResponseWriter, r *http.Request) {
+	if !a.invitationSelfAllowed(w, r, r.PathValue("user")) {
+		return
+	}
 	invites, err := a.userInvites(r.PathValue("user"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -144,6 +167,9 @@ func (a *API) listUserInvites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) countUserInvites(w http.ResponseWriter, r *http.Request) {
+	if !a.invitationSelfAllowed(w, r, r.PathValue("user")) {
+		return
+	}
 	invites, err := a.userInvites(r.PathValue("user"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
