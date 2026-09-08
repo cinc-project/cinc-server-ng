@@ -277,3 +277,50 @@ func TestSearchDocReportsNotOKForInvalidJSON(t *testing.T) {
 		t.Fatal("searchDoc should report not-ok for undecodable JSON")
 	}
 }
+
+// The flatten cache validates an entry against the bytes the store handed back.
+// Only the memory backend returns the stored slice itself; SQLite scans a fresh
+// slice per row, so a check based on pointer identity can never hold there — the
+// cache would miss on every row of every search while still paying to store an
+// entry per document. Validating on content keeps it correct on both.
+func TestSearchCacheHitsAcrossDistinctBackingArrays(t *testing.T) {
+	st := store.New()
+	if _, err := st.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
+	a := New(st)
+
+	raw := []byte(`{"name":"web01","chef_environment":"production"}`)
+	// What a durable backend hands back on a second read: equal content, a
+	// different array.
+	reread := append([]byte(nil), raw...)
+	if &raw[0] == &reread[0] {
+		t.Fatal("test setup: the two slices must not share a backing array")
+	}
+
+	_, first, ok := a.searchDoc("nodes", "web01", raw, true)
+	if !ok {
+		t.Fatal("first flatten failed")
+	}
+	_, second, ok := a.searchDoc("nodes", "web01", reread, true)
+	if !ok {
+		t.Fatal("second flatten failed")
+	}
+	if reflect.ValueOf(first).Pointer() != reflect.ValueOf(second).Pointer() {
+		t.Error("the second read re-flattened the document; the cache never hits on a durable backend")
+	}
+	if _, hit := a.searchDocCached("nodes", "web01", reread); !hit {
+		t.Error("searchDocCached missed on re-read bytes")
+	}
+
+	// Content that actually changed must still miss, or the cache would serve a
+	// stale view of a document that was written.
+	changed := []byte(`{"name":"web01","chef_environment":"staging"}`)
+	if _, hit := a.searchDocCached("nodes", "web01", changed); hit {
+		t.Error("the cache hit on changed content")
+	}
+	_, third, _ := a.searchDoc("nodes", "web01", changed, true)
+	if slices.Contains(third["chef_environment"], "production") {
+		t.Errorf("re-flatten kept the old value: %v", third["chef_environment"])
+	}
+}
