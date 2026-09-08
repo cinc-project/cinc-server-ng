@@ -46,17 +46,23 @@ func splitConstraint(c string) (op, ver string) {
 	return "", c
 }
 
-// pessimisticUpper returns the exclusive upper bound for a "~>" constraint:
-// the last specified component is dropped and the new last is incremented, so
-// "~> 1.2" yields "2.0" and "~> 1.2.3" yields "1.3".
+// pessimisticUpper returns the exclusive upper bound for a "~>" constraint: the
+// last specified component is the one allowed to move, so the ceiling is the
+// constraint with that component dropped and the new last incremented. "~> 1.2"
+// yields "2", "~> 1.2.3" yields "1.3", and "~> 1" yields "2".
+//
+// A one-component constraint used to return a sentinel ceiling of 1<<30, which
+// made "~> 1" unbounded above and let an environment pinned to it hand a node a
+// 2.x cookbook — the major-version jump the operator exists to prevent. There is
+// nothing special about that case: dropping no component and incrementing the
+// only one gives the right answer, which is what Rubygems does.
 func pessimisticUpper(ver string) string {
 	parts := strings.Split(ver, ".")
-	if len(parts) <= 1 {
-		// "~> 1" has no meaningful ceiling below infinity; treat as unbounded.
-		return strconv.Itoa(1 << 30)
+	if len(parts) > 1 {
+		parts = parts[:len(parts)-1]
 	}
-	parts = parts[:len(parts)-1]
-	n, _ := strconv.Atoi(parts[len(parts)-1])
-	parts[len(parts)-1] = strconv.Itoa(n + 1)
+	last := len(parts) - 1
+	n, _ := strconv.Atoi(parts[last])
+	parts[last] = strconv.Itoa(n + 1)
 	return strings.Join(parts, ".")
 }
