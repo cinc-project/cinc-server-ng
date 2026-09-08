@@ -470,7 +470,7 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, existed, err := org.Get("cookbooks", cookbookKey(name, version))
+	prev, existed, err := org.Get("cookbooks", cookbookKey(name, version))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -478,6 +478,19 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	if err := org.Put("cookbooks", cookbookKey(name, version), mustEncode(m)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// An overwrite drops the previous manifest's references just as a delete
+	// does, so it has to collect what those were the last reference to. Run
+	// after the Put, so gcOrphanedBlobs sees the new manifest and keeps anything
+	// it still points at.
+	if existed {
+		var old map[string]any
+		if json.Unmarshal(prev, &old) == nil {
+			if err := gcOrphanedBlobs(org, manifestChecksums(old)); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
 	}
 
 	status := http.StatusCreated
