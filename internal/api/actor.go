@@ -154,6 +154,62 @@ func storedPublicKey(org *store.Org, segment, name string) (string, error) {
 	return pub, nil
 }
 
+// adminField is the global-user flag the authentication layer reads back to
+// decide whether an actor is the superuser (see server/auth.go). It lives in the
+// same document as a user's profile fields, which a user may edit for itself.
+const adminField = "admin"
+
+// preservePrivilege keeps a user update from setting its own superuser flag.
+//
+// classifyRequest lets a user act on its own global record, because maintaining
+// your own profile is self-service. But the record it edits is also where the
+// authentication layer looks up "admin" to decide whether the actor bypasses
+// every ACL, so an unfiltered update turns that self-service into a one-request
+// path from any authenticated user to full control of the server.
+//
+// The flag is therefore server-controlled on update: the stored value is carried
+// forward unless the caller is already the superuser, who may still grant and
+// revoke it. With no authenticated actor the endpoint stays open, matching the
+// permissive default the rest of the package uses. Only global users carry the
+// flag — an org client's "admin" is not read by anything — so clients are left
+// alone.
+func preservePrivilege(r *http.Request, org *store.Org, segment, name string, obj map[string]any) error {
+	if segment != "users" {
+		return nil
+	}
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.IsGlobalAdmin {
+		return nil
+	}
+	stored, err := storedField(org, segment, name, adminField)
+	if err != nil {
+		return err
+	}
+	if stored == nil {
+		delete(obj, adminField)
+		return nil
+	}
+	obj[adminField] = stored
+	return nil
+}
+
+// storedField returns one field of an actor's stored record, or nil when the
+// actor or the field is absent.
+func storedField(org *store.Org, segment, name, field string) (any, error) {
+	raw, ok, err := org.Get(segment, name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	var prev map[string]any
+	if json.Unmarshal(raw, &prev) != nil {
+		return nil, nil
+	}
+	return prev[field], nil
+}
+
 func (a *API) scopedList(segment string, scope scopeFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		org := scope(w, r)
@@ -268,6 +324,10 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		delete(obj, "chef_key")
 		if pub != "" {
 			obj["public_key"] = pub
+		}
+		if err := preservePrivilege(r, org, segment, name, obj); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 		if _, err := StashPassword(org, name, obj); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
