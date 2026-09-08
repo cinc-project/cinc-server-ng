@@ -90,8 +90,14 @@ func TestClassifyOrganizationLifecycleRoutes(t *testing.T) {
 		method, path string
 		want         authzCheck
 	}{
-		{"PUT", "/organizations/acme", authzCheck{aclType: "organizations", aclName: "acme", perm: "update"}},
-		{"DELETE", "/organizations/acme", authzCheck{aclType: "organizations", aclName: "acme", perm: "delete"}},
+		// Reading an org's metadata is governed by its ACL, so a member can see
+		// the org it belongs to. Changing or destroying one is a server-level
+		// operation like provisioning it: no ACL is ever stored for the
+		// organization object, so anything else would fall back to defaultACL(),
+		// which grants update and delete to the org's own "users" group.
+		{"GET", "/organizations/acme", authzCheck{aclType: "organizations", aclName: "acme", perm: "read"}},
+		{"PUT", "/organizations/acme", authzCheck{superuserOnly: true, perm: "update"}},
+		{"DELETE", "/organizations/acme", authzCheck{superuserOnly: true, perm: "delete"}},
 		{"POST", "/organizations", authzCheck{superuserOnly: true, perm: "create"}},
 	}
 	for _, c := range cases {
