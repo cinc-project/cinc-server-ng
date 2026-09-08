@@ -288,4 +288,4 @@ make run-dev-sqlite   # a durable SQLite copy of the same data, auth on (for cin
 
 ## License
 
-cinc-server-ng is licensed under the [Business Source License 1.1](LICENSE).
+cinc-server-ng is licensed under the [Apache License 2.0](LICENSE).
