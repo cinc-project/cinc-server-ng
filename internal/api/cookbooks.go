@@ -695,19 +695,36 @@ func manifestRecipes(m map[string]any, cookbook string) []string {
 
 // compareVersions orders dotted numeric versions (e.g. "1.2.0" vs "1.10.0"),
 // returning -1, 0, or 1. Missing trailing segments are treated as zero.
+//
+// A segment that is not an integer is compared lexically instead. Chef rejects
+// such a version, but this server stores whatever it is handed, and the previous
+// behaviour — strconv.Atoi with 0 on failure — made "1.0.0-alpha" and "1.0.0"
+// compare *equal*. That leaves the ordering non-total, and the version sorts
+// built on it use sort.Slice, which is not stable: which of two such versions
+// "_latest" resolved to depended on the order the store happened to return them
+// in. Lexical fallback is not semver prerelease ordering (nothing here claims to
+// be), but it is deterministic, which is the property the callers need.
 func compareVersions(a, b string) int {
 	as := strings.Split(a, ".")
 	bs := strings.Split(b, ".")
 	for i := 0; i < len(as) || i < len(bs); i++ {
-		av, bv := 0, 0
+		av, bv := "0", "0"
 		if i < len(as) {
-			av, _ = strconv.Atoi(as[i])
+			av = as[i]
 		}
 		if i < len(bs) {
-			bv, _ = strconv.Atoi(bs[i])
+			bv = bs[i]
 		}
-		if av != bv {
-			if av < bv {
+		if av == bv {
+			continue
+		}
+		an, aerr := strconv.Atoi(av)
+		bn, berr := strconv.Atoi(bv)
+		if aerr != nil || berr != nil {
+			return strings.Compare(av, bv)
+		}
+		if an != bn {
+			if an < bn {
 				return -1
 			}
 			return 1
