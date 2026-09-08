@@ -60,8 +60,9 @@ differential:
 vet:
 	go vet ./...
 
-## lint: run golangci-lint (config in .golangci.yml); install it with
-## go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+## lint: run golangci-lint (config in .golangci.yml). Subsumes `make vet` and
+## a gofmt check, including the conformance/ and differential/ build tags.
+## Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 lint:
 	golangci-lint run ./...
 

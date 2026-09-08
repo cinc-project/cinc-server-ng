@@ -1,8 +1,15 @@
 version: "2"
 
+run:
+  # conformance/ and differential/ sit behind build tags. Without naming them
+  # here the linter never loads those files at all.
+  build-tags:
+    - conformance
+    - differential
+
 # The default set: errcheck, govet, ineffassign, staticcheck, unused.
-# `make vet` and the gofmt CI job still run independently; this adds the
-# checks neither of them covers.
+# govet makes a separate `go vet` step redundant, and the gofmt formatter
+# below makes a separate `gofmt -l` step redundant, so CI runs this alone.
 linters:
   default: standard
 
@@ -31,9 +38,18 @@ linters:
       - path: _test\.go
         linters: [errcheck]
 
+formatters:
+  # Reported as issues by `golangci-lint run`, so this replaces a standalone
+  # gofmt check. Applied (rather than reported) by `golangci-lint fmt`.
+  enable:
+    - gofmt
+
 issues:
   # Defaults are max-issues-per-linter: 50 and max-same-issues: 3, which
   # truncate repeated findings — fix three and three more appear. A blocking
   # gate has to report everything at once.
   max-issues-per-linter: 0
   max-same-issues: 0
+  # Also on by default: only the first issue on any given line is reported.
+  # Two distinct problems on one line means one of them is silently dropped.
+  uniq-by-line: false
