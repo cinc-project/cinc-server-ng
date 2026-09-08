@@ -157,6 +157,14 @@ func (a *API) disassociateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find user "+user+" in organization "+org.Name())
 		return
 	}
+	// Association added the user to the org's "users" group, which the default
+	// ACL grants CRUD on the org's objects. Leaving that membership behind would
+	// make removal cosmetic: the membership endpoints would refuse the user while
+	// every object permission the group carries stayed live.
+	if err := removeActorFromAllGroups(org, memberUsers, user); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"username": user})
 }
 
