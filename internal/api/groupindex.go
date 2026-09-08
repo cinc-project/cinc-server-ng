@@ -26,8 +26,15 @@ import (
 
 // groupIndex maps actors to the groups that list them, plus the nesting edges
 // needed to expand membership transitively.
+//
+// An index is not frozen once published: observe patches membership rows into
+// it in place, which is what keeps a fleet bootstrap linear. It is therefore
+// read (by every authorization check) and written (by every registration)
+// concurrently, so mu guards the maps. The cache's own lock is not enough — it
+// only guards which index is current, not the contents of one that is.
 type groupIndex struct {
 	gen     uint64
+	mu      sync.RWMutex
 	users   map[string][]string // user -> groups listing it directly
 	clients map[string][]string // client -> groups listing it directly
 	nests   map[string][]string // group -> groups that list it in their groups[]
@@ -66,6 +73,8 @@ func buildGroupIndex(org *store.Org) (*groupIndex, error) {
 
 // addAll records a group's members from its document.
 func (idx *groupIndex) addAll(group string, users, clients, nested []string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
 	for _, u := range users {
 		idx.users[u] = append(idx.users[u], group)
 	}
@@ -80,6 +89,8 @@ func (idx *groupIndex) addAll(group string, users, clients, nested []string) {
 // addOne records a single membership row, skipping a duplicate of what the
 // group document already declared.
 func (idx *groupIndex) addOne(group, kind, actor string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
 	var into map[string][]string
 	switch kind {
 	case memberUsers:
@@ -113,6 +124,8 @@ func indexMembers(raw []byte) (users, clients, groups []string) {
 // membership expands the groups an actor belongs to, following nesting
 // transitively. A group is only ever added once, so cycles terminate.
 func (idx *groupIndex) membership(actor Actor) map[string]bool {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
 	direct := idx.users
 	if actor.IsClient {
 		direct = idx.clients
@@ -150,25 +163,35 @@ func newGroupIndexCache() *groupIndexCache {
 // get returns an index current as of the org's groups generation, rebuilding it
 // if groups have been written since the cached one was built.
 func (c *groupIndexCache) get(org *store.Org) (*groupIndex, error) {
-	gen := org.GroupsGeneration()
 	c.mu.RLock()
 	idx, ok := c.m[org.Name()]
 	c.mu.RUnlock()
-	if ok && idx.gen == gen {
+	if ok && idx.gen == org.GroupsGeneration() {
 		return idx, nil
 	}
 
+	// The rebuild runs under the cache lock, which observe also takes.
+	//
+	// A rebuild re-reads the membership rows, and observe folds each new row
+	// into whichever index is installed. If the two could interleave, a row
+	// written mid-rebuild would land in the index the rebuild is about to
+	// replace and be missing from the one that replaces it — and, since rows are
+	// the only record that a registered client belongs to the org's clients
+	// group, that client would be denied everything the group grants until some
+	// unrelated group write forced another rebuild.
+	//
+	// Serializing also collapses a herd of concurrent rebuilds into one, which
+	// is the case that matters: every authorization check calls get.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if idx, ok := c.m[org.Name()]; ok && idx.gen == org.GroupsGeneration() {
+		return idx, nil // rebuilt by another goroutine while we waited
+	}
 	built, err := buildGroupIndex(org)
 	if err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	// Another goroutine may have stored a newer index while we built; keep
-	// whichever is newer so a slow builder cannot install a stale one.
-	if cur, ok := c.m[org.Name()]; !ok || built.gen >= cur.gen {
-		c.m[org.Name()] = built
-	}
-	c.mu.Unlock()
+	c.m[org.Name()] = built
 	return built, nil
 }
 
