@@ -70,22 +70,34 @@ func (a *API) principal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	} else if ok {
-		writeJSON(w, http.StatusOK, principalDoc(name, "client", raw))
+		doc, err := principalDoc(name, "client", raw)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, doc)
 		return
 	}
 	if raw, ok, err := a.store.Global().Get("users", name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	} else if ok {
-		writeJSON(w, http.StatusOK, principalDoc(name, "user", raw))
+		doc, err := principalDoc(name, "user", raw)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, doc)
 		return
 	}
 	writeError(w, http.StatusNotFound, "Cannot find principal "+name)
 }
 
-func principalDoc(name, typ string, actorRaw []byte) map[string]any {
+func principalDoc(name, typ string, actorRaw []byte) (map[string]any, error) {
 	var actor map[string]any
-	json.Unmarshal(actorRaw, &actor)
+	if err := json.Unmarshal(actorRaw, &actor); err != nil {
+		return nil, err
+	}
 	pubKey, _ := actor["public_key"].(string)
 	return map[string]any{
 		"name":       name,
@@ -93,7 +105,7 @@ func principalDoc(name, typ string, actorRaw []byte) map[string]any {
 		"public_key": pubKey,
 		"authz_id":   name,
 		"org_member": true,
-	}
+	}, nil
 }
 
 // withAPIVersion negotiates the server API version on every request. It runs

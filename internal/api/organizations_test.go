@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -168,5 +169,22 @@ func TestCreateOrganizationWithKeyUsesProvidedKey(t *testing.T) {
 	}
 	if !client.Validator {
 		t.Fatal("validator client not marked as validator")
+	}
+}
+
+// A stored organization document that will not unmarshal into a map must
+// produce a 500, not a panic. putOrganization decodes the stored doc into a
+// map and then writes the request's fields into it; while the unmarshal error
+// went unchecked, a failure left the map nil and the next assignment panicked
+// on a nil map. Unreachable through the API (the store holds canonical JSON
+// the server itself wrote), but the handler should not depend on that.
+func TestUpdateOrganizationWithUndecodableStoredDocument(t *testing.T) {
+	srv, st := newTestAPI(t)
+	if err := st.Global().Put(orgsColl, "acme", []byte(`"not an object"`)); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := do(t, "PUT", srv.URL+"/organizations/acme", `{"full_name":"Acme Corp"}`)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", resp.StatusCode, body)
 	}
 }

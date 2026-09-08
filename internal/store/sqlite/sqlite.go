@@ -144,7 +144,7 @@ func Open(path string, opts ...Option) (*Backend, error) {
 	if !isMemory(path) {
 		rdb, err := sql.Open("sqlite", dsnWithPragmas(path)+"&_pragma=query_only=true")
 		if err != nil {
-			db.Close()
+			_ = db.Close() // already failing; a close error adds nothing
 			return nil, err
 		}
 		readers := max(4, runtime.NumCPU())
@@ -155,11 +155,11 @@ func Open(path string, opts ...Option) (*Backend, error) {
 	}
 
 	if err := b.migrate(); err != nil {
-		b.Close()
+		_ = b.Close() // already failing; a close error adds nothing
 		return nil, err
 	}
 	if err := b.prepare(); err != nil {
-		b.Close()
+		_ = b.Close() // already failing; a close error adds nothing
 		return nil, err
 	}
 	if cfg.groupCommit {
@@ -724,7 +724,7 @@ func (b *Backend) Close() error {
 		b.stHasOrg, b.stBlobGet, b.stBlobHas, b.stBlobPut, b.stBlobDelete,
 	} {
 		if st != nil {
-			st.Close()
+			_ = st.Close() // db.Close releases these anyway; its error is the one returned
 		}
 	}
 	err := b.db.Close()

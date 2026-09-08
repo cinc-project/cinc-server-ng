@@ -210,26 +210,26 @@ func lex(s string) ([]token, error) {
 	i := 0
 	for i < len(s) {
 		c := s[i]
-		switch {
-		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+		switch c {
+		case ' ', '\t', '\n', '\r':
 			i++
-		case c == '(':
+		case '(':
 			toks = append(toks, token{kind: tLParen, text: "("})
 			i++
-		case c == ')':
+		case ')':
 			toks = append(toks, token{kind: tRParen, text: ")"})
 			i++
-		case c == ':':
+		case ':':
 			toks = append(toks, token{kind: tColon, text: ":"})
 			i++
-		case c == '"':
+		case '"':
 			end := strings.IndexByte(s[i+1:], '"')
 			if end < 0 {
 				return nil, fmt.Errorf("search: unterminated phrase")
 			}
 			toks = append(toks, token{kind: tPhrase, text: s[i+1 : i+1+end]})
 			i += end + 2
-		case c == '[' || c == '{':
+		case '[', '{':
 			close := byte(']')
 			incLo, incHi := true, true
 			if c == '{' {

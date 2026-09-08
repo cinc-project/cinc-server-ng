@@ -112,7 +112,9 @@ func testCollectionsSorted(t *testing.T, b store.Backend) {
 	mustPut(t, b, "acme", "nodes", "x", `{}`)
 	// A collection emptied by Delete must not be reported.
 	mustPut(t, b, "acme", "envs", "x", `{}`)
-	b.Delete("acme", "envs", "x")
+	if _, _, err := b.Delete("acme", "envs", "x"); err != nil {
+		t.Fatal(err)
+	}
 	colls, err := b.Collections("acme")
 	if err != nil {
 		t.Fatal(err)

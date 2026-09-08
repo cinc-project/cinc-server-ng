@@ -206,7 +206,7 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("EnforceACL requires authentication; do not set DisableAuth")
 	}
 	if opts.Repo != "" && opts.StatePath != "" {
-		return nil, errors.New("Repo and StatePath are mutually exclusive; a state directory already subsumes a chef-repo")
+		return nil, errors.New("options Repo and StatePath are mutually exclusive; a state directory already subsumes a chef-repo")
 	}
 	st, err := buildStore(opts)
 	if err != nil {

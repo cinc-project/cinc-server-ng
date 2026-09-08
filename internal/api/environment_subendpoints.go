@@ -51,7 +51,9 @@ func envConstraints(org *store.Org, env string) (map[string]string, bool, error)
 	var doc struct {
 		CookbookVersions map[string]string `json:"cookbook_versions"`
 	}
-	json.Unmarshal(raw, &doc)
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, false, err
+	}
 	return doc.CookbookVersions, true, nil
 }
 
@@ -189,11 +191,15 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]string{}
+	var decodeErr error
 	if err := org.Range("nodes", func(name string, raw []byte) bool {
 		var node struct {
 			ChefEnvironment string `json:"chef_environment"`
 		}
-		json.Unmarshal(raw, &node)
+		if err := json.Unmarshal(raw, &node); err != nil {
+			decodeErr = err
+			return false
+		}
 		nodeEnv := node.ChefEnvironment
 		if nodeEnv == "" {
 			nodeEnv = "_default"
@@ -204,6 +210,10 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 		return true
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if decodeErr != nil {
+		writeError(w, http.StatusInternalServerError, decodeErr.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, out)

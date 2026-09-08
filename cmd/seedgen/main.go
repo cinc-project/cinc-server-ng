@@ -274,7 +274,7 @@ func nameHash(s string) uint32 {
 func deepCopy(m map[string]any) map[string]any {
 	raw, _ := json.Marshal(m)
 	var c map[string]any
-	json.Unmarshal(raw, &c)
+	_ = json.Unmarshal(raw, &c) // round-tripping json.Marshal output cannot fail
 	return c
 }
 

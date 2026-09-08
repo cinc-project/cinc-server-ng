@@ -46,7 +46,8 @@ func TestServerNewMultiOrgValidatorKeysMatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse stored public key for %q: %v", name, err)
 		}
-		if priv.PublicKey.N.Cmp(storedPub.N) != 0 || priv.PublicKey.E != storedPub.E {
+		pub := &priv.PublicKey
+		if pub.N.Cmp(storedPub.N) != 0 || pub.E != storedPub.E {
 			t.Fatalf("validator key for %q does not match its stored public key", name)
 		}
 	}

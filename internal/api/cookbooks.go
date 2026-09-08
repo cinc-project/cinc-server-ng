@@ -241,7 +241,10 @@ func (a *API) commitSandbox(w http.ResponseWriter, r *http.Request) {
 	var doc struct {
 		Checksums []string `json:"checksums"`
 	}
-	json.Unmarshal(raw, &doc)
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	for _, sum := range doc.Checksums {
 		has, err := org.HasBlob(sum)

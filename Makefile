@@ -15,7 +15,7 @@ LDFLAGS := -X $(LDFLAGS_PKG).version=$(VERSION) \
            -X $(LDFLAGS_PKG).commit=$(COMMIT) \
            -X $(LDFLAGS_PKG).buildDate=$(BUILD_DATE)
 
-.PHONY: all build dist install test conformance differential vet fmt tidy clean run run-dev dev-db dev-db-reset run-dev-sqlite help
+.PHONY: all build dist install test conformance differential vet lint fmt tidy clean run run-dev dev-db dev-db-reset run-dev-sqlite help
 
 all: build
 
@@ -59,6 +59,12 @@ differential:
 ## vet: run go vet across all packages
 vet:
 	go vet ./...
+
+## lint: run golangci-lint (config in .golangci.yml). Subsumes `make vet` and
+## a gofmt check, including the conformance/ and differential/ build tags.
+## Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+lint:
+	golangci-lint run ./...
 
 ## fmt: format all Go source
 fmt:

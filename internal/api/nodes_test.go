@@ -75,7 +75,7 @@ func TestNodeCreateListGetDelete(t *testing.T) {
 	}
 
 	// List shows it as name->url.
-	resp, body = do(t, "GET", base+"/nodes", "")
+	_, body = do(t, "GET", base+"/nodes", "")
 	var list map[string]string
 	json.Unmarshal([]byte(body), &list)
 	if !strings.HasSuffix(list["web01"], "/organizations/acme/nodes/web01") {

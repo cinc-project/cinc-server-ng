@@ -58,7 +58,10 @@ func (a *API) listOrgInvites(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var inv map[string]any
-		json.Unmarshal(raw, &inv)
+		if err := json.Unmarshal(raw, &inv); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		out = append(out, map[string]any{"id": id, "username": inv["username"]})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -193,13 +196,11 @@ func (a *API) userInvites(user string) ([]map[string]any, error) {
 		if !ok {
 			continue
 		}
-		raw, ok, err := org.Get(assocReqColl, inviteID(user, name))
+		_, ok, err = org.Get(assocReqColl, inviteID(user, name))
 		if err != nil {
 			return nil, err
 		}
 		if ok {
-			var inv map[string]any
-			json.Unmarshal(raw, &inv)
 			out = append(out, map[string]any{"id": inviteID(user, name), "orgname": name})
 		}
 	}
@@ -249,7 +250,10 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		} else if ok {
-			json.Unmarshal(raw, &inv)
+			if err := json.Unmarshal(raw, &inv); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		authorized, err := a.inviterAuthorized(org, inv.Inviter)
 		if err != nil {
@@ -298,7 +302,9 @@ func (a *API) inviterAuthorized(org *store.Org, inviter string) (bool, error) {
 		return false, nil
 	}
 	var u map[string]any
-	json.Unmarshal(uraw, &u)
+	if err := json.Unmarshal(uraw, &u); err != nil {
+		return false, err
+	}
 	if admin, _ := u["admin"].(bool); admin {
 		return true, nil
 	}
@@ -350,7 +356,9 @@ func (a *API) findInvite(user, id string) (*store.Org, bool, error) {
 			var inv struct {
 				Username string `json:"username"`
 			}
-			json.Unmarshal(raw, &inv)
+			if err := json.Unmarshal(raw, &inv); err != nil {
+				return nil, false, err
+			}
 			if inv.Username == user {
 				return org, true, nil
 			}
