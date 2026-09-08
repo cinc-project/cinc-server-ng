@@ -77,6 +77,100 @@ func clearMembers(org *store.Org, group string) error {
 	return nil
 }
 
+// removeActorFromAllGroups revokes an actor's membership in every group of the
+// org.
+//
+// Joining a group is how an actor acquires permission here: association puts a
+// user in "users" and registration puts a client in "clients", and the default
+// ACL grants those groups read/update/delete on the org's objects. Removing the
+// actor from the org therefore has to remove it from the groups too, or the
+// membership view says it is gone while every permission it held is still live.
+//
+// Effective membership is the union of the group document and the incremental
+// rows, so both have to be cleared: dropping only the rows would leave a
+// hand-authored (or explicitly written) group document still naming the actor.
+func removeActorFromAllGroups(org *store.Org, kind, actor string) error {
+	if err := removeMemberRows(org, kind, actor); err != nil {
+		return err
+	}
+	return removeFromGroupDocs(org, kind, actor)
+}
+
+// removeMemberRows deletes every incremental membership row for an actor, in any
+// group. Rows are keyed (group, kind, actor), so they are found by suffix. Keys
+// are collected during the scan and deleted after it, since a Range callback
+// must not write back into the store.
+func removeMemberRows(org *store.Org, kind, actor string) error {
+	suffix := "\x00" + kind + "\x00" + actor
+	var keys []string
+	if err := org.Range(groupMembersColl, func(key string, _ []byte) bool {
+		if strings.HasSuffix(key, suffix) {
+			keys = append(keys, key)
+		}
+		return true
+	}); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if _, _, err := org.Delete(groupMembersColl, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeFromGroupDocs rewrites every group document that names the actor
+// directly, without it. Only groups that actually change are written, so this
+// does not churn the groups generation (and the authorization index built from
+// it) for an actor that was never a declared member.
+func removeFromGroupDocs(org *store.Org, kind, actor string) error {
+	names, err := org.Keys("groups")
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		raw, ok, err := org.Get("groups", name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		var g map[string]any
+		if json.Unmarshal(raw, &g) != nil {
+			continue
+		}
+		users, clients, groups := groupMembers(g)
+		var changed bool
+		switch kind {
+		case memberUsers:
+			users, changed = without(users, actor)
+		case memberClients:
+			clients, changed = without(clients, actor)
+		case memberGroups:
+			groups, changed = without(groups, actor)
+		}
+		if !changed {
+			continue
+		}
+		if err := org.Put("groups", name, mustEncode(groupDoc(name, users, clients, groups))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// without returns s with every occurrence of v removed, and whether it changed.
+func without(s []string, v string) ([]string, bool) {
+	out := s[:0:0]
+	for _, e := range s {
+		if e != v {
+			out = append(out, e)
+		}
+	}
+	return out, len(out) != len(s)
+}
+
 // groupMembership returns a group's effective membership: what its document
 // records, plus any rows added incrementally since.
 func groupMembership(org *store.Org, group string) (users, clients, groups []string, err error) {

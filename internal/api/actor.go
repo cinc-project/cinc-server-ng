@@ -411,14 +411,24 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 		if org == nil {
 			return
 		}
-		raw, ok, err := org.Delete(segment, r.PathValue("name"))
+		name := r.PathValue("name")
+		raw, ok, err := org.Delete(segment, name)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if !ok {
-			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+r.PathValue("name"))
+			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 			return
+		}
+		// Registration put the client in the org's "clients" group. Membership
+		// must not outlive the actor: the group grants permission by name, so a
+		// later client registered under the same name would inherit it.
+		if segment == "clients" {
+			if err := removeActorFromAllGroups(org, memberClients, name); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), raw))
 	}
