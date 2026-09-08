@@ -131,7 +131,41 @@ func (a *API) deletePolicy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Every revision is gone, so any group still deploying this policy points at
+	// something no node can fetch. The deployment goes with the policy.
+	if err := removePolicyFromGroups(org, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"revisions": revs})
+}
+
+// removePolicyFromGroups drops a policy from every policy group that deploys it.
+// A group naming a policy with no revisions left would advertise a deployment
+// that resolves to nothing: listPolicyGroups reports it, and getGroupPolicy 404s
+// on the revision after successfully finding the group.
+func removePolicyFromGroups(org *store.Org, policy string) error {
+	names, err := org.Keys(policyGroupsColl)
+	if err != nil {
+		return err
+	}
+	for _, group := range names {
+		g, ok, err := loadGroup(org, group)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if _, deployed := g.Policies[policy]; !deployed {
+			continue
+		}
+		delete(g.Policies, policy)
+		if err := saveGroup(org, group, g); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *API) getPolicyRevision(w http.ResponseWriter, r *http.Request) {
