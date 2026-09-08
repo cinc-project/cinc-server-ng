@@ -189,6 +189,16 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 		if !ok {
 			return nil, false
 		}
+		// Updating or destroying an organization is a server-level operation,
+		// like provisioning one: DELETE drops every object and blob the org
+		// holds. No ACL is ever written for the organization object, so this
+		// would otherwise fall back to defaultACL(), which grants update and
+		// delete to the org's own "users" group — handing the whole org to any
+		// member. Reading its metadata stays governed by that ACL, which is what
+		// lets a member see the org it belongs to.
+		if method == http.MethodPut || method == http.MethodDelete {
+			return &authzCheck{superuserOnly: true, perm: perm}, true
+		}
 		return &authzCheck{aclType: "organizations", aclName: org, perm: perm}, true
 	}
 
