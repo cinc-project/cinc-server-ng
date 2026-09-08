@@ -20,6 +20,20 @@ jobs:
       - name: Build
         run: go build ./...
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          # Pinned so a new linter release cannot turn a green branch red
+          # without a commit. Matches the version `make lint` documents.
+          version: v2.13.2
+
   gofmt:
     runs-on: ubuntu-latest
     steps:

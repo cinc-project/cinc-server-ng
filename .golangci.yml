@@ -1,0 +1,39 @@
+version: "2"
+
+# The default set: errcheck, govet, ineffassign, staticcheck, unused.
+# `make vet` and the gofmt CI job still run independently; this adds the
+# checks neither of them covers.
+linters:
+  default: standard
+
+  settings:
+    errcheck:
+      # Errors that are genuinely nothing to act on. Everything else must be
+      # handled, including the ones that look boring.
+      exclude-functions:
+        # Deferred close on a read-only handle: the error reports a flush
+        # failure there is no write to lose.
+        - (io.Closer).Close
+        - (*database/sql.Rows).Close
+        # Rollback after a committed or already-failed transaction returns
+        # sql.ErrTxDone by design; the deferred call is the safety net.
+        - (*database/sql.Tx).Rollback
+        # Draining a response body to make the connection reusable, and
+        # writing usage text to stderr. A failure changes nothing we can do.
+        - io.Copy
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+  exclusions:
+    rules:
+      # Test helpers close temp handles and ignore returns on purpose; the
+      # test failing IS the error handling.
+      - path: _test\.go
+        linters: [errcheck]
+
+issues:
+  # Defaults are max-issues-per-linter: 50 and max-same-issues: 3, which
+  # truncate repeated findings — fix three and three more appear. A blocking
+  # gate has to report everything at once.
+  max-issues-per-linter: 0
+  max-same-issues: 0

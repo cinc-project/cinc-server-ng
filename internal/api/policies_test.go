@@ -46,7 +46,7 @@ func TestPolicyRevisionLifecycle(t *testing.T) {
 	}
 
 	// GET /policies/appserver lists revisions.
-	resp, body = do(t, "GET", base+"/policies/appserver", "")
+	resp, _ = do(t, "GET", base+"/policies/appserver", "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("get policy = %d", resp.StatusCode)
 	}
@@ -92,7 +92,7 @@ func TestPolicyGroupDeployFlow(t *testing.T) {
 	}
 
 	// The group lists the policy at that revision.
-	resp, body = do(t, "GET", base+"/policy_groups", "")
+	_, body = do(t, "GET", base+"/policy_groups", "")
 	var groups map[string]struct {
 		Policies map[string]struct {
 			RevisionID string `json:"revision_id"`

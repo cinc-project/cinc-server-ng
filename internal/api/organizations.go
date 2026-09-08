@@ -171,7 +171,10 @@ func (a *API) putOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var meta map[string]any
-	json.Unmarshal(raw, &meta)
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	var update map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {

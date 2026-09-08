@@ -107,7 +107,7 @@ func (a *API) Handler() http.Handler {
 
 	a.routes = mux.patterns
 
-	var h http.Handler = withJSONErrors(mux)
+	h := withJSONErrors(mux)
 	if a.enforceACL {
 		h = a.authzMiddleware(h)
 	}

@@ -84,7 +84,10 @@ func (a *API) authenticateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user map[string]any
-	json.Unmarshal(userRaw, &user)
+	if err := json.Unmarshal(userRaw, &user); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "linked",
 		"user":   user,
