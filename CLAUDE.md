@@ -1,21 +1,16 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-cinc-server-ng is a drop-in replacement for **both** Chef Infra Server and chef-zero, written in Go. It speaks the real Chef Infra Server API and authenticates unmodified `chef-client`/`knife`/`cinc` clients via genuine Mixlib::Authentication signed requests. State lives behind a pluggable `store.Backend`: in memory by default (instant, disposable test servers, the chef-zero role) or in SQLite for durable state that survives restarts (`--storage sqlite --db <path>`), so the same server spans CI fixtures and full-scale production fleets. Fidelity to real Chef Infra Server behavior is the goal; Policyfiles/policy groups are first-class.
+cinc-server-ng is a drop-in replacement for **both** Chef Infra Server and chef-zero, written in Go. It speaks the real Chef Infra Server API and authenticates unmodified `chef-client`/`knife`/`cinc` clients via genuine Mixlib::Authentication signed requests. State lives behind a pluggable `store.Backend`: memory by default (the chef-zero role) or SQLite for durable state (`--storage sqlite --db <path>`). Fidelity to real Chef Infra Server behavior is the goal; Policyfiles/policy groups are first-class.
 
 ## Commands
 
-- `make build` — compile the `cinc-server-ng` binary (version metadata via ldflags); it lands at `./cinc-server-ng` in the repo root.
-- `make test` — `go test ./... -race -cover` (the full suite).
-- `make vet` / `make fmt` — `go vet ./...` / `gofmt -w .`.
-- `make conformance` — drives the real `knife` CLI against an in-process server (ACL enforcement **on**, as the binary ships); needs Cinc Workstation and is gated behind `-tags conformance`. It skips when knife is unusable unless `CINC_SERVER_NG_REQUIRE_CONFORMANCE=1` (which CI and the make target set), which turns that into a failure.
-- `make differential` — compares responses against a real Chef Infra Server (`-tags differential`, needs both servers; see `.github/workflows/differential.yml`). The harness itself is unit-tested without a real server by comparing two cinc-server-ng instances, so `go test ./differential/` runs in the normal suite.
-- Single test: `go test ./internal/api/ -run TestName -v` (most logic lives in `internal/api`).
-- `make run ARGS="--enforce-acls --orgs acme"` — build and run; flags: `--addr`, `--orgs` (CSV), `--admin`, `--no-auth`, `--enforce-acls`, `--repo`, `--key-out`, `--storage` (`memory` default / `sqlite`), `--db` (SQLite path; required for `--storage sqlite`; env `CINC_SERVER_NG_STORAGE`/`CINC_SERVER_NG_DB`), `--init` (seed the store and exit without serving — used to pre-bake a DB).
-- `make dev-db` bakes `dev/test-repo` into `dev/cinc-dev.db` (git-ignored); `make run-dev` serves the seed in-memory (no auth), `make run-dev-sqlite` serves the durable SQLite copy with auth on. Developer setup, test accounts, and cinc-console wiring live in `docs/DEVELOPMENT.md`.
+`make help` documents every target. Most used: `make build`, `make test` (`go test ./... -race -cover`), `make lint` (golangci-lint; subsumes `make vet` and a gofmt check, and covers the conformance/differential build tags). Single test: `go test ./internal/api/ -run TestName -v` (most logic lives in `internal/api`).
 
-Always run `make test && make vet` before committing. Development is strict TDD: write a failing test first.
+What `make help` does not say: `make conformance` skips when knife is unusable unless `CINC_SERVER_NG_REQUIRE_CONFORMANCE=1` (CI and the make target set it), which turns that skip into a failure; and the differential harness is itself unit-tested without a real Chef Infra Server by comparing two cinc-server-ng instances, so `go test ./differential/` runs in the normal suite.
+
+Flags: `make run ARGS="..."`, or `--help`. `--storage sqlite` requires `--db`; `--init` seeds the store and exits without serving. Dev database, test accounts, and cinc-console wiring live in `docs/DEVELOPMENT.md`.
+
+Always run `make test && make lint` before committing. Development is strict TDD: write a failing test first.
 
 ## Architecture
 
@@ -36,7 +31,6 @@ cmd/cinc-server-ng (flag parsing)
 - **`internal/auth`** — Mixlib signed-header verification/signing (protocol 1.0/1.1/1.3), verified against the real gem.
 - **`internal/search`** — in-process Solr-style query engine + Chef document flattener (no external search engine).
 - **`internal/repo`** — loads an on-disk chef-repo (objects, data bags, cookbook dirs) into an org at startup.
-- `internal/authz`, `cookbook`, `policyfile`, `repoloader`, `router` are **empty placeholder dirs** — ignore them; the real authz/cookbook/policy code is in `internal/api`.
 
 ## Conventions
 
@@ -88,8 +82,3 @@ code := statusOf(t, signedAs(t, "mallory", key, "GET", srv.URL()+"/users", ""))
 ```
 
 `srv.ValidatorKey(org)` is the bootstrap key a node registers with — the right actor for "what can someone who only has a validator key do?". Always assert the **baseline denial** before the exploit, or a test can pass because the setup was wrong. `make test` runs `-race`; a race in a derived index only surfaces if the test drives writes and reads concurrently through the real handler.
-
-## Repo notes
-
-- `.claude/worktrees/` holds a full stale copy of the tree. `grep -r` and `find` hit it and return duplicate matches — exclude it.
-- `server.test` (a compiled test binary) is checked in at the repo root and should not be.

@@ -22,3 +22,5 @@ cmd/loadtest/loadtest
 
 # don't ship the worktrees dir
 .claude/worktrees/
+# compiled test binaries
+*.test
