@@ -66,6 +66,12 @@ func (q notQ) Matches(f map[string][]string) bool { return !q.q.Matches(f) }
 type termQ struct {
 	field, value string
 	phrase       bool
+	// re is the compiled form of a wildcarded value, built once when the term is
+	// parsed and nil when the value has nothing to expand. matchVal runs once per
+	// value of every document a scan touches, so compiling there made the cost of
+	// a wildcard proportional to the size of the collection rather than to the
+	// pattern.
+	re *regexp.Regexp
 }
 
 func (q termQ) Matches(f map[string][]string) bool {
@@ -88,10 +94,10 @@ func (q termQ) Matches(f map[string][]string) bool {
 }
 
 func (q termQ) matchVal(v string) bool {
-	if q.phrase || !strings.ContainsAny(q.value, "*?") {
+	if q.re == nil {
 		return v == q.value
 	}
-	return wildcardToRegexp(q.value).MatchString(v)
+	return q.re.MatchString(v)
 }
 
 // existsQ matches when a field is present with at least one value (field:*).
@@ -164,6 +170,11 @@ func wildcardToRegexp(pattern string) *regexp.Regexp {
 	}
 	b.WriteString("$")
 	// Pattern is already lowercased by the parser; values are lowercased too.
+	//
+	// MustCompile is safe on any input: every character is either one of the two
+	// wildcards, which expand to a fixed metacharacter, or QuoteMeta'd. That
+	// matters more now that this runs at Parse time, on a caller-supplied query —
+	// FuzzParse holds Parse to never panicking.
 	return regexp.MustCompile(b.String())
 }
 
@@ -178,7 +189,11 @@ func buildTerm(field, value string, phrase bool) Query {
 		}
 		return existsQ{field: field}
 	}
-	return termQ{field: field, value: value, phrase: phrase}
+	t := termQ{field: field, value: value, phrase: phrase}
+	if !phrase && strings.ContainsAny(value, "*?") {
+		t.re = wildcardToRegexp(value)
+	}
+	return t
 }
 
 // --- lexer ----------------------------------------------------------------
