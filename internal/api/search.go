@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -110,10 +111,20 @@ func (a *API) searchDocCached(coll, id string, raw []byte) (fields map[string][]
 	return nil, false
 }
 
-// sameBytes reports whether two slices share the same backing array (and length),
-// i.e. are the identical stored value rather than merely equal in content.
+// sameBytes reports whether two slices hold the same bytes, which is what makes
+// a cached flatten still current.
+//
+// This used to compare backing arrays, on the reasoning that the store never
+// mutates a value in place — true, but only the memory backend hands back the
+// stored slice at all. The SQLite backend scans a fresh slice per row on every
+// read, so an identity check could never hold there: the cache missed on every
+// row of every search while still paying a sync.Map store per document, and
+// clearing itself wholesale every maxSearchCacheEntries.
+//
+// Comparing content is correct on both (equal bytes flatten identically) and a
+// memcmp is orders of magnitude cheaper than the decode-and-flatten it saves.
 func sameBytes(a, b []byte) bool {
-	return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
+	return bytes.Equal(a, b)
 }
 
 // match is one search hit: its id and the raw stored object (returned verbatim
