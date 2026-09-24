@@ -98,6 +98,11 @@ func planCorpus() memPostings {
 		"lonely": {
 			"name": {"lonely"},
 		},
+		"literal": {
+			"name":     {"literal"},
+			"run_list": {"recipe[base]"},
+			"note":     {"a*b"},
+		},
 	}}
 }
 
@@ -146,6 +151,10 @@ func TestPlanAgreesWithMatches(t *testing.T) {
 		`roles:"base"`,
 		"NOT NOT os:linux",
 		"chef_environment:production AND chef_environment:staging",
+		`run_list:recipe\[base\]`,
+		`run_list:recipe\[ba*`,
+		`note:a\*b`,
+		`note:a*`,
 	}
 	for _, qs := range queries {
 		q, err := Parse(qs)

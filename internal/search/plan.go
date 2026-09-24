@@ -51,7 +51,7 @@ func Plan(q Query, p Postings) (DocIDs, bool) {
 		if t.field == "" {
 			return p.MatchAny(t.matchVal), true
 		}
-		if t.phrase || !hasWildcard(t.value) {
+		if t.re == nil {
 			return p.Exact(t.field, t.value), true
 		}
 		return p.Match(t.field, t.matchVal), true
@@ -100,15 +100,6 @@ func Plan(q Query, p Postings) (DocIDs, bool) {
 		return difference(p.All(), inner), true
 	}
 	return nil, false
-}
-
-func hasWildcard(v string) bool {
-	for i := range len(v) {
-		if v[i] == '*' || v[i] == '?' {
-			return true
-		}
-	}
-	return false
 }
 
 // intersect keeps the ids present in both sets, iterating the smaller one.
