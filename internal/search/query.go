@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Query is a parsed Solr query that can be evaluated against a flattened doc.
@@ -17,8 +18,9 @@ type Query interface {
 // ranges with open bounds (*), quoted "phrases", field existence (field:*),
 // the match-all *:*, bare terms (matched against any field), boolean AND / OR /
 // NOT with parentheses, implicit AND between adjacent clauses, and leading-dash
-// negation (-field:value). Fuzzy (~), boosting (^), and per-field grouping
-// (field:(a OR b)) are not supported.
+// negation (-field:value), and Lucene backslash escapes, which make the next
+// character literal (run_list:recipe\[base\], a\*b). Fuzzy (~), boosting (^),
+// and per-field grouping (field:(a OR b)) are not supported.
 func Parse(s string) (Query, error) {
 	toks, err := lex(s)
 	if err != nil {
@@ -158,8 +160,18 @@ func parseFloat(s string) (float64, bool) {
 func wildcardToRegexp(pattern string) *regexp.Regexp {
 	var b strings.Builder
 	b.WriteString("^")
+	escaped := false
 	for _, r := range pattern {
+		if escaped {
+			// A backslash-escaped character (the lexer leaves only \*, \?
+			// and \\ in a pattern) matches itself.
+			b.WriteString(regexp.QuoteMeta(string(r)))
+			escaped = false
+			continue
+		}
 		switch r {
+		case '\\':
+			escaped = true
 		case '*':
 			b.WriteString(".*")
 		case '?':
@@ -179,21 +191,38 @@ func wildcardToRegexp(pattern string) *regexp.Regexp {
 }
 
 // buildTerm constructs the right leaf query for a field:value pair, recognizing
-// *:* (match all), field:* (existence), and wildcards.
-func buildTerm(field, value string, phrase bool) Query {
+// *:* (match all), field:* (existence), and wildcards. value is the literal
+// term; glob is the same term with only its literal wildcard characters (and
+// backslashes) still escaped, so a backslash-escaped * or ? matches itself.
+// A phrase is always literal and passes glob == value.
+func buildTerm(field, value, glob string, phrase bool) Query {
 	field = strings.ToLower(field)
 	value = strings.ToLower(value)
-	if value == "*" {
+	glob = strings.ToLower(glob)
+	if glob == "*" {
 		if field == "" || field == "*" {
 			return matchAll{}
 		}
 		return existsQ{field: field}
 	}
 	t := termQ{field: field, value: value, phrase: phrase}
-	if !phrase && strings.ContainsAny(value, "*?") {
-		t.re = wildcardToRegexp(value)
+	if !phrase && hasWildcard(glob) {
+		t.re = wildcardToRegexp(glob)
 	}
 	return t
+}
+
+// hasWildcard reports whether glob has an unescaped * or ?.
+func hasWildcard(glob string) bool {
+	for i := 0; i < len(glob); i++ {
+		switch glob[i] {
+		case '\\':
+			i++
+		case '*', '?':
+			return true
+		}
+	}
+	return false
 }
 
 // --- lexer ----------------------------------------------------------------
@@ -218,6 +247,11 @@ type token struct {
 	text         string
 	lo, hi       string // for tRange
 	incLo, incHi bool   // for tRange
+	// For tWord: text has backslash escapes resolved, glob keeps \*, \? and
+	// \\ escaped for wildcard matching, and negate records an unescaped
+	// leading '-'.
+	glob   string
+	negate bool
 }
 
 func lex(s string) ([]token, error) {
@@ -268,8 +302,29 @@ func lex(s string) ([]token, error) {
 			i += end + 2
 		default:
 			start := i
+			// A backslash makes the next character literal, as in Lucene:
+			// it neither ends the word nor acts as a wildcard, keyword or
+			// negation. text is the word with its escapes resolved; glob
+			// keeps only the escapes a wildcard pattern still needs.
+			var text, glob strings.Builder
 			for i < len(s) && !strings.ContainsRune(" \t\n\r()[]{}\":", rune(s[i])) {
-				i++
+				if s[i] != '\\' {
+					text.WriteByte(s[i])
+					glob.WriteByte(s[i])
+					i++
+					continue
+				}
+				if i+1 >= len(s) {
+					return nil, fmt.Errorf("search: query cannot end with an escape character")
+				}
+				_, n := utf8.DecodeRuneInString(s[i+1:])
+				esc := s[i+1 : i+1+n]
+				text.WriteString(esc)
+				if esc == "*" || esc == "?" || esc == "\\" {
+					glob.WriteByte('\\')
+				}
+				glob.WriteString(esc)
+				i += 1 + n
 			}
 			if i == start {
 				// A delimiter with no lexer case of its own — a stray range
@@ -287,7 +342,10 @@ func lex(s string) ([]token, error) {
 			case "NOT":
 				toks = append(toks, token{kind: tNot, text: word})
 			default:
-				toks = append(toks, token{kind: tWord, text: word})
+				toks = append(toks, token{
+					kind: tWord, text: text.String(), glob: glob.String(),
+					negate: len(word) > 1 && word[0] == '-',
+				})
 			}
 		}
 	}
@@ -381,7 +439,7 @@ func (p *parser) parsePrimary() (Query, error) {
 		return q, nil
 	case tPhrase:
 		p.next()
-		return buildTerm("", t.text, true), nil
+		return buildTerm("", t.text, t.text, true), nil
 	case tWord:
 		return p.parseClause()
 	default:
@@ -390,10 +448,10 @@ func (p *parser) parsePrimary() (Query, error) {
 }
 
 func (p *parser) parseClause() (Query, error) {
-	field := p.next().text
-	negate := false
-	if strings.HasPrefix(field, "-") && len(field) > 1 {
-		negate, field = true, field[1:]
+	f := p.next()
+	field, glob, negate := f.text, f.glob, f.negate
+	if negate {
+		field, glob = field[1:], glob[1:]
 	}
 
 	var q Query
@@ -402,9 +460,9 @@ func (p *parser) parseClause() (Query, error) {
 		v := p.next()
 		switch v.kind {
 		case tWord:
-			q = buildTerm(field, v.text, false)
+			q = buildTerm(field, v.text, v.glob, false)
 		case tPhrase:
-			q = buildTerm(field, v.text, true)
+			q = buildTerm(field, v.text, v.text, true)
 		case tRange:
 			q = rangeQ{field: strings.ToLower(field), lo: v.lo, hi: v.hi, incLo: v.incLo, incHi: v.incHi}
 		default:
@@ -412,7 +470,7 @@ func (p *parser) parseClause() (Query, error) {
 		}
 	} else {
 		// Bare term: match against any field.
-		q = buildTerm("", field, false)
+		q = buildTerm("", field, glob, false)
 	}
 
 	if negate {

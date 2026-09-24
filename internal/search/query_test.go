@@ -86,8 +86,60 @@ func TestIsMatchAll(t *testing.T) {
 	}
 }
 
+// TestQueryBackslashEscapes: queries are Lucene, where a backslash makes the
+// next character literal. `run_list:recipe\[base\]` is the term
+// `recipe[base]`, the form knife's documentation uses, and an escaped
+// wildcard, colon, dash or keyword loses its special meaning.
+func TestQueryBackslashEscapes(t *testing.T) {
+	doc := mustDoc(t, `{
+		"name": "web01",
+		"run_list": ["recipe[base]", "role[web]"],
+		"fqdn": "host:8080",
+		"note": "a*b",
+		"flag": "-x",
+		"word": "AND",
+		"path": "c:\\temp",
+		"spaced": "two words"
+	}`)
+	fields := Flatten(doc)
+
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{`run_list:recipe\[base\]`, true},
+		{`run_list:role\[web\]`, true},
+		{`run_list:recipe\[other\]`, false},
+		{`name:web01 AND run_list:recipe\[base\]`, true},
+		{`run_list:recipe\[base\] AND name:web01`, true},
+		{`run_list:recipe\[ba*`, true}, // an escape and a live wildcard
+		{`fqdn:host\:8080`, true},
+		{`note:a\*b`, true}, // escaped wildcard is literal
+		{`note:a\*c`, false},
+		{`name:web\*`, false}, // literal '*', not a wildcard
+		{`name:w\?b01`, false},
+		{`flag:\-x`, true},
+		{`\-x`, true}, // a bare term, not a negation
+		{`word:\AND`, true},
+		{`path:c\:\\temp`, true},
+		{`spaced:two\ words`, true},
+		{`recipe\[base\]`, true}, // bare escaped term, any field
+		{`(run_list:recipe\[base\])`, true},
+	}
+	for _, c := range cases {
+		q, err := Parse(c.query)
+		if err != nil {
+			t.Errorf("Parse(%q) error: %v", c.query, err)
+			continue
+		}
+		if got := q.Matches(fields); got != c.want {
+			t.Errorf("Matches(%q) = %v, want %v", c.query, got, c.want)
+		}
+	}
+}
+
 func TestParseErrors(t *testing.T) {
-	for _, q := range []string{"", "(unclosed", "name:"} {
+	for _, q := range []string{"", "(unclosed", "name:", `name:web\`} {
 		if _, err := Parse(q); err == nil {
 			t.Errorf("Parse(%q) expected error, got nil", q)
 		}

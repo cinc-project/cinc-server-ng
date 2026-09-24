@@ -90,6 +90,40 @@ func TestSearchReflectsUpdatesEndToEnd(t *testing.T) {
 	}
 }
 
+// TestSearchEscapedRunListItem: the Lucene-escaped form of a run list item,
+// the one knife's documentation uses, matches roles and nodes with it.
+func TestSearchEscapedRunListItem(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	seedNode(t, base, "web01", "production", "alpha")
+	resp, b := do(t, "POST", base+"/roles", `{"name":"web","json_class":"Chef::Role","run_list":["recipe[base]"]}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create role = %d: %s", resp.StatusCode, b)
+	}
+	do(t, "POST", base+"/roles", `{"name":"db","json_class":"Chef::Role","run_list":["recipe[postgres]"]}`)
+
+	for _, c := range []struct {
+		index, q string
+		want     int
+	}{
+		{"role", `name:web+AND+run_list:recipe\[base\]`, 1},
+		{"role", `run_list:recipe\[base\]`, 1},
+		{"node", `run_list:recipe\[nginx\]`, 1},
+		{"node", `run_list:recipe\[base\]`, 0},
+	} {
+		resp, body := do(t, "GET", base+"/search/"+c.index+"?q="+strings.ReplaceAll(strings.ReplaceAll(c.q, `\`, "%5C"), "[", "%5B"), "")
+		if resp.StatusCode != 200 {
+			t.Errorf("%s q=%s = %d: %s", c.index, c.q, resp.StatusCode, body)
+			continue
+		}
+		var res searchResult
+		json.Unmarshal([]byte(body), &res)
+		if res.Total != c.want {
+			t.Errorf("%s q=%s total = %d, want %d: %s", c.index, c.q, res.Total, c.want, body)
+		}
+	}
+}
+
 func TestSearchPagination(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
