@@ -154,6 +154,11 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 	users, clients, groups := groupMembers(obj)
+	users, clients, groups, err := a.knownGroupMembers(org, users, clients, groups)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	// An explicit write replaces the group's membership, so any rows added
 	// incrementally since the last write no longer apply.
 	if err := clearMembers(org, name); err != nil {
@@ -166,6 +171,38 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRaw(w, http.StatusOK, doc)
+}
+
+// knownGroupMembers keeps only the members of a group update that exist: users
+// are global (the bootstrap superuser belongs to no org yet sits in its
+// groups), clients and groups belong to org. erchef's oc_chef_group:update
+// resolves each name to an authz id and silently drops the ones it cannot
+// find. A group here stores names, so keeping an unresolved one would make
+// whatever is later created under that name a member from the start.
+func (a *API) knownGroupMembers(org *store.Org, users, clients, groups []string) (u, c, g []string, err error) {
+	keep := func(space *store.Org, coll string, names []string) ([]string, error) {
+		out := make([]string, 0, len(names))
+		for _, n := range names {
+			_, ok, err := space.Get(coll, n)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				out = append(out, n)
+			}
+		}
+		return out, nil
+	}
+	if u, err = keep(a.store.Global(), "users", users); err != nil {
+		return nil, nil, nil, err
+	}
+	if c, err = keep(org, "clients", clients); err != nil {
+		return nil, nil, nil, err
+	}
+	if g, err = keep(org, "groups", groups); err != nil {
+		return nil, nil, nil, err
+	}
+	return u, c, g, nil
 }
 
 // groupNameRE is erchef's rule for a new group's name (oc_chef_wm_groups

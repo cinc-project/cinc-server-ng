@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -82,6 +83,8 @@ func TestGroupMembershipRoundTrip(t *testing.T) {
 	srv := seededServer(t)
 	base := srv.URL + "/organizations/acme"
 
+	do(t, "POST", srv.URL+"/users", `{"name":"anna"}`)
+	do(t, "POST", srv.URL+"/users", `{"name":"ben"}`)
 	if resp, body := do(t, "POST", base+"/groups", `{"groupname":"devs"}`); resp.StatusCode != 201 {
 		t.Fatalf("create group = %d: %s", resp.StatusCode, body)
 	}
@@ -103,6 +106,48 @@ func TestGroupMembershipRoundTrip(t *testing.T) {
 	}
 	if len(g.Actors) != 2 {
 		t.Fatalf("group actors = %v, want anna+ben flattened", g.Actors)
+	}
+}
+
+// TestGroupUpdateDropsUnknownMembers covers erchef's group update, which
+// resolves every member name and keeps only the ones it finds: users are
+// global, clients and groups belong to the org. Unknown names are dropped
+// without an error, so they are neither listed nor a latent membership for
+// whatever is created under the name later.
+func TestGroupUpdateDropsUnknownMembers(t *testing.T) {
+	srv := seededServer(t)
+	base := srv.URL + "/organizations/acme"
+	do(t, "POST", srv.URL+"/users", `{"name":"anna"}`)
+	do(t, "POST", base+"/clients", `{"name":"web01"}`)
+	for _, g := range []string{"devs", "ops"} {
+		if resp, body := do(t, "POST", base+"/groups", `{"groupname":"`+g+`"}`); resp.StatusCode != 201 {
+			t.Fatalf("create group %s = %d: %s", g, resp.StatusCode, body)
+		}
+	}
+
+	resp, body := do(t, "PUT", base+"/groups/devs",
+		`{"groupname":"devs","actors":{"users":["anna","ghost-user"],"clients":["web01","ghost-client"],"groups":["ops","ghost-group"]}}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("update group = %d: %s", resp.StatusCode, body)
+	}
+
+	_, body = do(t, "GET", base+"/groups/devs", "")
+	var g struct {
+		Users, Clients, Groups, Actors []string
+	}
+	if err := json.Unmarshal([]byte(body), &g); err != nil {
+		t.Fatalf("group doc invalid: %v\n%s", err, body)
+	}
+	if !slices.Equal(g.Users, []string{"anna"}) || !slices.Equal(g.Clients, []string{"web01"}) ||
+		!slices.Equal(g.Groups, []string{"ops"}) || !slices.Equal(g.Actors, []string{"anna", "web01", "ops"}) {
+		t.Fatalf("group members = %+v, want only the known anna, web01 and ops; body %s", g, body)
+	}
+
+	// A client created later under a dropped name does not join the group.
+	do(t, "POST", base+"/clients", `{"name":"ghost-client"}`)
+	_, body = do(t, "GET", base+"/groups/devs", "")
+	if strings.Contains(body, "ghost-client") {
+		t.Fatalf("a client created after the update inherited the dropped membership: %s", body)
 	}
 }
 
