@@ -30,10 +30,11 @@ func (a *API) registerACLRoutes(mux *recordingMux) {
 		mux.HandleFunc("GET "+base+"/{perm}", a.getACLPerm(typ))
 		mux.HandleFunc("PUT "+base+"/{perm}", a.putACLPerm(typ))
 	}
-	// The organization's own ACL.
-	mux.HandleFunc("GET /organizations/{org}/_acl", a.getOrgACL)
-	mux.HandleFunc("GET /organizations/{org}/_acl/{perm}", a.getOrgACLPerm)
-	mux.HandleFunc("PUT /organizations/{org}/_acl/{perm}", a.putOrgACLPerm)
+	// The organization's own ACL, at erchef's path. erchef has no shorter
+	// /organizations/{org}/_acl form.
+	mux.HandleFunc("GET /organizations/{org}/organizations/_acl", a.getOrgACL)
+	mux.HandleFunc("GET /organizations/{org}/organizations/_acl/{perm}", a.getOrgACLPerm)
+	mux.HandleFunc("PUT /organizations/{org}/organizations/_acl/{perm}", a.putOrgACLPerm)
 	// Global user ACLs (not org-scoped); stored in the global object space.
 	mux.HandleFunc("GET /users/{name}/_acl", a.getUserACL)
 	mux.HandleFunc("GET /users/{name}/_acl/{perm}", a.getUserACLPerm)

@@ -88,7 +88,7 @@ func Script(actor string) []Step {
 		{Name: "group list", Method: "GET", Path: "/groups"},
 		{Name: "group admins", Method: "GET", Path: "/groups/admins"},
 		{Name: "container list", Method: "GET", Path: "/containers"},
-		{Name: "org acl", Method: "GET", Path: "/_acl"},
+		{Name: "org acl", Method: "GET", Path: "/organizations/_acl"},
 
 		// --- clients ----------------------------------------------------------
 		{Name: "client list", Method: "GET", Path: "/clients"},

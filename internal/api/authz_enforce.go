@@ -174,10 +174,14 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	read := method == http.MethodGet || method == http.MethodHead
 
 	// ACL endpoints (/.../_acl[/{perm}]) require grant on the target object.
+	// The org's own ACL is at /organizations/{org}/organizations/_acl, erchef's
+	// path.
 	if i := slices.Index(rest, "_acl"); i >= 0 {
 		switch obj := rest[:i]; len(obj) {
-		case 0:
-			return &authzCheck{aclType: "organizations", aclName: org, perm: "grant"}, true
+		case 1:
+			if obj[0] == "organizations" {
+				return &authzCheck{aclType: "organizations", aclName: org, perm: "grant"}, true
+			}
 		case 2:
 			return &authzCheck{aclType: obj[0], aclName: obj[1], perm: "grant"}, true
 		}
