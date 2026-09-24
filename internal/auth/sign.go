@@ -23,7 +23,9 @@ func SignRequest(r *http.Request, userID, timestamp string, body []byte, key *rs
 		ContentHash: hashB64(sha256.New(), body),
 	}
 	serverAPIVersion := r.Header.Get("X-Ops-Server-API-Version")
-	signingString := canonicalString(r.Method, r.URL.Path, body, p, serverAPIVersion)
+	// Sign the path net/http puts on the wire (URL.RequestURI uses
+	// EscapedPath), escapes included, as Mixlib clients do.
+	signingString := canonicalString(r.Method, r.URL.EscapedPath(), body, p, serverAPIVersion)
 
 	sum := sha256.Sum256([]byte(signingString))
 	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])

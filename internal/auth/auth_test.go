@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +70,31 @@ func TestVerifyGoldenVectors(t *testing.T) {
 				t.Fatalf("VerifyRequest failed for valid signature: %v", err)
 			}
 		})
+	}
+}
+
+// TestGoldenVectorsSignEscapedPath: the gem signs the path it is handed, and
+// Chef::HTTP::Authenticator hands it `url.path`, escapes included. So an
+// escaped-path vector verifies only against the escaped path; the decoded
+// path a Go server finds in r.URL.Path is a different signing string.
+func TestGoldenVectorsSignEscapedPath(t *testing.T) {
+	vf, pub := loadVectors(t)
+	n := 0
+	for _, v := range vf.Cases {
+		if !strings.Contains(v.Path, "%") {
+			continue
+		}
+		n++
+		decoded, err := url.PathUnescape(v.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := VerifyRequest(v.HTTPMethod, decoded, []byte(v.Body), header(v), pub); err == nil {
+			t.Errorf("%s %s: signature verified against the decoded path %q", v.ProtoVersion, v.Path, decoded)
+		}
+	}
+	if n == 0 {
+		t.Fatal("no escaped-path vectors; regenerate testdata/vectors.json with gen_vectors.rb")
 	}
 }
 

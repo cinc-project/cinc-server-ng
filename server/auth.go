@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -59,7 +60,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// the webui key and run as that user. This mirrors Chef Infra Server's
 		// webui-key mechanism, which a console uses to honor each user's ACLs.
 		if strings.EqualFold(r.Header.Get("X-Ops-Request-Source"), "web") {
-			if err := auth.Verify(r.Method, r.URL.Path, body, parsed, r.Header.Get("X-Ops-Server-API-Version"), s.webuiPub); err != nil {
+			if err := auth.Verify(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"), s.webuiPub); err != nil {
 				unauthorized(w, "Invalid webui signature for request source 'web'")
 				return
 			}
@@ -94,7 +95,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if err := auth.Verify(r.Method, r.URL.Path, body, parsed, r.Header.Get("X-Ops-Server-API-Version"), pub); err != nil {
+		if err := auth.Verify(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"), pub); err != nil {
 			unauthorized(w, "Invalid signature for user or client '"+parsed.UserID+"'")
 			return
 		}
@@ -109,6 +110,20 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		r = r.WithContext(api.WithActor(r.Context(), actor))
 		next.ServeHTTP(w, r)
 	})
+}
+
+// wirePath returns the request path exactly as the client sent it, percent
+// escapes included, which is what a Mixlib client signs and what erchef
+// verifies. url.URL keeps the received path verbatim in RawPath whenever it
+// differs from the default encoding of Path; when RawPath is empty, that
+// default encoding is exactly what was received. The decoded u.Path must
+// never be verified: many encodings share one decoded path, and the client
+// signed only the one it sent.
+func wirePath(u *url.URL) string {
+	if u.RawPath != "" {
+		return u.RawPath
+	}
+	return u.EscapedPath()
 }
 
 // resolveAuth resolves an actor's signing key and identity in a single store
