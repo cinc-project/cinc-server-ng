@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -116,6 +117,10 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Field 'name' missing")
 		return
 	}
+	if !groupNameRE.MatchString(name) {
+		writeError(w, http.StatusBadRequest, "Invalid group name.")
+		return
+	}
 	users, clients, groups := groupMembers(obj)
 	if err := clearMembers(org, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -162,6 +167,10 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	writeRaw(w, http.StatusOK, doc)
 }
+
+// groupNameRE is erchef's rule for a new group's name (oc_chef_wm_groups
+// VALID_NAME_REGEX): lowercase letters, digits, '-' and '_' only.
+var groupNameRE = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 // groupName reads a group's name from the Chef identity fields, in order.
 func groupName(obj map[string]any) string {

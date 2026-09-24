@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -129,5 +131,29 @@ func TestContainerGet(t *testing.T) {
 	json.Unmarshal([]byte(body), &c)
 	if c["containername"] != "nodes" {
 		t.Fatalf("container doc = %s", body)
+	}
+}
+
+// erchef (oc_chef_wm_groups) matches a new group's name against
+// ^[a-z0-9\-_]+$ and answers 400 "Invalid group name." for anything else,
+// creating nothing.
+func TestCreateGroupRejectsInvalidName(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme/groups"
+	for _, name := range []string{"bad name!", "t group 1a2b", "Upper", "a.b", "a:b", "a/b"} {
+		body, _ := json.Marshal(map[string]string{"groupname": name})
+		resp, out := do(t, "POST", base, string(body))
+		if resp.StatusCode != 400 || !strings.Contains(out, "Invalid group name.") {
+			t.Errorf("create group %q = %d %s, want 400 Invalid group name.", name, resp.StatusCode, out)
+		}
+		if resp, _ := do(t, "GET", base+"/"+url.PathEscape(name), ""); resp.StatusCode != 404 {
+			t.Errorf("refused group %q was stored: GET = %d", name, resp.StatusCode)
+		}
+	}
+	for _, name := range []string{"ops", "ops-team_2"} {
+		body, _ := json.Marshal(map[string]string{"groupname": name})
+		if resp, out := do(t, "POST", base, string(body)); resp.StatusCode != 201 {
+			t.Errorf("create group %q = %d %s, want 201", name, resp.StatusCode, out)
+		}
 	}
 }
