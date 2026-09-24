@@ -94,7 +94,7 @@ func TestEnforceACLGlobalUsers(t *testing.T) {
 	users := srv.URL() + "/users"
 
 	// The admin creates a non-admin user and we recover its generated key.
-	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", users, `{"name":"alice"}`))
+	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", users, validUserBody(t, `{"name":"alice"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}

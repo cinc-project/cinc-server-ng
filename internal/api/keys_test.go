@@ -96,7 +96,7 @@ func TestKeysForMissingActor404(t *testing.T) {
 func TestUserKeyLifecycle(t *testing.T) {
 	srv, _ := newTestAPI(t)
 
-	resp, body := do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	resp, body := do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 	if resp.StatusCode != 201 {
 		t.Fatalf("create user = %d: %s", resp.StatusCode, body)
 	}

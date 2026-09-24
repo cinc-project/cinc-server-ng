@@ -10,7 +10,7 @@ func TestUserOrgAssociation(t *testing.T) {
 	base := srv.URL + "/organizations/acme"
 
 	// bob must exist as a global user before being associated.
-	do(t, "POST", srv.URL+"/users", `{"name":"bob"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"bob"}`))
 
 	// Associating an unknown user fails.
 	resp, _ := do(t, "POST", base+"/users", `{"username":"ghost"}`)

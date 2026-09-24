@@ -84,7 +84,7 @@ func TestSearchPaginationWindow(t *testing.T) {
 func TestGlobalUserURIShape(t *testing.T) {
 	srv, _ := newTestAPI(t)
 
-	resp, body := do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	resp, body := do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create user = %d: %s", resp.StatusCode, body)
 	}
@@ -110,7 +110,7 @@ func TestGlobalUserURIShape(t *testing.T) {
 // user's key URIs, which are derived from the same builder.
 func TestGlobalUserKeyURIShape(t *testing.T) {
 	srv, _ := newTestAPI(t)
-	if resp, body := do(t, "POST", srv.URL+"/users", `{"name":"alice"}`); resp.StatusCode != http.StatusCreated {
+	if resp, body := do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`)); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create user = %d: %s", resp.StatusCode, body)
 	}
 	_, body := do(t, "GET", srv.URL+"/users/alice/keys", "")
@@ -167,14 +167,14 @@ func TestAssociateUserJoinsUsersGroup(t *testing.T) {
 // that omits the public key keeps the stored key instead of dropping it — a
 // dropped key would break that actor's authentication.
 func TestActorPutPreservesPublicKey(t *testing.T) {
-	for _, tc := range []struct{ kind, base string }{
-		{"client", "/organizations/acme/clients"},
-		{"user", "/users"},
+	for _, tc := range []struct{ kind, base, create, put string }{
+		{"client", "/organizations/acme/clients", `{"name":"web01"}`, `{"name":"web01","validator":false}`},
+		{"user", "/users", userBody(`{"name":"web01"}`), `{"name":"web01","display_name":"Web","email":"web01@example.test"}`},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			srv, _ := newTestAPI(t)
 
-			if resp, body := do(t, "POST", srv.URL+tc.base, `{"name":"web01"}`); resp.StatusCode != http.StatusCreated {
+			if resp, body := do(t, "POST", srv.URL+tc.base, tc.create); resp.StatusCode != http.StatusCreated {
 				t.Fatalf("create %s = %d: %s", tc.kind, resp.StatusCode, body)
 			}
 			_, body := do(t, "GET", srv.URL+tc.base+"/web01", "")
@@ -186,7 +186,7 @@ func TestActorPutPreservesPublicKey(t *testing.T) {
 			}
 
 			// An update that does not re-send the key must not clear it.
-			if resp, b := do(t, "PUT", srv.URL+tc.base+"/web01", `{"name":"web01","validator":false}`); resp.StatusCode != http.StatusOK {
+			if resp, b := do(t, "PUT", srv.URL+tc.base+"/web01", tc.put); resp.StatusCode != http.StatusOK {
 				t.Fatalf("put %s = %d: %s", tc.kind, resp.StatusCode, b)
 			}
 			_, body = do(t, "GET", srv.URL+tc.base+"/web01", "")

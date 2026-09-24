@@ -12,7 +12,7 @@ import (
 func createUserKey(t *testing.T, srv *Server, name string) []byte {
 	t.Helper()
 	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", srv.URL()+"/users",
-		`{"name":"`+name+`","password":"pw"}`))
+		validUserBody(t, `{"name":"`+name+`"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}

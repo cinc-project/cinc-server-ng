@@ -120,7 +120,7 @@ func TestUserCreateIsGlobal(t *testing.T) {
 	srv := httptest.NewServer(New(st).Handler())
 	defer srv.Close()
 
-	resp, body := do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	resp, body := do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 	if resp.StatusCode != 201 {
 		t.Fatalf("create user status %d: %s", resp.StatusCode, body)
 	}

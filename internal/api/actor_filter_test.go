@@ -12,8 +12,8 @@ import (
 func TestUserListFiltering(t *testing.T) {
 	srv, _ := newTestAPI(t)
 
-	do(t, "POST", srv.URL+"/users", `{"name":"alice","email":"alice@example.com"}`)
-	do(t, "POST", srv.URL+"/users", `{"name":"bob","email":"bob@example.com","external_authentication_uid":"ldap-bob"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice","email":"alice@example.com"}`))
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"bob","email":"bob@example.com","external_authentication_uid":"ldap-bob"}`))
 
 	decode := func(body string) map[string]string {
 		t.Helper()

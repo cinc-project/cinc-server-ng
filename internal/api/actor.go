@@ -47,6 +47,13 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "Field 'name' missing")
 			return
 		}
+		if segment == "users" {
+			if msg := validateUser(obj, nil, true); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+			lowerEmail(obj)
+		}
 
 		// A client and a global user that share a name are the same principal to
 		// everything downstream, so the second one must not be created.
@@ -369,6 +376,22 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
+		}
+		// A user update is validated like erchef's, then merged into the stored
+		// record rather than replacing it: a field the body omits keeps its
+		// value, and only an explicit null removes one.
+		if segment == "users" {
+			stored, err := storedRecord(org, segment, name)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if msg := validateUser(obj, stored, false); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+			lowerEmail(obj)
+			obj = mergeUser(stored, obj)
 		}
 		delete(obj, "private_key")
 		// A PUT that omits the public key must not silently drop the actor's

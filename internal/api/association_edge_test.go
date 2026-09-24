@@ -20,7 +20,7 @@ func decodeStringError(t *testing.T, body string) string {
 // Duplicate association / invitation are 409 conflicts with string error bodies.
 func TestAssociationConflicts(t *testing.T) {
 	srv, _ := newTestAPI(t)
-	do(t, "POST", srv.URL+"/users", `{"name":"dave"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"dave"}`))
 
 	resp, body := do(t, "POST", srv.URL+"/organizations/acme/users", `{"username":"dave"}`)
 	if resp.StatusCode != 201 {
@@ -34,7 +34,7 @@ func TestAssociationConflicts(t *testing.T) {
 		t.Fatalf("dup associate body = %q", msg)
 	}
 
-	do(t, "POST", srv.URL+"/users", `{"name":"erin"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"erin"}`))
 	resp, body = do(t, "POST", srv.URL+"/organizations/acme/association_requests", `{"user":"erin"}`)
 	if resp.StatusCode != 201 {
 		t.Fatalf("invite = %d: %s", resp.StatusCode, body)
@@ -51,7 +51,7 @@ func TestAssociationConflicts(t *testing.T) {
 // A rescinded / consumed / nonexistent invite returns 404 with a string body.
 func TestInviteConsumed(t *testing.T) {
 	srv, _ := newTestAPI(t)
-	do(t, "POST", srv.URL+"/users", `{"name":"frank"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"frank"}`))
 	do(t, "POST", srv.URL+"/organizations/acme/association_requests", `{"user":"frank"}`)
 	id := "frank-acme"
 
@@ -79,7 +79,7 @@ func TestInviteConsumed(t *testing.T) {
 // accepted.
 func TestInviterLostAuthority(t *testing.T) {
 	srv, st := newTestAPI(t)
-	do(t, "POST", srv.URL+"/users", `{"name":"grace"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"grace"}`))
 	org, ok, err := st.Org("acme")
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestInviterLostAuthority(t *testing.T) {
 // matches that message to offer --force. Nothing is removed on the refusal.
 func TestDisassociateAdminRefused(t *testing.T) {
 	srv, _ := newTestAPI(t)
-	do(t, "POST", srv.URL+"/users", `{"name":"dave"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"dave"}`))
 	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/users", `{"username":"dave"}`); resp.StatusCode != 201 {
 		t.Fatalf("associate = %d: %s", resp.StatusCode, body)
 	}
@@ -138,7 +138,7 @@ func TestDisassociateAdminRefused(t *testing.T) {
 // it through authz.
 func TestDisassociateNestedAdminRefused(t *testing.T) {
 	srv, _ := newTestAPI(t)
-	do(t, "POST", srv.URL+"/users", `{"name":"dave"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"dave"}`))
 	do(t, "POST", srv.URL+"/organizations/acme/users", `{"username":"dave"}`)
 	do(t, "POST", srv.URL+"/organizations/acme/groups",
 		`{"groupname":"ops","actors":{"users":["dave"],"clients":[],"groups":[]}}`)

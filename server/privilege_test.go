@@ -28,7 +28,7 @@ func TestSelfUpdateCannotGrantAdmin(t *testing.T) {
 
 	// The self-update itself is allowed — it is how a user maintains its profile.
 	if code := statusOf(t, signedAs(t, "mallory", key, "PUT", srv.URL()+"/users/mallory",
-		`{"name":"mallory","admin":true}`)); code != 200 {
+		validUserBody(t, `{"name":"mallory","admin":true}`))); code != 200 {
 		t.Fatalf("self update = %d, want 200", code)
 	}
 
@@ -48,13 +48,13 @@ func TestSuperuserCanGrantAndRevokeAdmin(t *testing.T) {
 	users := srv.URL() + "/users"
 	key := []byte(createUser(t, srv, `{"name":"trent"}`))
 
-	if code := statusOf(t, signed(t, srv, "PUT", users+"/trent", `{"name":"trent","admin":true}`)); code != 200 {
+	if code := statusOf(t, signed(t, srv, "PUT", users+"/trent", validUserBody(t, `{"name":"trent","admin":true}`))); code != 200 {
 		t.Fatalf("admin grants admin = %d, want 200", code)
 	}
 	if code := statusOf(t, signedAs(t, "trent", key, "GET", users, "")); code != 200 {
 		t.Errorf("promoted user list users = %d, want 200", code)
 	}
-	if code := statusOf(t, signed(t, srv, "PUT", users+"/trent", `{"name":"trent"}`)); code != 200 {
+	if code := statusOf(t, signed(t, srv, "PUT", users+"/trent", validUserBody(t, `{"name":"trent","admin":false}`))); code != 200 {
 		t.Fatalf("admin revokes admin = %d, want 200", code)
 	}
 	if code := statusOf(t, signedAs(t, "trent", key, "GET", users, "")); code != 403 {
@@ -70,7 +70,7 @@ func TestSelfUpdatePreservesOwnProfileFields(t *testing.T) {
 	key := []byte(createUser(t, srv, `{"name":"nina","email":"nina@example.com"}`))
 
 	req := signedAs(t, "nina", key, "PUT", srv.URL()+"/users/nina",
-		`{"name":"nina","email":"nina@example.invalid"}`)
+		validUserBody(t, `{"name":"nina","email":"nina@example.invalid"}`))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
