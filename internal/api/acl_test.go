@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -94,7 +95,7 @@ func TestACLDataBagAndOrg(t *testing.T) {
 	}
 
 	// Organization-level ACL.
-	resp, body = do(t, "GET", base+"/_acl", "")
+	resp, body = do(t, "GET", base+"/organizations/_acl", "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("org acl = %d: %s", resp.StatusCode, body)
 	}
@@ -102,6 +103,52 @@ func TestACLDataBagAndOrg(t *testing.T) {
 	json.Unmarshal([]byte(body), &acl)
 	if _, ok := acl["grant"]; !ok {
 		t.Fatalf("org acl missing grant: %s", body)
+	}
+}
+
+// TestOrgACLAtErchefPath covers the organization's own ACL at erchef's path,
+// /organizations/{org}/organizations/_acl[/{perm}]. erchef has no shorter
+// /organizations/{org}/_acl form, so that path is not routed.
+func TestOrgACLAtErchefPath(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+
+	resp, body := do(t, "GET", base+"/organizations/_acl", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET org acl = %d: %s", resp.StatusCode, body)
+	}
+	var acl map[string]aclPerm
+	json.Unmarshal([]byte(body), &acl)
+	if _, ok := acl["grant"]; !ok {
+		t.Fatalf("org acl missing grant: %s", body)
+	}
+
+	resp, body = do(t, "PUT", base+"/organizations/_acl/read", `{"read":{"actors":["alice"],"groups":[]}}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT org acl read = %d: %s", resp.StatusCode, body)
+	}
+	resp, body = do(t, "GET", base+"/organizations/_acl/read", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET org acl read = %d: %s", resp.StatusCode, body)
+	}
+	var got map[string]aclPerm
+	json.Unmarshal([]byte(body), &got)
+	if !slices.Equal(got["read"].Actors, []string{"alice"}) {
+		t.Errorf("org acl read actors = %v, want [alice]; body %s", got["read"].Actors, body)
+	}
+
+	// The short form is not an erchef route: it 404s with a JSON error.
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/_acl", ""},
+		{"GET", "/_acl/read", ""},
+		{"PUT", "/_acl/read", `{"read":{"actors":[],"groups":[]}}`},
+	} {
+		resp, body := do(t, c.method, base+c.path, c.body)
+		var e struct{ Error []string }
+		if resp.StatusCode != 404 || json.Unmarshal([]byte(body), &e) != nil || len(e.Error) == 0 {
+			t.Errorf("%s %s = %d %s, want a JSON 404", c.method, c.path, resp.StatusCode, body)
+		}
 	}
 }
 

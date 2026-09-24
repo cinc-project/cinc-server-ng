@@ -95,7 +95,8 @@ at org creation, resolves actor membership through nested groups, and checks
 authentication → existence → authorization in that order (so a missing object
 reports `404`, not `403`). Enforcement covers the
 org-scoped object endpoints (nodes, roles, data bags, cookbooks, groups,
-containers, …), the org's own `_acl`, and the global actor endpoints: the
+containers, …), the org's own ACL (`/organizations/<org>/organizations/_acl`,
+erchef's path), and the global actor endpoints: the
 `/users` collection is superuser-only (a user may still read or update its own
 record), and `/users/<name>/_acl` is governed by the grant permission on that
 user. The bootstrap admin is a superuser and bypasses ACLs, mirroring Chef's

@@ -97,7 +97,7 @@ func TestOrgACLSinglePermission(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 
-	resp, body := do(t, "GET", base+"/_acl/read", "")
+	resp, body := do(t, "GET", base+"/organizations/_acl/read", "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("org acl read = %d: %s", resp.StatusCode, body)
 	}
@@ -106,7 +106,7 @@ func TestOrgACLSinglePermission(t *testing.T) {
 	if _, ok := got["read"]; !ok || len(got) != 1 {
 		t.Fatalf("single-permission response = %s", body)
 	}
-	if resp, _ := do(t, "GET", base+"/_acl/bogus", ""); resp.StatusCode != 404 {
+	if resp, _ := do(t, "GET", base+"/organizations/_acl/bogus", ""); resp.StatusCode != 404 {
 		t.Fatalf("org acl bogus = %d, want 404", resp.StatusCode)
 	}
 }

@@ -166,7 +166,12 @@ func TestClassifyRequest(t *testing.T) {
 		// _acl endpoints require grant on the target object; no existence check.
 		{"GET", "/organizations/acme/nodes/web01/_acl", &authzCheck{aclType: "nodes", aclName: "web01", perm: "grant"}},
 		{"PUT", "/organizations/acme/nodes/web01/_acl/grant", &authzCheck{aclType: "nodes", aclName: "web01", perm: "grant"}},
-		{"GET", "/organizations/acme/_acl", &authzCheck{aclType: "organizations", aclName: "acme", perm: "grant"}},
+		// The org's own ACL is at erchef's /organizations/{org}/organizations/_acl;
+		// there is no /organizations/{org}/_acl route to classify.
+		{"GET", "/organizations/acme/_acl", nil},
+		{"GET", "/organizations/acme/organizations/_acl", &authzCheck{aclType: "organizations", aclName: "acme", perm: "grant"}},
+		{"GET", "/organizations/acme/organizations/_acl/read", &authzCheck{aclType: "organizations", aclName: "acme", perm: "grant"}},
+		{"PUT", "/organizations/acme/organizations/_acl/grant", &authzCheck{aclType: "organizations", aclName: "acme", perm: "grant"}},
 		// Organization read.
 		{"GET", "/organizations/acme", &authzCheck{aclType: "organizations", aclName: "acme", perm: "read"}},
 		// Data bags: container governs the collection; the bag ACL governs items.
@@ -517,14 +522,26 @@ func TestEnforceOrgACL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code, body := authzReq(t, h, Actor{Name: "stranger"}, "GET", "/organizations/acme/_acl", ""); code != http.StatusForbidden {
-		t.Errorf("stranger GET org acl = %d, want 403; body %s", code, body)
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/organizations/acme/organizations/_acl", ""},
+		{"GET", "/organizations/acme/organizations/_acl/grant", ""},
+		{"PUT", "/organizations/acme/organizations/_acl/read", `{"read":{"actors":[],"groups":[]}}`},
+	} {
+		if code, body := authzReq(t, h, Actor{Name: "stranger"}, c.method, c.path, c.body); code != http.StatusForbidden {
+			t.Errorf("stranger %s %s = %d, want 403; body %s", c.method, c.path, code, body)
+		}
+		if code, body := authzReq(t, h, Actor{Name: "granter"}, c.method, c.path, c.body); code != http.StatusOK {
+			t.Errorf("granter %s %s = %d, want 200; body %s", c.method, c.path, code, body)
+		}
 	}
-	if code, body := authzReq(t, h, Actor{Name: "granter"}, "GET", "/organizations/acme/_acl", ""); code != http.StatusOK {
-		t.Errorf("granter GET org acl = %d, want 200; body %s", code, body)
-	}
-	if code, body := authzReq(t, h, Actor{Name: "granter"}, "PUT", "/organizations/acme/_acl/grant",
-		`{"grant":{"actors":["granter"],"groups":[]}}`); code != http.StatusOK {
-		t.Errorf("granter PUT org acl grant = %d, want 200; body %s", code, body)
+	// The short form is not routed, so even a grant holder gets a 404 rather
+	// than a 403 from the fail-closed write check.
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/organizations/acme/_acl", ""},
+		{"PUT", "/organizations/acme/_acl/read", `{"read":{"actors":[],"groups":[]}}`},
+	} {
+		if code, body := authzReq(t, h, Actor{Name: "granter"}, c.method, c.path, c.body); code != http.StatusNotFound {
+			t.Errorf("granter %s %s = %d, want 404; body %s", c.method, c.path, code, body)
+		}
 	}
 }
