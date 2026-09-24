@@ -102,6 +102,17 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 		// Hand the bytes forward so a read handler need not fetch them again.
 		r = withPreread(r, org.Name(), check.existColl, check.existKey, raw)
 	}
+	if check.aclEndpoint {
+		ok, err := aclObjectExists(org, check.aclType, check.aclName)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return r, false
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, "Cannot find "+check.aclType+" "+check.aclName)
+			return r, false
+		}
+	}
 	allowed, err := a.actorAllowed(org, actor, check.aclType, check.aclName, check.perm)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -132,6 +143,11 @@ type authzCheck struct {
 	// allowSelf names the user permitted to act on its own global record; when
 	// it matches the actor the request is allowed before the superuser gate.
 	allowSelf string
+	// aclEndpoint marks a request for the _acl of the aclType/aclName object,
+	// which must exist before its ACL is authorized (a 404, not a 403). The
+	// object's storage varies by type, so aclObjectExists checks it rather than
+	// existColl.
+	aclEndpoint bool
 }
 
 // enforceSegs are the generic object collections whose container ACL governs
@@ -183,7 +199,7 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 				return &authzCheck{aclType: "organizations", aclName: org, perm: "grant"}, true
 			}
 		case 2:
-			return &authzCheck{aclType: obj[0], aclName: obj[1], perm: "grant"}, true
+			return &authzCheck{aclType: obj[0], aclName: obj[1], perm: "grant", aclEndpoint: true}, true
 		}
 		return nil, false
 	}
@@ -282,7 +298,7 @@ func classifyUsers(method string, rest []string) (*authzCheck, bool) {
 	}
 	// /users/{name}/_acl[/{perm}] — grant on the user object (global space).
 	if rest[1] == "_acl" {
-		return &authzCheck{global: true, aclType: "users", aclName: rest[0], perm: "grant"}, true
+		return &authzCheck{global: true, aclType: "users", aclName: rest[0], perm: "grant", aclEndpoint: true}, true
 	}
 	// /users/{name}/keys[/{key}] — a user's public_key is the credential the
 	// auth layer verifies against, so rewriting it is an account takeover.

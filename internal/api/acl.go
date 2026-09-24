@@ -12,7 +12,8 @@ import (
 // Every object exposes a well-formed five-permission ACL that tooling such as
 // `knife acl` can read and write. ACLs are stored per object in the "acls"
 // collection keyed by "type/name"; an object with no stored ACL reports a
-// sensible permissive default. By default these ACLs are structural only — no
+// sensible permissive default, while the ACL of an object that does not exist is
+// a 404, as in erchef. By default these ACLs are structural only — no
 // request is denied — but they become enforced when the server is started with
 // ACL enforcement enabled (see authz_enforce.go).
 
@@ -109,6 +110,44 @@ func (a *API) grantCreator(r *http.Request, org *store.Org, typ, name string) er
 func deleteACL(org *store.Org, typ, name string) error {
 	_, _, err := org.Delete("acls", aclKey(typ, name))
 	return err
+}
+
+// aclObjectExists reports whether the object an ACL of type typ and name
+// belongs to exists. erchef looks the object up before its ACL, so the ACL of a
+// missing object is a 404 rather than the default: and a stored one would not be
+// inert, since loadACL keys it by type and name alone and it would govern
+// whatever is later created under that name.
+func aclObjectExists(org *store.Org, typ, name string) (bool, error) {
+	switch typ {
+	case "organizations":
+		return true, nil // the caller has already resolved the org itself
+	case "data":
+		_, ok, err := org.Get(dataBagsColl, name)
+		return ok, err
+	case "cookbooks", "cookbook_artifacts":
+		return hasVersion(org, typ, name)
+	case "policies":
+		revs, err := org.Keys(policyRevColl(name))
+		return len(revs) > 0, err
+	default: // stored one key per object in a collection named for the type
+		_, ok, err := org.Get(typ, name)
+		return ok, err
+	}
+}
+
+// aclObjectFound writes a 404 (or a 500 on a store error) and returns false
+// unless the object whose ACL is addressed exists.
+func aclObjectFound(w http.ResponseWriter, org *store.Org, typ, name string) bool {
+	ok, err := aclObjectExists(org, typ, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "Cannot find "+typ+" "+name)
+		return false
+	}
+	return true
 }
 
 func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
@@ -215,6 +254,9 @@ func (a *API) putUserACLPerm(w http.ResponseWriter, r *http.Request) {
 
 // writeACLDoc writes the full five-permission ACL for an object.
 func writeACLDoc(w http.ResponseWriter, org *store.Org, typ, name string) {
+	if !aclObjectFound(w, org, typ, name) {
+		return
+	}
 	acl, err := loadACL(org, typ, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -227,6 +269,9 @@ func writeACLDoc(w http.ResponseWriter, org *store.Org, typ, name string) {
 func writeACLPermDoc(w http.ResponseWriter, org *store.Org, typ, name, perm string) {
 	if !slices.Contains(aclPerms, perm) {
 		writeError(w, http.StatusNotFound, "Cannot find ACL permission "+perm)
+		return
+	}
+	if !aclObjectFound(w, org, typ, name) {
 		return
 	}
 	acl, err := loadACL(org, typ, name)
@@ -244,6 +289,9 @@ func writeACLPermDoc(w http.ResponseWriter, org *store.Org, typ, name, perm stri
 func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, members *store.Org, typ, name, perm string, status int) {
 	if !slices.Contains(aclPerms, perm) {
 		writeError(w, http.StatusNotFound, "Cannot find ACL permission "+perm)
+		return
+	}
+	if !aclObjectFound(w, scope, typ, name) {
 		return
 	}
 	var body map[string]any

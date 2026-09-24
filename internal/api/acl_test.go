@@ -36,6 +36,7 @@ func TestACLDefaultShape(t *testing.T) {
 func TestACLGetSinglePermission(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
+	do(t, "POST", base+"/roles", `{"name":"web"}`)
 	resp, body := do(t, "GET", base+"/roles/web/_acl/read", "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("get read perm = %d: %s", resp.StatusCode, body)
@@ -50,6 +51,7 @@ func TestACLGetSinglePermission(t *testing.T) {
 func TestACLUpdatePermission(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
+	do(t, "POST", base+"/nodes", `{"name":"web01"}`)
 
 	// Grant a specific actor on the "grant" permission.
 	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
@@ -251,6 +253,8 @@ func TestPolicyGroupACLPutStatus201(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 	do(t, "POST", base+"/groups", `{"groupname":"admins"}`)
+	do(t, "PUT", base+"/policy_groups/prod/policies/base", `{"revision_id":"r1"}`)
+	do(t, "POST", base+"/nodes", `{"name":"web01"}`)
 	// policy_group ACL PUT returns 201, matching Chef.
 	if resp, body := do(t, "PUT", base+"/policy_groups/prod/_acl/read", `{"read":{"actors":[],"groups":["admins"]}}`); resp.StatusCode != 201 {
 		t.Fatalf("policy_group acl put = %d, want 201; body %s", resp.StatusCode, body)

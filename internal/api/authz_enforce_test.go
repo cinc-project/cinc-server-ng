@@ -163,9 +163,9 @@ func TestClassifyRequest(t *testing.T) {
 		{"HEAD", "/organizations/acme/nodes/web01", &authzCheck{aclType: "nodes", aclName: "web01", perm: "read", existColl: "nodes", existKey: "web01", existMsg: "Cannot find nodes web01"}},
 		{"PUT", "/organizations/acme/roles/web", &authzCheck{aclType: "roles", aclName: "web", perm: "update", existColl: "roles", existKey: "web", existMsg: "Cannot find roles web"}},
 		{"DELETE", "/organizations/acme/environments/prod", &authzCheck{aclType: "environments", aclName: "prod", perm: "delete", existColl: "environments", existKey: "prod", existMsg: "Cannot find environments prod"}},
-		// _acl endpoints require grant on the target object; no existence check.
-		{"GET", "/organizations/acme/nodes/web01/_acl", &authzCheck{aclType: "nodes", aclName: "web01", perm: "grant"}},
-		{"PUT", "/organizations/acme/nodes/web01/_acl/grant", &authzCheck{aclType: "nodes", aclName: "web01", perm: "grant"}},
+		// _acl endpoints require grant on the target object, and the object must exist first.
+		{"GET", "/organizations/acme/nodes/web01/_acl", &authzCheck{aclType: "nodes", aclName: "web01", perm: "grant", aclEndpoint: true}},
+		{"PUT", "/organizations/acme/nodes/web01/_acl/grant", &authzCheck{aclType: "nodes", aclName: "web01", perm: "grant", aclEndpoint: true}},
 		// The org's own ACL is at erchef's /organizations/{org}/organizations/_acl;
 		// there is no /organizations/{org}/_acl route to classify.
 		{"GET", "/organizations/acme/_acl", nil},
@@ -198,8 +198,8 @@ func TestClassifyRequest(t *testing.T) {
 		{"PUT", "/users/bob", &authzCheck{superuserOnly: true, perm: "update", allowSelf: "bob"}},
 		{"DELETE", "/users/bob", &authzCheck{superuserOnly: true, perm: "delete", allowSelf: "bob"}},
 		// Global user ACLs: grant on the user object, evaluated in the global space.
-		{"GET", "/users/bob/_acl", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant"}},
-		{"PUT", "/users/bob/_acl/grant", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant"}},
+		{"GET", "/users/bob/_acl", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant", aclEndpoint: true}},
+		{"PUT", "/users/bob/_acl/grant", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant", aclEndpoint: true}},
 		// Force-associating a user is superuser-only, as on erchef (see
 		// authz_gaps_test.go for the rest of the membership routes).
 		{"POST", "/organizations/acme/users", &authzCheck{superuserOnly: true, perm: "create"}},
