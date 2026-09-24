@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -459,6 +460,10 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if msg := validateCookbookNames(name, m); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	// Every referenced file must already be in the blob store.
 	for _, sum := range manifestChecksums(m) {
@@ -502,6 +507,41 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	a.injectFileURLs(m, r, org.Name())
 	writeJSON(w, status, m)
+}
+
+// cookbookNameRE is erchef's cookbook_name rule (chef_regex NAME_REGEX):
+// letters, digits, '.', '_' and '-'.
+var cookbookNameRE = regexp.MustCompile(`^[.A-Za-z0-9_-]+$`)
+
+// validateCookbookNames applies erchef's cookbook name checks to a version
+// PUT (chef_cookbook_version:validate_cookbook): the URL name, metadata.name
+// when present, and the keys of metadata.dependencies and metadata.platforms.
+// It returns erchef's error message, or "" when everything is valid.
+func validateCookbookNames(urlName string, m map[string]any) string {
+	if !cookbookNameRE.MatchString(urlName) {
+		return "Invalid cookbook name '" + urlName +
+			"' using regex: 'Malformed cookbook name. Must only contain A-Z, a-z, 0-9, _, . or -'."
+	}
+	meta, _ := m["metadata"].(map[string]any)
+	if n, ok := meta["name"]; ok {
+		if s, _ := n.(string); !cookbookNameRE.MatchString(s) {
+			return "Field 'metadata.name' invalid"
+		}
+	}
+	for _, field := range []string{"dependencies", "platforms"} {
+		constraints, _ := meta[field].(map[string]any)
+		keys := make([]string, 0, len(constraints))
+		for k := range constraints {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if !cookbookNameRE.MatchString(k) {
+				return "Invalid key '" + k + "' for metadata." + field
+			}
+		}
+	}
+	return ""
 }
 
 func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
