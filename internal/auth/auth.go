@@ -86,7 +86,11 @@ func VerifyRequest(method, path string, body []byte, h http.Header, pub *rsa.Pub
 	return Verify(method, path, body, p, h.Get("X-Ops-Server-API-Version"), pub)
 }
 
-// Verify checks a parsed request's signature against pub.
+// Verify checks a parsed request's signature against pub. path must be the
+// request path exactly as received, percent escapes included, never the
+// decoded path: Mixlib clients sign the path they send
+// (Chef::HTTP::Authenticator passes `url.path`), and erchef verifies against
+// the raw request path.
 func Verify(method, path string, body []byte, p *Parsed, serverAPIVersion string, pub *rsa.PublicKey) error {
 	signingString := canonicalString(method, path, body, p, serverAPIVersion)
 

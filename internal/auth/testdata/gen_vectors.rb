@@ -6,10 +6,18 @@
 require "openssl"
 require "digest"
 require "json"
+require "uri"
 require "mixlib/authentication/signedheaderauth"
 
 # Fixed key generated once and embedded in the output so vectors are stable.
-key = OpenSSL::PKey::RSA.new(2048)
+# Regenerating reuses the key already in vectors.json (RSASSA-PKCS1-v1_5 is
+# deterministic, so the existing vectors come out byte-identical).
+existing = File.join(__dir__, "vectors.json")
+key = if File.exist?(existing)
+        OpenSSL::PKey::RSA.new(JSON.parse(File.read(existing))["private_key"])
+      else
+        OpenSSL::PKey::RSA.new(2048)
+      end
 
 REQUESTS = [
   { http_method: :get,    path: "/organizations/acme/nodes",          body: "",                       user_id: "test-client" },
@@ -18,6 +26,11 @@ REQUESTS = [
   { http_method: :delete, path: "/organizations/acme/data/secrets",   body: "",                       user_id: "user@example.com" },
   # path canonicalization edge cases
   { http_method: :get,    path: "/organizations/acme//nodes/",        body: "",                       user_id: "test-client" },
+  # Percent-escaped paths. Chef::HTTP::Authenticator signs `url.path`, the
+  # escaped path as it goes on the wire, so these paths come from a parsed
+  # URI the same way.
+  { http_method: :delete, path: URI("https://chef.example/organizations/acme/data/t%20bad%2095bd2c97").path, body: "", user_id: "test-client" },
+  { http_method: :get,    path: URI("https://chef.example/organizations/acme/data/bag/bad%20id").path,       body: "", user_id: "test-client" },
 ].freeze
 
 cases = []

@@ -23,6 +23,30 @@ func TestSignThenVerifyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSignRequestSignsEscapedPath: Mixlib clients (Chef::HTTP::Authenticator
+// passes `url.path`) sign the path as it goes on the wire, percent escapes
+// included. SignRequest must do the same, or its signatures only verify
+// against the decoded path.
+func TestSignRequestSignsEscapedPath(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rawURL := range []string{
+		"http://localhost/organizations/acme/data/t%20bad%2095bd2c97",
+		"http://localhost/organizations/acme/data/a%7eb",
+	} {
+		req, _ := http.NewRequest("GET", rawURL, nil)
+		if err := SignRequest(req, "node1", "2024-01-02T03:04:05Z", nil, key); err != nil {
+			t.Fatal(err)
+		}
+		wire := strings.TrimPrefix(rawURL, "http://localhost")
+		if err := VerifyRequest("GET", wire, nil, req.Header, &key.PublicKey); err != nil {
+			t.Errorf("%s: signature does not cover the escaped path: %v", wire, err)
+		}
+	}
+}
+
 func TestSignedRequestRejectedByWrongKey(t *testing.T) {
 	key, _ := GenerateKey()
 	other, _ := GenerateKey()
