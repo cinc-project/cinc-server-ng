@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
@@ -137,6 +138,16 @@ func keysColl(segment, actor string) string { return segment + "_keys:" + actor 
 
 func keysBaseURL(r *http.Request, segment, actor string) string {
 	return objectURL(r, orgSegment(r), segment, actor) + "/keys"
+}
+
+// keyURL is the URL of one of an actor's keys, for the Location header of a
+// rename. The caller passes the actor and key names already path-escaped
+// (url.PathEscape) and the org is escaped here, so each can only ever fill its
+// own segment under the actor's keys on this server: none can supply a host,
+// climb to a parent path, or split the header. Escaping at the call site keeps
+// the request-derived names visibly sanitized where the header is set.
+func keyURL(r *http.Request, segment, escapedActor, escapedKey string) string {
+	return objectURL(r, url.PathEscape(orgSegment(r)), segment, escapedActor) + "/keys/" + escapedKey
 }
 
 // loadActor fetches the actor object, writing a 404 if it does not exist.
@@ -418,6 +429,12 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 		if n := str(body["name"]); n != "" {
 			newName = n
 		}
+		// validateKeyFields has checked the name already; the rename puts it in
+		// the Location header, so check it again where it is used.
+		if !validKeyName(newName) {
+			writeError(w, http.StatusBadRequest, "Field 'name' invalid")
+			return
+		}
 		key := map[string]any{"name": newName, "public_key": old.PublicKey, "expiration_date": old.ExpirationDate}
 		for _, field := range []string{"public_key", "expiration_date"} {
 			if v := str(body[field]); v != "" {
@@ -483,7 +500,7 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 				return
 			}
 		}
-		w.Header().Set("Location", keysBaseURL(r, segment, name)+"/"+newName)
+		w.Header().Set("Location", keyURL(r, segment, url.PathEscape(name), url.PathEscape(newName)))
 		respond(http.StatusCreated)
 	}
 }

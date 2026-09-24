@@ -34,6 +34,14 @@ func invalidClientNameMessage(name string) string {
 		"' using regex: 'Malformed client name.  Must be A-Z, a-z, 0-9, _, -, or .'."
 }
 
+// validKeyName reports whether s is a key name erchef accepts (chef_regex
+// key_name) that also addresses the key: "." and ".." match key_name but are
+// path segments, so a key under either name could never be fetched, and a
+// rename's Location built from one would point at a parent path.
+func validKeyName(s string) bool {
+	return keyNameRE.MatchString(s) && s != "." && s != ".."
+}
+
 // validPublicKey reports whether s is a PEM public key erchef accepts
 // (chef_key_base:valid_public_key): a "PUBLIC KEY" or "RSA PUBLIC KEY" block
 // that parses.
@@ -64,7 +72,7 @@ func validExpirationDate(s string) bool {
 // to the caller, which treats it as absent.
 func validateKeyFields(body map[string]any) string {
 	if v, ok := body["name"]; ok {
-		if s, _ := v.(string); !keyNameRE.MatchString(s) {
+		if s, _ := v.(string); !validKeyName(s) {
 			return "Field 'name' invalid"
 		}
 	}

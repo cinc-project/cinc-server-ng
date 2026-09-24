@@ -363,6 +363,50 @@ func TestKeyPutRenameConflicts(t *testing.T) {
 	}
 }
 
+// A rename's new name ends up in the Location header, so a name that could
+// steer that header anywhere but the key's own URL (another host, a parent
+// path, an encoded slash, a header injection) is refused with a 400, sets no
+// Location, and leaves the key where it was. A name erchef allows still
+// renames, to a Location on this server under the actor's keys.
+func TestKeyPutRenameRejectsUnsafeNames(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme/clients/web01/keys"
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+	do(t, "POST", base, `{"name":"a","expiration_date":"infinity"}`)
+	before := getKeyDoc(t, base+"/a")
+
+	for _, name := range []string{
+		"//evil.example",
+		"https://evil.example/x",
+		"..",
+		".",
+		"a/../../b",
+		"a%2Fb",
+		"a\r\nX-Evil: 1",
+		"a\nb",
+		"a b",
+	} {
+		resp, body := do(t, "PUT", base+"/a", `{"name":`+jsonString(t, name)+`}`)
+		if resp.StatusCode != 400 {
+			t.Errorf("rename to %q = %d, want 400: %s", name, resp.StatusCode, body)
+		}
+		if loc := resp.Header.Get("Location"); loc != "" {
+			t.Errorf("rename to %q set Location %q", name, loc)
+		}
+	}
+	if got := getKeyDoc(t, base+"/a"); got["public_key"] != before["public_key"] {
+		t.Fatalf("key a changed by a refused rename: %v", got)
+	}
+
+	resp, body := do(t, "PUT", base+"/a", `{"name":"rotated:2026.1_a-b"}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("rename to an erchef key name = %d, want 201: %s", resp.StatusCode, body)
+	}
+	if loc := resp.Header.Get("Location"); loc != base+"/rotated:2026.1_a-b" {
+		t.Fatalf("Location = %q, want %q", loc, base+"/rotated:2026.1_a-b")
+	}
+}
+
 func testPublicKey(t *testing.T) string {
 	t.Helper()
 	key, err := auth.GenerateKey()
