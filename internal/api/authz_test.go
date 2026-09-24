@@ -83,8 +83,8 @@ func TestGroupMembershipRoundTrip(t *testing.T) {
 	srv := seededServer(t)
 	base := srv.URL + "/organizations/acme"
 
-	do(t, "POST", srv.URL+"/users", `{"name":"anna"}`)
-	do(t, "POST", srv.URL+"/users", `{"name":"ben"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"anna"}`))
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"ben"}`))
 	if resp, body := do(t, "POST", base+"/groups", `{"groupname":"devs"}`); resp.StatusCode != 201 {
 		t.Fatalf("create group = %d: %s", resp.StatusCode, body)
 	}
@@ -117,7 +117,7 @@ func TestGroupMembershipRoundTrip(t *testing.T) {
 func TestGroupUpdateDropsUnknownMembers(t *testing.T) {
 	srv := seededServer(t)
 	base := srv.URL + "/organizations/acme"
-	do(t, "POST", srv.URL+"/users", `{"name":"anna"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"anna"}`))
 	do(t, "POST", base+"/clients", `{"name":"web01"}`)
 	for _, g := range []string{"devs", "ops"} {
 		if resp, body := do(t, "POST", base+"/groups", `{"groupname":"`+g+`"}`); resp.StatusCode != 201 {

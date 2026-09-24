@@ -52,7 +52,7 @@ func TestACLUpdatePermission(t *testing.T) {
 	base := srv.URL + "/organizations/acme"
 
 	// Grant a specific actor on the "grant" permission.
-	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 	do(t, "POST", base+"/groups", `{"groupname":"admins"}`)
 	resp, body := do(t, "PUT", base+"/nodes/web01/_acl/grant",
 		`{"grant":{"actors":["alice"],"groups":["admins"]}}`)
@@ -82,7 +82,7 @@ func TestACLUpdateRejectsUnknownMembers(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 	do(t, "PUT", base+"/nodes/web01", `{"name":"web01"}`)
-	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 	do(t, "POST", base+"/clients", `{"name":"web-client"}`)
 	do(t, "POST", base+"/groups", `{"groupname":"ops"}`)
 
@@ -115,7 +115,7 @@ func TestACLUpdateRejectsUnknownMembers(t *testing.T) {
 // resolve against the global users, so an unknown name is refused.
 func TestUserACLUpdateRejectsUnknownActor(t *testing.T) {
 	srv, _ := newTestAPI(t)
-	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 
 	resp, body := do(t, "PUT", srv.URL+"/users/alice/_acl/grant", `{"grant":{"actors":["ghost"],"groups":[]}}`)
 	if resp.StatusCode != 400 || !strings.Contains(body, "ghost") {
@@ -231,7 +231,7 @@ func TestUserACLEndpoints(t *testing.T) {
 	}
 
 	// PUT updates and persists.
-	do(t, "POST", base+"/users", `{"name":"bob"}`)
+	do(t, "POST", base+"/users", userBody(`{"name":"bob"}`))
 	if resp, _ := do(t, "PUT", base+"/users/alice/_acl/grant", `{"grant":{"actors":["bob"],"groups":[]}}`); resp.StatusCode != 200 {
 		t.Fatalf("user acl put = %d", resp.StatusCode)
 	}
