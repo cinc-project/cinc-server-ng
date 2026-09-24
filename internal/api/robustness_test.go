@@ -63,36 +63,35 @@ func TestObjectNameRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDataBagItemNameRoundTrip pins the same robustness for the two-level
-// data-bag namespace: both the bag name and the item id may carry tricky
-// characters and must round-trip through the store as valid JSON.
+// TestDataBagItemNameRoundTrip pins the two-level data-bag namespace against
+// the same tricky characters. erchef refuses every one of them as a bag name
+// and as an item id (its data_bag_name / data_bag_item_id rule), so each must
+// be answered with a 400 and leave nothing behind that a later read finds.
 func TestDataBagItemNameRoundTrip(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	const data = "/organizations/acme/data"
+	if resp, b := do(t, "POST", srv.URL+data, `{"name":"bag"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create bag = %d: %s", resp.StatusCode, b)
+	}
 
 	for _, name := range trickyNames {
 		t.Run(name, func(t *testing.T) {
-			bagBody, _ := json.Marshal(map[string]any{"name": name})
-			if resp, b := do(t, "POST", srv.URL+data, string(bagBody)); resp.StatusCode != http.StatusCreated {
-				t.Fatalf("create bag = %d: %s", resp.StatusCode, b)
-			}
 			esc := url.PathEscape(name)
 
-			itemBody, _ := json.Marshal(map[string]any{"id": name, "secret": "s"})
-			if resp, b := do(t, "POST", srv.URL+data+"/"+esc, string(itemBody)); resp.StatusCode != http.StatusCreated {
-				t.Fatalf("create item = %d: %s", resp.StatusCode, b)
+			bagBody, _ := json.Marshal(map[string]any{"name": name})
+			if resp, b := do(t, "POST", srv.URL+data, string(bagBody)); resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("create bag = %d: %s, want 400", resp.StatusCode, b)
+			}
+			if resp, b := do(t, "GET", srv.URL+data+"/"+esc, ""); resp.StatusCode != http.StatusNotFound {
+				t.Errorf("get refused bag = %d: %s, want 404", resp.StatusCode, b)
 			}
 
-			resp, got := do(t, "GET", srv.URL+data+"/"+esc+"/"+esc, "")
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("get item = %d: %s", resp.StatusCode, got)
+			itemBody, _ := json.Marshal(map[string]any{"id": name, "secret": "s"})
+			if resp, b := do(t, "POST", srv.URL+data+"/bag", string(itemBody)); resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("create item = %d: %s, want 400", resp.StatusCode, b)
 			}
-			var item map[string]any
-			if err := json.Unmarshal([]byte(got), &item); err != nil {
-				t.Fatalf("stored item is not valid JSON: %v (%s)", err, got)
-			}
-			if item["id"] != name {
-				t.Errorf("round-tripped id = %v, want %q", item["id"], name)
+			if resp, b := do(t, "GET", srv.URL+data+"/bag/"+esc, ""); resp.StatusCode != http.StatusNotFound {
+				t.Errorf("get refused item = %d: %s, want 404", resp.StatusCode, b)
 			}
 		})
 	}

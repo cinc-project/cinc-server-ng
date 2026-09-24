@@ -221,7 +221,8 @@ func TestActorPutReplacesPublicKeyWhenProvided(t *testing.T) {
 // TestCreateDataBagStoresCanonicalJSON pins that a bag name is stored as
 // canonical JSON. The name was previously concatenated into a JSON string
 // literal, so a name containing a double quote produced a malformed,
-// unparseable stored value.
+// unparseable stored value. Such a name is now refused outright (erchef's
+// data_bag_name rule), so it must not be stored at all.
 func TestCreateDataBagStoresCanonicalJSON(t *testing.T) {
 	srv, st := newTestAPI(t)
 	org, _, err := st.Org("acme")
@@ -229,8 +230,15 @@ func TestCreateDataBagStoresCanonicalJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const name = `a"b`
-	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/data", `{"name":"a\"b"}`); resp.StatusCode != http.StatusCreated {
+	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/data", `{"name":"a\"b"}`); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("create data bag with a quote = %d: %s, want 400", resp.StatusCode, body)
+	}
+	if _, ok, _ := org.Get(dataBagsColl, `a"b`); ok {
+		t.Fatal("a refused data bag was stored")
+	}
+
+	const name = "a.b"
+	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/data", `{"name":"a.b"}`); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create data bag = %d: %s", resp.StatusCode, body)
 	}
 

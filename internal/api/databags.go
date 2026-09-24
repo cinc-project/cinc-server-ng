@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -12,6 +13,10 @@ import (
 // bags, and each bag's items live in their own "databag_items:<bag>"
 // collection. Items are keyed by their "id" field rather than "name".
 const dataBagsColl = "data_bags"
+
+// dataBagNameRE is erchef's data_bag_name and data_bag_item_id rule
+// (chef_regex ALTERNATIVE_NAME_REGEX): letters, digits, '_', ':', '.' and '-'.
+var dataBagNameRE = regexp.MustCompile(`^[.A-Za-z0-9_:-]+$`)
 
 func dataBagItemsColl(bag string) string { return "databag_items:" + bag }
 
@@ -61,6 +66,10 @@ func (a *API) createDataBag(w http.ResponseWriter, r *http.Request) {
 	name, _ := obj["name"].(string)
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "Field 'name' missing")
+		return
+	}
+	if !dataBagNameRE.MatchString(name) {
+		writeError(w, http.StatusBadRequest, "Field 'name' invalid")
 		return
 	}
 	if err := org.Create(dataBagsColl, name, mustEncode(map[string]any{"name": name})); errors.Is(err, store.ErrConflict) {
@@ -167,6 +176,10 @@ func (a *API) createDataBagItem(w http.ResponseWriter, r *http.Request) {
 	}
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "Field 'id' missing")
+		return
+	}
+	if !dataBagNameRE.MatchString(id) {
+		writeError(w, http.StatusBadRequest, "Field 'id' invalid")
 		return
 	}
 	if err := org.Create(dataBagItemsColl(bag), id, raw); errors.Is(err, store.ErrConflict) {
