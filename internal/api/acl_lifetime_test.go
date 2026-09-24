@@ -75,14 +75,14 @@ func TestDeletingAnObjectDeletesItsACL(t *testing.T) {
 		},
 		{
 			what:    "policy",
-			setup:   [][3]string{{"POST", "/organizations/acme/policies/base/revisions", `{"revision_id":"r1"}`}},
+			setup:   [][3]string{{"POST", "/organizations/acme/policies/base/revisions", `{"name":"base","revision_id":"r1","run_list":[],"cookbook_locks":{}}`}},
 			aclType: "policies", aclName: "base",
 			aclPath: "/organizations/acme/policies/base/_acl/read",
 			delete:  [3]string{"DELETE", "/organizations/acme/policies/base", ""},
 		},
 		{
 			what:    "policy group",
-			setup:   [][3]string{{"PUT", "/organizations/acme/policy_groups/prod/policies/base", `{"revision_id":"r1"}`}},
+			setup:   [][3]string{{"PUT", "/organizations/acme/policy_groups/prod/policies/base", `{"name":"base","revision_id":"r1","run_list":[],"cookbook_locks":{}}`}},
 			aclType: "policy_groups", aclName: "prod",
 			aclPath: "/organizations/acme/policy_groups/prod/_acl/read",
 			delete:  [3]string{"DELETE", "/organizations/acme/policy_groups/prod", ""},

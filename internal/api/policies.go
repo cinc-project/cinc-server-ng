@@ -194,13 +194,9 @@ func (a *API) createPolicyRevision(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, revID, err := decodeRevision(r)
+	raw, revID, err := decodeRevision(r, r.PathValue("name"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if revID == "" {
-		writeError(w, http.StatusBadRequest, "Field 'revision_id' missing")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := org.Create(policyRevColl(r.PathValue("name")), revID, raw); errors.Is(err, store.ErrConflict) {
@@ -365,16 +361,12 @@ func (a *API) putGroupPolicy(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, revID, err := decodeRevision(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if revID == "" {
-		writeError(w, http.StatusBadRequest, "Field 'revision_id' missing")
-		return
-	}
 	policy := r.PathValue("policy")
+	raw, revID, err := decodeRevision(r, policy)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := org.Put(policyRevColl(policy), revID, raw); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -432,13 +424,18 @@ func (a *API) deleteGroupPolicy(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, http.StatusOK, raw)
 }
 
-// decodeRevision reads a policy revision body and returns canonical bytes plus
-// its "revision_id".
-func decodeRevision(r *http.Request) (raw []byte, revID string, err error) {
+// decodeRevision reads a policy revision body for the policy named in the
+// request path, validates it as erchef does (validatePolicyRevision), and
+// returns canonical bytes plus its "revision_id". The error's text is the
+// message to answer 400 with.
+func decodeRevision(r *http.Request, policy string) (raw []byte, revID string, err error) {
 	var obj map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
-		return nil, "", err
+		return nil, "", errors.New("invalid JSON body")
 	}
-	revID, _ = obj["revision_id"].(string)
+	if msg := validatePolicyRevision(policy, obj); msg != "" {
+		return nil, "", errors.New(msg)
+	}
+	revID = obj["revision_id"].(string)
 	return mustEncode(obj), revID, nil
 }
