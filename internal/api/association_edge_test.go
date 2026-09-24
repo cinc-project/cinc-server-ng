@@ -97,3 +97,54 @@ func TestInviterLostAuthority(t *testing.T) {
 		t.Fatalf("accept stale invite = %d, want 403: %s", resp.StatusCode, body)
 	}
 }
+
+// A member of the org's admins group cannot be removed from the org until they
+// have left the group: erchef refuses with a 403 naming the group, and knife
+// matches that message to offer --force. Nothing is removed on the refusal.
+func TestDisassociateAdminRefused(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	do(t, "POST", srv.URL+"/users", `{"name":"dave"}`)
+	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/users", `{"username":"dave"}`); resp.StatusCode != 201 {
+		t.Fatalf("associate = %d: %s", resp.StatusCode, body)
+	}
+	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/groups",
+		`{"groupname":"admins","actors":{"users":["dave"],"clients":[],"groups":[]}}`); resp.StatusCode != 201 {
+		t.Fatalf("create admins = %d: %s", resp.StatusCode, body)
+	}
+
+	resp, body := do(t, "DELETE", srv.URL+"/organizations/acme/users/dave", "")
+	if resp.StatusCode != 403 {
+		t.Fatalf("remove admin member = %d, want 403: %s", resp.StatusCode, body)
+	}
+	want := "Please remove dave from this organization's admins group before removing him or her from the organization."
+	if msg := decodeStringError(t, body); msg != want {
+		t.Fatalf("remove admin member body = %q, want %q", msg, want)
+	}
+	if resp, body := do(t, "GET", srv.URL+"/organizations/acme/users/dave", ""); resp.StatusCode != 200 {
+		t.Fatalf("dave should still be a member after the refusal: %d %s", resp.StatusCode, body)
+	}
+
+	// Once out of admins, the removal goes through.
+	if resp, body := do(t, "PUT", srv.URL+"/organizations/acme/groups/admins",
+		`{"groupname":"admins","actors":{"users":[],"clients":[],"groups":[]}}`); resp.StatusCode != 200 {
+		t.Fatalf("leave admins = %d: %s", resp.StatusCode, body)
+	}
+	if resp, body := do(t, "DELETE", srv.URL+"/organizations/acme/users/dave", ""); resp.StatusCode != 200 {
+		t.Fatalf("remove former admin = %d, want 200: %s", resp.StatusCode, body)
+	}
+}
+
+// Membership of admins counts through a nested group too, as erchef resolves
+// it through authz.
+func TestDisassociateNestedAdminRefused(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	do(t, "POST", srv.URL+"/users", `{"name":"dave"}`)
+	do(t, "POST", srv.URL+"/organizations/acme/users", `{"username":"dave"}`)
+	do(t, "POST", srv.URL+"/organizations/acme/groups",
+		`{"groupname":"ops","actors":{"users":["dave"],"clients":[],"groups":[]}}`)
+	do(t, "POST", srv.URL+"/organizations/acme/groups",
+		`{"groupname":"admins","actors":{"users":[],"clients":[],"groups":["ops"]}}`)
+	if resp, body := do(t, "DELETE", srv.URL+"/organizations/acme/users/dave", ""); resp.StatusCode != 403 {
+		t.Fatalf("remove nested admin = %d, want 403: %s", resp.StatusCode, body)
+	}
+}
