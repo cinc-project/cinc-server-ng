@@ -179,3 +179,47 @@ func TestDataBagItemRejectsInvalidID(t *testing.T) {
 		t.Errorf("valid item = %d %s, want 201", resp.StatusCode, out)
 	}
 }
+
+// TestDataBagItemAcceptsWrappedForm covers the body Chef::DataBagItem#save
+// sends: the item's fields under raw_data, with name, json_class, chef_type and
+// data_bag alongside. knife tries a PUT and falls back to POST on a 404, so
+// both have to unwrap it and store the item's own fields, as erchef does.
+func TestDataBagItemAcceptsWrappedForm(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	if resp, body := do(t, "POST", base+"/data", `{"name":"secrets"}`); resp.StatusCode != 201 {
+		t.Fatalf("create bag = %d: %s", resp.StatusCode, body)
+	}
+	wrapped := func(v string) string {
+		return `{"name":"data_bag_item_secrets_db","json_class":"Chef::DataBagItem","chef_type":"data_bag_item",` +
+			`"data_bag":"secrets","raw_data":{"id":"db","value":"` + v + `"}}`
+	}
+	stored := func() map[string]any {
+		t.Helper()
+		resp, body := do(t, "GET", base+"/data/secrets/db", "")
+		if resp.StatusCode != 200 {
+			t.Fatalf("get item = %d: %s", resp.StatusCode, body)
+		}
+		var item map[string]any
+		if err := json.Unmarshal([]byte(body), &item); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := item["raw_data"]; ok {
+			t.Errorf("item stored still wrapped: %s", body)
+		}
+		return item
+	}
+
+	if resp, body := do(t, "POST", base+"/data/secrets", wrapped("one")); resp.StatusCode != 201 {
+		t.Fatalf("create wrapped item = %d: %s", resp.StatusCode, body)
+	}
+	if got := stored()["value"]; got != "one" {
+		t.Errorf("value after create = %v, want one", got)
+	}
+	if resp, body := do(t, "PUT", base+"/data/secrets/db", wrapped("two")); resp.StatusCode != 200 {
+		t.Fatalf("update wrapped item = %d: %s", resp.StatusCode, body)
+	}
+	if got := stored()["value"]; got != "two" {
+		t.Errorf("value after update = %v, want two", got)
+	}
+}

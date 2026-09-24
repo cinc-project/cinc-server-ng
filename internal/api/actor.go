@@ -365,6 +365,9 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
+		if !exists(w, r, org, segment, name, "Cannot find "+segment+" "+name) {
+			return
+		}
 		var obj map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")

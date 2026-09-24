@@ -14,7 +14,7 @@ type aclPerm struct {
 func TestACLDefaultShape(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
-	do(t, "PUT", base+"/nodes/web01", `{"name":"web01"}`)
+	do(t, "POST", base+"/nodes", `{"name":"web01"}`)
 
 	_, body := do(t, "GET", base+"/nodes/web01/_acl", "")
 	var acl map[string]aclPerm
