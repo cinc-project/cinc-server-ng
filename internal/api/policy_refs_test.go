@@ -17,12 +17,12 @@ func TestDeletingAPolicyClearsItsGroupDeployments(t *testing.T) {
 	// Deploy "base" to two groups, and an unrelated policy to one of them.
 	for _, g := range []string{"prod", "staging"} {
 		if resp, body := do(t, "PUT", base+"/policy_groups/"+g+"/policies/base",
-			`{"revision_id":"r1","run_list":["recipe[base]"]}`); resp.StatusCode >= 300 {
+			`{"name":"base","revision_id":"r1","run_list":["recipe[base::default]"],"cookbook_locks":{}}`); resp.StatusCode >= 300 {
 			t.Fatalf("deploy base to %s = %d: %s", g, resp.StatusCode, body)
 		}
 	}
 	if resp, body := do(t, "PUT", base+"/policy_groups/prod/policies/web",
-		`{"revision_id":"w1"}`); resp.StatusCode >= 300 {
+		`{"name":"web","revision_id":"w1","run_list":[],"cookbook_locks":{}}`); resp.StatusCode >= 300 {
 		t.Fatalf("deploy web = %d: %s", resp.StatusCode, body)
 	}
 

@@ -107,7 +107,7 @@ func TestEnforceACLDeniesPolicyDeploy(t *testing.T) {
 	base := srv.URL() + "/organizations/acme"
 	nodeKey := createActor(t, srv, base+"/clients", `{"name":"node1"}`)
 
-	revision := `{"revision_id":"deadbeef","name":"base","run_list":["recipe[evil]"]}`
+	revision := `{"revision_id":"deadbeef","name":"base","run_list":["recipe[evil::default]"],"cookbook_locks":{}}`
 	if code := statusOf(t, signedAs(t, "node1", nodeKey, "PUT",
 		base+"/policy_groups/prod/policies/base", revision)); code != http.StatusForbidden {
 		t.Fatalf("node1 deploys policy = %d, want 403", code)
