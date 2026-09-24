@@ -9,7 +9,7 @@ func TestAuthenticateUser(t *testing.T) {
 	srv, _ := newTestAPI(t)
 
 	// Create a global user with a password.
-	resp, body := do(t, "POST", srv.URL+"/users", `{"name":"alice","password":"s3cret"}`)
+	resp, body := do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice","password":"s3cret"}`))
 	if resp.StatusCode != 201 {
 		t.Fatalf("create user = %d: %s", resp.StatusCode, body)
 	}
@@ -45,9 +45,9 @@ func TestAuthenticateUser(t *testing.T) {
 func TestAuthenticateUserByUsername(t *testing.T) {
 	srv, _ := newTestAPI(t)
 
-	do(t, "POST", srv.URL+"/users", `{"name":"carol","password":"p@ss"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"carol","password":"p@ss-w0rd"}`))
 
-	resp, body := do(t, "POST", srv.URL+"/authenticate_user", `{"username":"carol","password":"p@ss"}`)
+	resp, body := do(t, "POST", srv.URL+"/authenticate_user", `{"username":"carol","password":"p@ss-w0rd"}`)
 	if resp.StatusCode != 200 {
 		t.Fatalf("authenticate by username (correct) = %d: %s", resp.StatusCode, body)
 	}

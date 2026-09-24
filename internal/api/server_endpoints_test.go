@@ -60,7 +60,7 @@ func TestPrincipals(t *testing.T) {
 	base := srv.URL + "/organizations/acme"
 
 	// A global user.
-	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 	_, body := do(t, "GET", base+"/principals/alice", "")
 	var u struct {
 		Name      string `json:"name"`

@@ -10,7 +10,7 @@ import (
 // invitation id.
 func invite(t *testing.T, srvURL, user string) string {
 	t.Helper()
-	do(t, "POST", srvURL+"/users", `{"name":"`+user+`"}`)
+	do(t, "POST", srvURL+"/users", userBody(`{"name":"`+user+`"}`))
 	resp, body := do(t, "POST", srvURL+"/organizations/acme/association_requests", `{"user":"`+user+`"}`)
 	if resp.StatusCode != 201 {
 		t.Fatalf("invite %s = %d: %s", user, resp.StatusCode, body)
@@ -181,7 +181,7 @@ func TestInviteAlreadyMember409(t *testing.T) {
 func TestInviteNotFoundMessageHasColon(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
-	do(t, "POST", srv.URL+"/users", `{"name":"grace"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"grace"}`))
 
 	// Rescinding a nonexistent invite: 404 with the standard colon body.
 	resp, body := do(t, "DELETE", base+"/association_requests/bogus-id", "")

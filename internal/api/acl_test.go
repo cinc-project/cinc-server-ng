@@ -112,7 +112,7 @@ func TestACLDataBagAndOrg(t *testing.T) {
 func TestOrgACLAtErchefPath(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
-	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 
 	resp, body := do(t, "GET", base+"/organizations/_acl", "")
 	if resp.StatusCode != 200 {
@@ -155,7 +155,7 @@ func TestOrgACLAtErchefPath(t *testing.T) {
 func TestUserACLEndpoints(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL
-	do(t, "POST", base+"/users", `{"name":"alice"}`)
+	do(t, "POST", base+"/users", userBody(`{"name":"alice"}`))
 
 	// Full user ACL: all five permissions, JSON.
 	resp, body := do(t, "GET", base+"/users/alice/_acl", "")

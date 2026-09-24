@@ -125,7 +125,7 @@ func TestDeletingAnObjectDeletesItsACL(t *testing.T) {
 // A global user's ACL lives in the global space and goes with the user.
 func TestDeletingAUserDeletesItsACL(t *testing.T) {
 	srv, st := newTestAPI(t)
-	if resp, body := do(t, "POST", srv.URL+"/users", `{"name":"dave"}`); resp.StatusCode >= 300 {
+	if resp, body := do(t, "POST", srv.URL+"/users", userBody(`{"name":"dave"}`)); resp.StatusCode >= 300 {
 		t.Fatalf("create user = %d: %s", resp.StatusCode, body)
 	}
 	if resp, body := do(t, "PUT", srv.URL+"/users/dave/_acl/read",

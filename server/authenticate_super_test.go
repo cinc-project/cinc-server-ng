@@ -16,7 +16,7 @@ func TestAuthenticateUserSuperuserOnly(t *testing.T) {
 	// As the admin, create a global user with a password and capture the
 	// generated private key so we can sign requests as that user.
 	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", srv.URL()+"/users",
-		`{"name":"bob","password":"b0bpw"}`))
+		validUserBody(t, `{"name":"bob","password":"b0b-pw"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestAuthenticateUserSuperuserOnly(t *testing.T) {
 
 	// The superuser authenticates the user with the correct password.
 	resp, err = http.DefaultClient.Do(signed(t, srv, "POST", srv.URL()+"/authenticate_user",
-		`{"username":"bob","password":"b0bpw"}`))
+		`{"username":"bob","password":"b0b-pw"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestAuthenticateUserSuperuserOnly(t *testing.T) {
 
 	// A non-admin caller (bob signing for himself) is forbidden.
 	resp, err = http.DefaultClient.Do(signedAs(t, "bob", []byte(created.ChefKey.PrivateKey),
-		"POST", srv.URL()+"/authenticate_user", `{"username":"bob","password":"b0bpw"}`))
+		"POST", srv.URL()+"/authenticate_user", `{"username":"bob","password":"b0b-pw"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -453,7 +453,7 @@ func TestEnforceGlobalUsersSuperuserOnly(t *testing.T) {
 	if code, body := authzReq(t, h, Actor{Name: "bob"}, "GET", "/users/bob", ""); code != http.StatusOK {
 		t.Errorf("bob GET self = %d, want 200; body %s", code, body)
 	}
-	if code, body := authzReq(t, h, Actor{Name: "bob"}, "PUT", "/users/bob", `{"username":"bob"}`); code != http.StatusOK {
+	if code, body := authzReq(t, h, Actor{Name: "bob"}, "PUT", "/users/bob", `{"username":"bob","display_name":"Bob","email":"bob@example.test"}`); code != http.StatusOK {
 		t.Errorf("bob PUT self = %d, want 200; body %s", code, body)
 	}
 	// ...but not another user's record.

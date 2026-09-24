@@ -43,7 +43,7 @@ func TestUserCannotShadowOrgClient(t *testing.T) {
 	if code := statusOf(t, signed(t, srv, "POST", acme+"/clients", `{"name":"node1"}`)); code != 201 {
 		t.Fatalf("create client = %d, want 201", code)
 	}
-	if code := statusOf(t, signed(t, srv, "POST", srv.URL()+"/users", `{"name":"node1"}`)); code != http.StatusConflict {
+	if code := statusOf(t, signed(t, srv, "POST", srv.URL()+"/users", validUserBody(t, `{"name":"node1"}`))); code != http.StatusConflict {
 		t.Errorf("create user colliding with a client = %d, want 409", code)
 	}
 }
@@ -54,7 +54,7 @@ func TestUserCannotShadowOrgClient(t *testing.T) {
 func TestNonCollidingActorNamesStillCreate(t *testing.T) {
 	srv := startServer(t, Options{Orgs: []string{"acme", "beta"}, EnforceACL: true})
 
-	if code := statusOf(t, signed(t, srv, "POST", srv.URL()+"/users", `{"name":"alice"}`)); code != 201 {
+	if code := statusOf(t, signed(t, srv, "POST", srv.URL()+"/users", validUserBody(t, `{"name":"alice"}`))); code != 201 {
 		t.Errorf("create user = %d, want 201", code)
 	}
 	for _, org := range []string{"acme", "beta"} {

@@ -41,7 +41,7 @@ func webuiSignedAs(t *testing.T, srv *Server, userID, method, url, body string) 
 // createUser creates a global user as the admin and returns its private key.
 func createUser(t *testing.T, srv *Server, body string) string {
 	t.Helper()
-	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", srv.URL()+"/users", body))
+	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", srv.URL()+"/users", validUserBody(t, body)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +106,10 @@ func TestAdminKeyCannotImpersonateWithoutWebSource(t *testing.T) {
 // for credential checks (how a console validates a login).
 func TestWebUIImpersonationAllowsAuthenticateUser(t *testing.T) {
 	srv := startServer(t, Options{})
-	createUser(t, srv, `{"name":"carol","password":"p@ss"}`)
+	createUser(t, srv, `{"name":"carol","password":"p@ss-w0rd"}`)
 
 	resp, err := http.DefaultClient.Do(webuiSignedAs(t, srv, "carol", "POST",
-		srv.URL()+"/authenticate_user", `{"username":"carol","password":"p@ss"}`))
+		srv.URL()+"/authenticate_user", `{"username":"carol","password":"p@ss-w0rd"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
