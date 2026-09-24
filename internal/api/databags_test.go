@@ -134,3 +134,48 @@ func TestDataBagItemInMissingBag404(t *testing.T) {
 		t.Fatalf("item in missing bag = %d", resp.StatusCode)
 	}
 }
+
+// erchef matches a data bag's name and an item's id against
+// chef_regex's data_bag_name / data_bag_item_id rule (letters, digits, _, -,
+// :, .) and refuses anything else with a 400, creating nothing.
+func TestDataBagRejectsInvalidName(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	for _, name := range []string{"bad name", "bad!name", "bad/name", "bad@name"} {
+		body, _ := json.Marshal(map[string]string{"name": name})
+		resp, out := do(t, "POST", base+"/data", string(body))
+		if resp.StatusCode != 400 || !strings.Contains(out, "Field 'name' invalid") {
+			t.Errorf("create bag %q = %d %s, want 400 Field 'name' invalid", name, resp.StatusCode, out)
+		}
+	}
+	_, out := do(t, "GET", base+"/data", "")
+	if strings.TrimSpace(out) != "{}" {
+		t.Errorf("refused bags were created: %s", out)
+	}
+	for _, name := range []string{"good", "Good_1.2-x", "a:b"} {
+		body, _ := json.Marshal(map[string]string{"name": name})
+		if resp, out := do(t, "POST", base+"/data", string(body)); resp.StatusCode != 201 {
+			t.Errorf("create bag %q = %d %s, want 201", name, resp.StatusCode, out)
+		}
+	}
+}
+
+func TestDataBagItemRejectsInvalidID(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	do(t, "POST", base+"/data", `{"name":"secrets"}`)
+	for _, id := range []string{"bad id", "bad/id", "bad!id"} {
+		body, _ := json.Marshal(map[string]string{"id": id})
+		resp, out := do(t, "POST", base+"/data/secrets", string(body))
+		if resp.StatusCode != 400 || !strings.Contains(out, "Field 'id' invalid") {
+			t.Errorf("create item %q = %d %s, want 400 Field 'id' invalid", id, resp.StatusCode, out)
+		}
+	}
+	_, out := do(t, "GET", base+"/data/secrets", "")
+	if strings.TrimSpace(out) != "{}" {
+		t.Errorf("refused items were created: %s", out)
+	}
+	if resp, out := do(t, "POST", base+"/data/secrets", `{"id":"ok_1.2-x:y"}`); resp.StatusCode != 201 {
+		t.Errorf("valid item = %d %s, want 201", resp.StatusCode, out)
+	}
+}
