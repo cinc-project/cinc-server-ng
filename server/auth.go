@@ -83,9 +83,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// One lookup resolves both the signing key and the actor identity from a
-		// single store read of the actor's record.
-		pub, actor, ok, err := s.resolveAuth(r.URL.Path, parsed.UserID)
+		// One lookup resolves both the actor identity and every key it may sign
+		// with: its unexpired keys, as the keys API lists them.
+		pubs, actor, ok, err := s.resolveAuth(r.URL.Path, parsed.UserID)
 		if err != nil {
 			serverError(w, err)
 			return
@@ -95,7 +95,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if err := auth.Verify(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"), pub); err != nil {
+		if !verifiesWithAny(r, body, parsed, pubs) {
 			unauthorized(w, "Invalid signature for user or client '"+parsed.UserID+"'")
 			return
 		}
@@ -126,33 +126,46 @@ func wirePath(u *url.URL) string {
 	return u.EscapedPath()
 }
 
-// resolveAuth resolves an actor's signing key and identity in a single store
-// read of its record. It checks org clients first (when the request targets an
-// org), then global users, mirroring Chef's resolution order. The actor records
-// whether it is an org client (vs. a global user) and whether a global user is
-// an admin (Chef's pivotal superuser, which bypasses ACLs).
-func (s *Server) resolveAuth(path, name string) (*rsa.PublicKey, api.Actor, bool, error) {
+// verifiesWithAny reports whether the request's signature verifies against any
+// of the actor's keys. Chef Infra Server tries each of the requestor's
+// unexpired keys in turn.
+func verifiesWithAny(r *http.Request, body []byte, parsed *auth.Parsed, pubs []*rsa.PublicKey) bool {
+	version := r.Header.Get("X-Ops-Server-API-Version")
+	for _, pub := range pubs {
+		if auth.Verify(r.Method, wirePath(r.URL), body, parsed, version, pub) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveAuth resolves an actor's signing keys and identity. It checks org
+// clients first (when the request targets an org), then global users,
+// mirroring Chef's resolution order. The actor records whether it is an org
+// client (vs. a global user) and whether a global user is an admin (Chef's
+// pivotal superuser, which bypasses ACLs).
+func (s *Server) resolveAuth(path, name string) ([]*rsa.PublicKey, api.Actor, bool, error) {
 	if org := orgFromPath(path); org != "" {
 		o, ok, err := s.store.Org(org)
 		if err != nil {
 			return nil, api.Actor{}, false, err
 		}
 		if ok {
-			pub, _, ok, err := s.parseActorRecord(o, "clients", name)
+			pubs, _, ok, err := s.parseActorRecord(o, "clients", name)
 			if err != nil {
 				return nil, api.Actor{}, false, err
 			}
 			if ok {
-				return pub, api.Actor{Name: name, IsClient: true}, true, nil
+				return pubs, api.Actor{Name: name, IsClient: true}, true, nil
 			}
 		}
 	}
-	pub, admin, ok, err := s.parseActorRecord(s.store.Global(), "users", name)
+	pubs, admin, ok, err := s.parseActorRecord(s.store.Global(), "users", name)
 	if err != nil {
 		return nil, api.Actor{}, false, err
 	}
 	if ok {
-		return pub, api.Actor{Name: name, IsGlobalAdmin: admin}, true, nil
+		return pubs, api.Actor{Name: name, IsGlobalAdmin: admin}, true, nil
 	}
 	return nil, api.Actor{}, false, nil
 }
@@ -170,11 +183,13 @@ func parseWebUIKey(pemBytes []byte) (*rsa.PublicKey, error) {
 	return &priv.PublicKey, nil
 }
 
-// parseActorRecord reads an actor record from a store collection and extracts
-// its RSA public key (parsed through the server's key cache to avoid re-parsing
-// PEM/x509 on every request) and its admin flag. The record is read copy-free
-// since it is only unmarshalled here.
-func (s *Server) parseActorRecord(org *store.Org, collection, name string) (pub *rsa.PublicKey, admin, ok bool, err error) {
+// parseActorRecord reads an actor record from a store collection and returns
+// the RSA public keys it may currently sign with (api.SigningKeys: its
+// unexpired keys, parsed through the server's key cache to avoid re-parsing
+// PEM/x509 on every request) and its admin flag. ok is false when the actor
+// does not exist or has no usable key. The record is read copy-free since it
+// is only unmarshalled here.
+func (s *Server) parseActorRecord(org *store.Org, collection, name string) (pubs []*rsa.PublicKey, admin, ok bool, err error) {
 	raw, found, err := org.View(collection, name)
 	if err != nil {
 		return nil, false, false, err
@@ -186,14 +201,22 @@ func (s *Server) parseActorRecord(org *store.Org, collection, name string) (pub 
 		PublicKey string `json:"public_key"`
 		Admin     bool   `json:"admin"`
 	}
-	if err := json.Unmarshal(raw, &rec); err != nil || rec.PublicKey == "" {
+	if err := json.Unmarshal(raw, &rec); err != nil {
 		return nil, false, false, nil
 	}
-	key, err := s.keyCache.Parse(rec.PublicKey)
+	pems, err := api.SigningKeys(org, collection, name, rec.PublicKey, s.opts.Now())
 	if err != nil {
+		return nil, false, false, err
+	}
+	for _, pem := range pems {
+		if key, err := s.keyCache.Parse(pem); err == nil {
+			pubs = append(pubs, key)
+		}
+	}
+	if len(pubs) == 0 {
 		return nil, false, false, nil
 	}
-	return key, rec.Admin, true, nil
+	return pubs, rec.Admin, true, nil
 }
 
 // checkSkew rejects timestamps outside the allowed clock-skew window.

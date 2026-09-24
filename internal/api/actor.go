@@ -410,7 +410,14 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		// key forward (key changes go through the keys API, not a bare update),
 		// normalizing a nested chef_key to the top-level field either way.
 		pub := bodyPublicKey(obj)
-		if pub == "" {
+		if pub != "" {
+			// The body's key replaces the default key, which may be a row the
+			// keys API stored rather than the actor's own public_key.
+			if err := setStoredDefaultPublicKey(org, segment, name, pub); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		} else {
 			stored, err := storedPublicKey(org, segment, name)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
@@ -473,6 +480,10 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		if err := deleteACL(org, segment, name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := deleteActorKeys(org, segment, name); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
