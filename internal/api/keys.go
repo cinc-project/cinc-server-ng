@@ -203,11 +203,33 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
+		// As erchef's chef_key_base:maybe_generate_key_pair: create_key asks the
+		// server for a new pair in place of the key's public_key, so asking for
+		// both is contradictory. The flag is a request, never part of the key.
+		createKey, _ := body["create_key"].(bool)
+		delete(body, "create_key")
+		if createKey && str(body["public_key"]) != "" {
+			writeError(w, http.StatusBadRequest, "Since you requested a new key be created, you cannot also specify a public_key.")
+			return
+		}
 		coll := keysColl(segment, name)
 		_, stored, err := org.Get(coll, keyName)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if !stored && keyName != defaultKeyName {
+			writeError(w, http.StatusNotFound, "Cannot find key "+keyName)
+			return
+		}
+		privateKey := ""
+		if createKey {
+			pub, priv, err := generateKeyPair()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			body["public_key"], privateKey = pub, priv
 		}
 
 		// Updating the synthetic default key rewrites the actor's public_key.
@@ -219,11 +241,11 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 					return
 				}
 			}
-			writeJSON(w, http.StatusOK, keyObject(defaultKeyName, str(actor["public_key"])))
-			return
-		}
-		if !stored {
-			writeError(w, http.StatusNotFound, "Cannot find key "+keyName)
+			resp := keyObject(defaultKeyName, str(actor["public_key"]))
+			if privateKey != "" {
+				resp["private_key"] = privateKey
+			}
+			writeJSON(w, http.StatusOK, resp)
 			return
 		}
 		body["name"] = keyName
@@ -232,8 +254,28 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if privateKey != "" {
+			// The private half goes back in the response only; it is never stored.
+			body["private_key"] = privateKey
+			writeJSON(w, http.StatusOK, body)
+			return
+		}
 		writeRaw(w, http.StatusOK, raw)
 	}
+}
+
+// generateKeyPair makes a new RSA key pair, returning the public half and the
+// private half as PEM.
+func generateKeyPair() (pub, priv string, err error) {
+	key, err := auth.GenerateKey()
+	if err != nil {
+		return "", "", errors.New("key generation failed")
+	}
+	pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+	if err != nil {
+		return "", "", errors.New("key encoding failed")
+	}
+	return string(pubPEM), string(auth.EncodePrivateKeyPEM(key)), nil
 }
 
 func (a *API) deleteKey(segment string, scope scopeFunc) http.HandlerFunc {
