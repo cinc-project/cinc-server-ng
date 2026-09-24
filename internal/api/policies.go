@@ -133,7 +133,7 @@ func (a *API) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	// Every revision is gone, so any group still deploying this policy points at
 	// something no node can fetch. The deployment goes with the policy.
-	if err := removePolicyFromGroups(org, name); err != nil {
+	if err := removePolicyFromGroups(org, name, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -144,11 +144,13 @@ func (a *API) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"revisions": revs})
 }
 
-// removePolicyFromGroups drops a policy from every policy group that deploys it.
-// A group naming a policy with no revisions left would advertise a deployment
+// removePolicyFromGroups drops a policy from every policy group that deploys it,
+// or, when rev is not empty, from every group that deploys that revision of it.
+// A group naming a revision that no longer exists would advertise a deployment
 // that resolves to nothing: listPolicyGroups reports it, and getGroupPolicy 404s
-// on the revision after successfully finding the group.
-func removePolicyFromGroups(org *store.Org, policy string) error {
+// on the revision after successfully finding the group. erchef gets the same
+// result from its association rows cascading on the revision's delete.
+func removePolicyFromGroups(org *store.Org, policy, rev string) error {
 	names, err := org.Keys(policyGroupsColl)
 	if err != nil {
 		return err
@@ -161,7 +163,8 @@ func removePolicyFromGroups(org *store.Org, policy string) error {
 		if !ok {
 			continue
 		}
-		if _, deployed := g.Policies[policy]; !deployed {
+		p, deployed := g.Policies[policy]
+		if !deployed || (rev != "" && p.RevisionID != rev) {
 			continue
 		}
 		delete(g.Policies, policy)
@@ -218,13 +221,18 @@ func (a *API) deletePolicyRevision(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, ok, err := org.Delete(policyRevColl(r.PathValue("name")), r.PathValue("rev"))
+	name, rev := r.PathValue("name"), r.PathValue("rev")
+	raw, ok, err := org.Delete(policyRevColl(name), rev)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find policy revision")
+		return
+	}
+	if err := removePolicyFromGroups(org, name, rev); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
