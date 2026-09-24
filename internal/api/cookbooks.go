@@ -590,20 +590,25 @@ func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
 // must survive while any remains — and must not survive the last, or the next
 // upload of that name inherits it.
 func deleteVersionedACL(org *store.Org, coll, name string) error {
-	var remaining bool
-	if err := org.Range(coll, func(key string, _ []byte) bool {
+	remaining, err := hasVersion(org, coll, name)
+	if err != nil || remaining {
+		return err
+	}
+	return deleteACL(org, coll, name)
+}
+
+// hasVersion reports whether a versioned collection (cookbooks or cookbook
+// artifacts, keyed "name/version") holds any version of name.
+func hasVersion(org *store.Org, coll, name string) (bool, error) {
+	var found bool
+	err := org.Range(coll, func(key string, _ []byte) bool {
 		if cb, _, ok := strings.Cut(key, "/"); ok && cb == name {
-			remaining = true
+			found = true
 			return false
 		}
 		return true
-	}); err != nil {
-		return err
-	}
-	if remaining {
-		return nil
-	}
-	return deleteACL(org, coll, name)
+	})
+	return found, err
 }
 
 func (a *API) cookbooksLatest(w http.ResponseWriter, r *http.Request) {
