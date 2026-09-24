@@ -59,8 +59,12 @@ func validatePolicyRevision(urlName string, doc map[string]any) string {
 		return "Field 'cookbook_locks' invalid"
 	}
 	for _, cookbook := range slices.Sorted(maps.Keys(locks)) {
+		if !policyLockCookbookRE.MatchString(cookbook) {
+			// chef_wm_malformed's message for an ej object_key failure.
+			return "Invalid key '" + cookbook + "' for cookbook_locks"
+		}
 		lock, isObj := locks[cookbook].(map[string]any)
-		if !policyLockCookbookRE.MatchString(cookbook) || !isObj {
+		if !isObj {
 			return "Field 'cookbook_locks' invalid"
 		}
 		if msg := validateCookbookLock(lock); msg != "" {

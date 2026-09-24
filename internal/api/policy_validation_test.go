@@ -75,7 +75,7 @@ func TestPolicyRevisionValidation(t *testing.T) {
 		}, "Field 'cookbook_locks' invalid"},
 		{"cookbook_locks bad cookbook name", "", func(d map[string]any) {
 			d["cookbook_locks"].(map[string]any)["bad name"] = lockOf(d)
-		}, "Field 'cookbook_locks' invalid"},
+		}, "Invalid key 'bad name' for cookbook_locks"},
 		{"lock missing identifier", "", func(d map[string]any) {
 			d["cookbook_locks"].(map[string]any)["invalid_member"] = map[string]any{"dotted_decimal_identifier": "1.2.3"}
 		}, "Field 'identifier' missing"},
