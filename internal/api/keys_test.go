@@ -407,6 +407,41 @@ func TestKeyPutRenameRejectsUnsafeNames(t *testing.T) {
 	}
 }
 
+// The actor's public_key mirrors the default key, so renaming the stored
+// default away leaves the actor with no default key (as deleting it does)
+// instead of a synthetic one rebuilt from the old public_key, and renaming a
+// key onto "default" makes it the actor's key again.
+func TestKeyPutRenameDefaultKeepsActorKeyInStep(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme/clients/web01"
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+	def := getKeyDoc(t, base+"/keys/default")
+	// Store the default as a row, as a PUT on the default key does.
+	if resp, body := do(t, "PUT", base+"/keys/default", `{"expiration_date":"infinity"}`); resp.StatusCode != 200 {
+		t.Fatalf("PUT default = %d: %s", resp.StatusCode, body)
+	}
+
+	if resp, body := do(t, "PUT", base+"/keys/default", `{"name":"retired"}`); resp.StatusCode != 201 {
+		t.Fatalf("rename default away = %d: %s", resp.StatusCode, body)
+	}
+	_, body := do(t, "GET", base+"/keys", "")
+	var list []keyListEntry
+	json.Unmarshal([]byte(body), &list)
+	if len(list) != 1 || !hasKey(list, "retired") {
+		t.Fatalf("keys after renaming default away = %s, want only retired", body)
+	}
+	if client := getKeyDoc(t, base); client["public_key"] != nil {
+		t.Fatalf("actor public_key after renaming default away = %v, want none", client["public_key"])
+	}
+
+	if resp, body := do(t, "PUT", base+"/keys/retired", `{"name":"default"}`); resp.StatusCode != 201 {
+		t.Fatalf("rename onto default = %d: %s", resp.StatusCode, body)
+	}
+	if client := getKeyDoc(t, base); client["public_key"] != def["public_key"] {
+		t.Fatalf("actor public_key after renaming onto default = %v, want %v", client["public_key"], def["public_key"])
+	}
+}
+
 func testPublicKey(t *testing.T) string {
 	t.Helper()
 	key, err := auth.GenerateKey()
