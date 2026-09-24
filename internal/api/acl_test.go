@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,8 @@ func TestACLUpdatePermission(t *testing.T) {
 	base := srv.URL + "/organizations/acme"
 
 	// Grant a specific actor on the "grant" permission.
+	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	do(t, "POST", base+"/groups", `{"groupname":"admins"}`)
 	resp, body := do(t, "PUT", base+"/nodes/web01/_acl/grant",
 		`{"grant":{"actors":["alice"],"groups":["admins"]}}`)
 	if resp.StatusCode != 200 {
@@ -67,6 +70,56 @@ func TestACLUpdatePermission(t *testing.T) {
 	// Other permissions remain at their defaults.
 	if len(acl["read"].Groups) == 0 {
 		t.Fatalf("read permission lost its defaults: %s", body)
+	}
+}
+
+// TestACLUpdateRejectsUnknownMembers covers erchef's resolution of every ACE
+// member before the write: an actor that is neither a user nor a client of the
+// org, or a group the org does not have, refuses the PUT with a 400 and leaves
+// the ACL unchanged. Storing the name would be a latent grant to whatever is
+// created under it later.
+func TestACLUpdateRejectsUnknownMembers(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	do(t, "PUT", base+"/nodes/web01", `{"name":"web01"}`)
+	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+	do(t, "POST", base+"/clients", `{"name":"web-client"}`)
+	do(t, "POST", base+"/groups", `{"groupname":"ops"}`)
+
+	_, before := do(t, "GET", base+"/nodes/web01/_acl", "")
+	for _, c := range []struct{ body, missing string }{
+		{`{"read":{"actors":["alice","ghost-client"],"groups":["ops"]}}`, "ghost-client"},
+		{`{"read":{"actors":["alice"],"groups":["ops","ghost-group"]}}`, "ghost-group"},
+	} {
+		resp, body := do(t, "PUT", base+"/nodes/web01/_acl/read", c.body)
+		if resp.StatusCode != 400 {
+			t.Errorf("PUT %s = %d, want 400; body %s", c.body, resp.StatusCode, body)
+		}
+		if !strings.Contains(body, c.missing) {
+			t.Errorf("PUT %s error should name %s: %s", c.body, c.missing, body)
+		}
+	}
+	if _, after := do(t, "GET", base+"/nodes/web01/_acl", ""); after != before {
+		t.Errorf("a refused PUT changed the ACL:\nbefore %s\nafter  %s", before, after)
+	}
+
+	// Users (global), org clients and org groups all resolve.
+	resp, body := do(t, "PUT", base+"/nodes/web01/_acl/read",
+		`{"read":{"actors":["alice","web-client"],"groups":["ops"]}}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT with known members = %d: %s", resp.StatusCode, body)
+	}
+}
+
+// TestUserACLUpdateRejectsUnknownActor covers a global user's ACL: its actors
+// resolve against the global users, so an unknown name is refused.
+func TestUserACLUpdateRejectsUnknownActor(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
+
+	resp, body := do(t, "PUT", srv.URL+"/users/alice/_acl/grant", `{"grant":{"actors":["ghost"],"groups":[]}}`)
+	if resp.StatusCode != 400 || !strings.Contains(body, "ghost") {
+		t.Fatalf("PUT naming an unknown user = %d, want 400 naming it; body %s", resp.StatusCode, body)
 	}
 }
 
@@ -178,6 +231,7 @@ func TestUserACLEndpoints(t *testing.T) {
 	}
 
 	// PUT updates and persists.
+	do(t, "POST", base+"/users", `{"name":"bob"}`)
 	if resp, _ := do(t, "PUT", base+"/users/alice/_acl/grant", `{"grant":{"actors":["bob"],"groups":[]}}`); resp.StatusCode != 200 {
 		t.Fatalf("user acl put = %d", resp.StatusCode)
 	}
@@ -196,6 +250,7 @@ func TestUserACLEndpoints(t *testing.T) {
 func TestPolicyGroupACLPutStatus201(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
+	do(t, "POST", base+"/groups", `{"groupname":"admins"}`)
 	// policy_group ACL PUT returns 201, matching Chef.
 	if resp, body := do(t, "PUT", base+"/policy_groups/prod/_acl/read", `{"read":{"actors":[],"groups":["admins"]}}`); resp.StatusCode != 201 {
 		t.Fatalf("policy_group acl put = %d, want 201; body %s", resp.StatusCode, body)

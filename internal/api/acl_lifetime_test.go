@@ -99,6 +99,7 @@ func TestDeletingAnObjectDeletesItsACL(t *testing.T) {
 				}
 			}
 			// Give the object a distinguishable ACL, as `knife acl` would.
+			do(t, "POST", srv.URL+"/users", `{"name":"mallory"}`)
 			if resp, body := do(t, "PUT", srv.URL+c.aclPath,
 				`{"read":{"actors":["mallory"],"groups":[]}}`); resp.StatusCode >= 300 {
 				t.Fatalf("put acl = %d: %s", resp.StatusCode, body)
@@ -128,6 +129,7 @@ func TestDeletingAUserDeletesItsACL(t *testing.T) {
 	if resp, body := do(t, "POST", srv.URL+"/users", `{"name":"dave"}`); resp.StatusCode >= 300 {
 		t.Fatalf("create user = %d: %s", resp.StatusCode, body)
 	}
+	do(t, "POST", srv.URL+"/users", `{"name":"mallory"}`)
 	if resp, body := do(t, "PUT", srv.URL+"/users/dave/_acl/read",
 		`{"read":{"actors":["mallory"],"groups":[]}}`); resp.StatusCode >= 300 {
 		t.Fatalf("put acl = %d: %s", resp.StatusCode, body)
@@ -151,6 +153,7 @@ func TestCookbookACLSurvivesWhileAVersionRemains(t *testing.T) {
 			t.Fatalf("put %s = %d: %s", v, resp.StatusCode, body)
 		}
 	}
+	do(t, "POST", srv.URL+"/users", `{"name":"alice"}`)
 	if resp, body := do(t, "PUT", srv.URL+"/organizations/acme/cookbooks/apache/_acl/read",
 		`{"read":{"actors":["alice"],"groups":[]}}`); resp.StatusCode >= 300 {
 		t.Fatalf("put acl = %d: %s", resp.StatusCode, body)

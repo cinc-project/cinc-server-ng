@@ -155,6 +155,9 @@ func TestSearchReflectsGroupChangeImmediately(t *testing.T) {
 		t.Fatalf("create node = %d, want 201", code)
 	}
 	// Grant read only to a group node1 is not yet in.
+	if code := statusOf(t, signed(t, srv, "POST", base+"/groups", `{"name":"auditors"}`)); code != 201 {
+		t.Fatalf("create group = %d, want 201", code)
+	}
 	grant := `{"read":{"actors":[],"groups":["auditors"]}}`
 	if code := statusOf(t, signed(t, srv, "PUT", base+"/nodes/web01/_acl/read", grant)); code != 200 {
 		t.Fatalf("grant to auditors = %d, want 200", code)
@@ -163,9 +166,6 @@ func TestSearchReflectsGroupChangeImmediately(t *testing.T) {
 		t.Fatalf("before joining auditors: %v, want no rows", got)
 	}
 
-	if code := statusOf(t, signed(t, srv, "POST", base+"/groups", `{"name":"auditors"}`)); code != 201 {
-		t.Fatalf("create group = %d, want 201", code)
-	}
 	if code := statusOf(t, signed(t, srv, "PUT", base+"/groups/auditors",
 		`{"actors":{"users":[],"clients":["node1"],"groups":[]}}`)); code != 200 {
 		t.Fatalf("add node1 to auditors = %d, want 200", code)
