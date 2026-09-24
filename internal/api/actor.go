@@ -54,6 +54,14 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			}
 			lowerEmail(obj)
 		}
+		if segment == "clients" && !clientNameRE.MatchString(name) {
+			writeError(w, http.StatusBadRequest, invalidClientNameMessage(name))
+			return
+		}
+		if pub := bodyPublicKey(obj); pub != "" && !validPublicKey(pub) {
+			writeError(w, http.StatusBadRequest, invalidPublicKeyMessage)
+			return
+		}
 
 		// A client and a global user that share a name are the same principal to
 		// everything downstream, so the second one must not be created.

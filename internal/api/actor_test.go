@@ -150,3 +150,40 @@ func privateKeyFrom(t *testing.T, out map[string]any) string {
 	}
 	return ""
 }
+
+// erchef (chef_client:valid_name) matches a new client's name against
+// chef_regex client_name and answers 400 for anything else.
+func TestClientCreateRejectsInvalidName(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	resp, out := do(t, "POST", base+"/clients", `{"name":"c!bad name"}`)
+	const want = `Invalid client name 'c!bad name' using regex: 'Malformed client name.  Must be A-Z, a-z, 0-9, _, -, or .'.`
+	if resp.StatusCode != 400 || !strings.Contains(out, want) {
+		t.Errorf("create client = %d %s, want 400 %q", resp.StatusCode, out, want)
+	}
+	if resp, _ := do(t, "GET", base+"/clients/c%21bad%20name", ""); resp.StatusCode != 404 {
+		t.Errorf("refused client was stored: GET = %d", resp.StatusCode)
+	}
+	if resp, out := do(t, "POST", base+"/clients", `{"name":"web-01.a_b"}`); resp.StatusCode != 201 {
+		t.Errorf("valid client = %d %s, want 201", resp.StatusCode, out)
+	}
+}
+
+// erchef (chef_key_base:validate_public_key_fields) refuses a client whose
+// public_key is not a PEM public key, since it could never authenticate.
+func TestClientCreateRejectsInvalidPublicKey(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	for _, body := range []string{
+		`{"name":"c1","public_key":"this is not a public key\n"}`,
+		`{"name":"c1","chef_key":{"public_key":"this is not a public key\n"}}`,
+	} {
+		resp, out := do(t, "POST", base+"/clients", body)
+		if resp.StatusCode != 400 || !strings.Contains(out, "Public Key must be a valid key.") {
+			t.Errorf("POST %s = %d %s, want 400 Public Key must be a valid key.", body, resp.StatusCode, out)
+		}
+	}
+	if resp, _ := do(t, "GET", base+"/clients/c1", ""); resp.StatusCode != 404 {
+		t.Errorf("refused client was stored: GET = %d", resp.StatusCode)
+	}
+}
