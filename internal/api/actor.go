@@ -438,6 +438,23 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
+		// A user's org memberships, group memberships and pending invitations
+		// go with it, as they do on Chef (ON DELETE CASCADE, plus the authz actor
+		// leaving every group). They name the user by bare name, so anything left
+		// behind would be inherited by the next user created under that name.
+		// They are cleared before the record, so a failure part-way leaves a
+		// user that still exists and whose delete can simply be retried.
+		if segment == "users" {
+			if _, ok, err := org.Get(segment, name); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			} else if ok {
+				if err := a.removeUserFromOrgs(name); err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
+		}
 		raw, ok, err := org.Delete(segment, name)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -462,6 +479,35 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), raw))
 	}
+}
+
+// removeUserFromOrgs drops a global user from every organization: its
+// membership, every group that names it (document and incremental rows), and
+// any invitation pending for it.
+func (a *API) removeUserFromOrgs(user string) error {
+	orgs, err := a.store.ListOrgs()
+	if err != nil {
+		return err
+	}
+	for _, name := range orgs {
+		org, ok, err := a.store.Org(name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if _, _, err := org.Delete(assocColl, user); err != nil {
+			return err
+		}
+		if _, _, err := org.Delete(assocReqColl, inviteID(user, name)); err != nil {
+			return err
+		}
+		if err := removeActorFromAllGroups(org, memberUsers, user); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // mustEncode marshals v to canonical JSON without HTML escaping.
