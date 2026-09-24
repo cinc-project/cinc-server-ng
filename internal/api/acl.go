@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -147,7 +148,7 @@ func (a *API) getACLPerm(typ string) http.HandlerFunc {
 func (a *API) putACLPerm(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if org := a.org(w, r); org != nil {
-			updateACLPermDoc(w, r, org, typ, r.PathValue("name"), r.PathValue("perm"), aclPutStatus(typ))
+			a.updateACLPermDoc(w, r, org, org, typ, r.PathValue("name"), r.PathValue("perm"), aclPutStatus(typ))
 		}
 	}
 }
@@ -166,7 +167,7 @@ func (a *API) getOrgACLPerm(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) putOrgACLPerm(w http.ResponseWriter, r *http.Request) {
 	if org := a.org(w, r); org != nil {
-		updateACLPermDoc(w, r, org, "organizations", r.PathValue("org"), r.PathValue("perm"), http.StatusOK)
+		a.updateACLPermDoc(w, r, org, org, "organizations", r.PathValue("org"), r.PathValue("perm"), http.StatusOK)
 	}
 }
 
@@ -179,7 +180,7 @@ func (a *API) getUserACLPerm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) putUserACLPerm(w http.ResponseWriter, r *http.Request) {
-	updateACLPermDoc(w, r, a.store.Global(), "users", r.PathValue("name"), r.PathValue("perm"), http.StatusOK)
+	a.updateACLPermDoc(w, r, a.store.Global(), nil, "users", r.PathValue("name"), r.PathValue("perm"), http.StatusOK)
 }
 
 // writeACLDoc writes the full five-permission ACL for an object.
@@ -208,7 +209,9 @@ func writeACLPermDoc(w http.ResponseWriter, org *store.Org, typ, name, perm stri
 
 // updateACLPermDoc replaces a single permission's ACE and writes it back with
 // the given success status (200 for most object types, 201 for policy_groups).
-func updateACLPermDoc(w http.ResponseWriter, r *http.Request, org *store.Org, typ, name, perm string, status int) {
+// scope holds the ACL; members is the org the ACE's members resolve in, or nil
+// for a global user's ACL (see unknownACEMembers).
+func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, members *store.Org, typ, name, perm string, status int) {
 	if !slices.Contains(aclPerms, perm) {
 		writeError(w, http.StatusNotFound, "Cannot find ACL permission "+perm)
 		return
@@ -224,15 +227,72 @@ func updateACLPermDoc(w http.ResponseWriter, r *http.Request, org *store.Org, ty
 		ace = inner
 	}
 
-	acl, err := loadACL(org, typ, name)
+	actors, groups, err := a.unknownACEMembers(members, ace)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(actors) > 0 || len(groups) > 0 {
+		var msgs []string
+		if len(actors) > 0 {
+			msgs = append(msgs, "The actor(s) "+strings.Join(actors, ", ")+" do not exist.")
+		}
+		if len(groups) > 0 {
+			msgs = append(msgs, "The group(s) "+strings.Join(groups, ", ")+" do not exist in this organization.")
+		}
+		writeError(w, http.StatusBadRequest, msgs...)
+		return
+	}
+
+	acl, err := loadACL(scope, typ, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	acl[perm] = ace
-	if err := org.Put("acls", aclKey(typ, name), mustEncode(acl)); err != nil {
+	if err := scope.Put("acls", aclKey(typ, name), mustEncode(acl)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, status, map[string]any{perm: ace})
+}
+
+// unknownACEMembers returns the actor and group names an ACE lists that do not
+// exist. erchef resolves every member to an authz id before writing an ACL and
+// refuses the write when one is missing; an ACL here stores names, so keeping
+// an unresolved one would be a latent grant to whatever is later created under
+// it.
+//
+// Actors resolve as global users (the bootstrap superuser, which default ACLs
+// name, belongs to no org) or as clients of org. Groups resolve as groups of
+// org. For a global user's ACL org is nil: actors resolve as users only, and
+// groups are not checked, since the global space has none to resolve against.
+func (a *API) unknownACEMembers(org *store.Org, ace map[string]any) (actors, groups []string, err error) {
+	for _, name := range jsonStrings(ace["actors"]) {
+		_, ok, err := a.store.Global().Get("users", name)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok && org != nil {
+			if _, ok, err = org.Get("clients", name); err != nil {
+				return nil, nil, err
+			}
+		}
+		if !ok {
+			actors = append(actors, name)
+		}
+	}
+	if org == nil {
+		return actors, nil, nil
+	}
+	for _, name := range jsonStrings(ace["groups"]) {
+		_, ok, err := org.Get("groups", name)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok {
+			groups = append(groups, name)
+		}
+	}
+	return actors, groups, nil
 }
