@@ -150,11 +150,29 @@ func (a *API) disassociateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := r.PathValue("user")
-	if _, ok, err := org.Delete(assocColl, user); err != nil {
+	if _, ok, err := org.Get(assocColl, user); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	} else if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find user "+user+" in organization "+org.Name())
+		return
+	}
+	// Chef refuses to drop an admin from the org: they have to leave the admins
+	// group first. knife's `org user remove` matches this message to offer
+	// --force, which does exactly that. Membership is resolved transitively, as
+	// Chef's authz does, so an admin by way of a nested group is refused too.
+	groups, err := a.actorGroups(org, Actor{Name: user})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if groups["admins"] {
+		writeStringError(w, http.StatusForbidden, "Please remove "+user+
+			" from this organization's admins group before removing him or her from the organization.")
+		return
+	}
+	if _, _, err := org.Delete(assocColl, user); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Association added the user to the org's "users" group, which the default
