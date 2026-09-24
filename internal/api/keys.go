@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
@@ -137,6 +138,16 @@ func keysColl(segment, actor string) string { return segment + "_keys:" + actor 
 
 func keysBaseURL(r *http.Request, segment, actor string) string {
 	return objectURL(r, orgSegment(r), segment, actor) + "/keys"
+}
+
+// keyURL is the URL of one of an actor's keys, for the Location header of a
+// rename. The caller passes the actor and key names already path-escaped
+// (url.PathEscape) and the org is escaped here, so each can only ever fill its
+// own segment under the actor's keys on this server: none can supply a host,
+// climb to a parent path, or split the header. Escaping at the call site keeps
+// the request-derived names visibly sanitized where the header is set.
+func keyURL(r *http.Request, segment, escapedActor, escapedKey string) string {
+	return objectURL(r, url.PathEscape(orgSegment(r)), segment, escapedActor) + "/keys/" + escapedKey
 }
 
 // loadActor fetches the actor object, writing a 404 if it does not exist.
@@ -351,7 +362,7 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		coll := keysColl(segment, name)
-		_, stored, err := org.Get(coll, keyName)
+		oldRaw, stored, err := org.Get(coll, keyName)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -403,25 +414,94 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 			writeRaw(w, http.StatusOK, raw)
 			return
 		}
-		body["name"] = keyName
-		raw := mustEncode(body)
-		if err := org.Put(coll, keyName, raw); err != nil {
+		var old struct {
+			PublicKey      string `json:"public_key"`
+			ExpirationDate string `json:"expiration_date"`
+		}
+		if err := json.Unmarshal(oldRaw, &old); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if pub := str(body["public_key"]); keyName == defaultKeyName && pub != "" {
-			if err := setActorPublicKey(org, segment, name, actor, pub); err != nil {
+		// As erchef's chef_key:update_from_ejson: each field comes from the body
+		// when it is there and keeps its stored value when it is not, and a
+		// "name" in the body renames the key.
+		newName := keyName
+		if n := str(body["name"]); n != "" {
+			newName = n
+		}
+		// validateKeyFields has checked the name already; the rename puts it in
+		// the Location header, so check it again where it is used.
+		if !validKeyName(newName) {
+			writeError(w, http.StatusBadRequest, "Field 'name' invalid")
+			return
+		}
+		key := map[string]any{"name": newName, "public_key": old.PublicKey, "expiration_date": old.ExpirationDate}
+		for _, field := range []string{"public_key", "expiration_date"} {
+			if v := str(body[field]); v != "" {
+				key[field] = v
+			}
+		}
+		raw := mustEncode(key)
+		respond := func(status int) {
+			if privateKey == "" {
+				writeRaw(w, status, raw)
+				return
+			}
+			// The private half goes back in the response only; it is never stored.
+			key["private_key"] = privateKey
+			writeJSON(w, status, key)
+		}
+		if newName == keyName {
+			if err := org.Put(coll, keyName, raw); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			// The actor's public_key mirrors the default key.
+			if keyName == defaultKeyName {
+				if err := setActorPublicKey(org, segment, name, actor, str(key["public_key"])); err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
+			respond(http.StatusOK)
+			return
+		}
+
+		// A rename may not take a name another key already answers to,
+		// including the default key made with the actor.
+		if newName == defaultKeyName && str(actor["public_key"]) != "" {
+			writeError(w, http.StatusConflict, "Key already exists")
+			return
+		}
+		if err := org.Create(coll, newName, raw); errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "Key already exists")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if _, _, err := org.Delete(coll, keyName); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// The actor's public_key mirrors the default key, so renaming the
+		// default away clears it (as deleting it does) rather than leaving it to
+		// resurface as a synthetic default that still authenticates, and
+		// renaming a key onto "default" makes it the actor's key.
+		switch {
+		case keyName == defaultKeyName:
+			if err := setActorPublicKey(org, segment, name, actor, ""); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		case newName == defaultKeyName:
+			if err := setActorPublicKey(org, segment, name, actor, str(key["public_key"])); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
-		if privateKey != "" {
-			// The private half goes back in the response only; it is never stored.
-			body["private_key"] = privateKey
-			writeJSON(w, http.StatusOK, body)
-			return
-		}
-		writeRaw(w, http.StatusOK, raw)
+		w.Header().Set("Location", keyURL(r, segment, url.PathEscape(name), url.PathEscape(newName)))
+		respond(http.StatusCreated)
 	}
 }
 

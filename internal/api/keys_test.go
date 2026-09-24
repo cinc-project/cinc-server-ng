@@ -255,6 +255,193 @@ func TestClientKeyPutDefaultExpiration(t *testing.T) {
 	}
 }
 
+// getKeyDoc fetches one key and decodes it, requiring a 200.
+func getKeyDoc(t *testing.T, url string) map[string]any {
+	t.Helper()
+	resp, body := do(t, "GET", url, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET %s = %d: %s", url, resp.StatusCode, body)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+// A key PUT keeps the stored value of every field the body leaves out, as
+// erchef's chef_key:update_from_ejson does.
+func TestKeyPutKeepsOmittedFields(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	do(t, "POST", base+"/clients", `{"name":"web01"}`)
+	do(t, "POST", base+"/clients/web01/keys", `{"name":"partial","expiration_date":"infinity"}`)
+	before := getKeyDoc(t, base+"/clients/web01/keys/partial")
+
+	resp, body := do(t, "PUT", base+"/clients/web01/keys/partial", `{"expiration_date":"2041-01-01T00:00:00Z"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT = %d: %s", resp.StatusCode, body)
+	}
+	after := getKeyDoc(t, base+"/clients/web01/keys/partial")
+	if after["expiration_date"] != "2041-01-01T00:00:00Z" {
+		t.Fatalf("expiration_date = %v, want 2041-01-01T00:00:00Z", after["expiration_date"])
+	}
+	if after["public_key"] == nil || after["public_key"] != before["public_key"] {
+		t.Fatalf("public_key after a PUT that omits it = %v, want %v", after["public_key"], before["public_key"])
+	}
+	if after["name"] != "partial" {
+		t.Fatalf("name = %v, want partial", after["name"])
+	}
+
+	// And a body with only a public_key keeps the expiration date.
+	pub := jsonString(t, testPublicKey(t))
+	do(t, "PUT", base+"/clients/web01/keys/partial", `{"public_key":`+pub+`}`)
+	after = getKeyDoc(t, base+"/clients/web01/keys/partial")
+	if after["expiration_date"] != "2041-01-01T00:00:00Z" {
+		t.Fatalf("expiration_date after a public_key-only PUT = %v", after["expiration_date"])
+	}
+}
+
+// A key PUT whose body names the key differently renames it: the key moves to
+// the new name and the answer is a 201 pointing at it.
+func TestKeyPutRenames(t *testing.T) {
+	for _, tc := range []struct{ kind, base string }{
+		{"client", "/organizations/acme/clients/web01/keys"},
+		{"user", "/users/alice/keys"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			srv, _ := newTestAPI(t)
+			do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+			do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
+			keys := srv.URL + tc.base
+			do(t, "POST", keys, `{"name":"old-name","expiration_date":"infinity"}`)
+			before := getKeyDoc(t, keys+"/old-name")
+
+			resp, body := do(t, "PUT", keys+"/old-name", `{"name":"new-name"}`)
+			if resp.StatusCode != 201 {
+				t.Fatalf("rename PUT = %d, want 201: %s", resp.StatusCode, body)
+			}
+			if loc := resp.Header.Get("Location"); !strings.HasSuffix(loc, tc.base+"/new-name") {
+				t.Fatalf("Location = %q, want the new key's URL", loc)
+			}
+			after := getKeyDoc(t, keys+"/new-name")
+			if after["name"] != "new-name" || after["public_key"] != before["public_key"] || after["expiration_date"] != "infinity" {
+				t.Fatalf("renamed key = %v, want the old key under its new name", after)
+			}
+			if resp, _ := do(t, "GET", keys+"/old-name", ""); resp.StatusCode != 404 {
+				t.Fatalf("GET old name = %d, want 404", resp.StatusCode)
+			}
+			_, body = do(t, "GET", keys, "")
+			var list []keyListEntry
+			json.Unmarshal([]byte(body), &list)
+			if len(list) != 2 || !hasKey(list, "default") || !hasKey(list, "new-name") {
+				t.Fatalf("keys after rename = %s, want default and new-name", body)
+			}
+		})
+	}
+}
+
+// Renaming a key onto a name that is taken conflicts and changes nothing.
+func TestKeyPutRenameConflicts(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme/clients/web01/keys"
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+	do(t, "POST", base, `{"name":"a","expiration_date":"infinity"}`)
+	do(t, "POST", base, `{"name":"b","expiration_date":"infinity"}`)
+	a, b := getKeyDoc(t, base+"/a"), getKeyDoc(t, base+"/b")
+
+	for _, target := range []string{"b", "default"} {
+		if resp, body := do(t, "PUT", base+"/a", `{"name":"`+target+`"}`); resp.StatusCode != 409 {
+			t.Fatalf("rename onto %q = %d, want 409: %s", target, resp.StatusCode, body)
+		}
+	}
+	if got := getKeyDoc(t, base+"/a"); got["public_key"] != a["public_key"] {
+		t.Fatalf("key a changed by a refused rename: %v", got)
+	}
+	if got := getKeyDoc(t, base+"/b"); got["public_key"] != b["public_key"] {
+		t.Fatalf("key b changed by a refused rename: %v", got)
+	}
+}
+
+// A rename's new name ends up in the Location header, so a name that could
+// steer that header anywhere but the key's own URL (another host, a parent
+// path, an encoded slash, a header injection) is refused with a 400, sets no
+// Location, and leaves the key where it was. A name erchef allows still
+// renames, to a Location on this server under the actor's keys.
+func TestKeyPutRenameRejectsUnsafeNames(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme/clients/web01/keys"
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+	do(t, "POST", base, `{"name":"a","expiration_date":"infinity"}`)
+	before := getKeyDoc(t, base+"/a")
+
+	for _, name := range []string{
+		"//evil.example",
+		"https://evil.example/x",
+		"..",
+		".",
+		"a/../../b",
+		"a%2Fb",
+		"a\r\nX-Evil: 1",
+		"a\nb",
+		"a b",
+	} {
+		resp, body := do(t, "PUT", base+"/a", `{"name":`+jsonString(t, name)+`}`)
+		if resp.StatusCode != 400 {
+			t.Errorf("rename to %q = %d, want 400: %s", name, resp.StatusCode, body)
+		}
+		if loc := resp.Header.Get("Location"); loc != "" {
+			t.Errorf("rename to %q set Location %q", name, loc)
+		}
+	}
+	if got := getKeyDoc(t, base+"/a"); got["public_key"] != before["public_key"] {
+		t.Fatalf("key a changed by a refused rename: %v", got)
+	}
+
+	resp, body := do(t, "PUT", base+"/a", `{"name":"rotated:2026.1_a-b"}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("rename to an erchef key name = %d, want 201: %s", resp.StatusCode, body)
+	}
+	if loc := resp.Header.Get("Location"); loc != base+"/rotated:2026.1_a-b" {
+		t.Fatalf("Location = %q, want %q", loc, base+"/rotated:2026.1_a-b")
+	}
+}
+
+// The actor's public_key mirrors the default key, so renaming the stored
+// default away leaves the actor with no default key (as deleting it does)
+// instead of a synthetic one rebuilt from the old public_key, and renaming a
+// key onto "default" makes it the actor's key again.
+func TestKeyPutRenameDefaultKeepsActorKeyInStep(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme/clients/web01"
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+	def := getKeyDoc(t, base+"/keys/default")
+	// Store the default as a row, as a PUT on the default key does.
+	if resp, body := do(t, "PUT", base+"/keys/default", `{"expiration_date":"infinity"}`); resp.StatusCode != 200 {
+		t.Fatalf("PUT default = %d: %s", resp.StatusCode, body)
+	}
+
+	if resp, body := do(t, "PUT", base+"/keys/default", `{"name":"retired"}`); resp.StatusCode != 201 {
+		t.Fatalf("rename default away = %d: %s", resp.StatusCode, body)
+	}
+	_, body := do(t, "GET", base+"/keys", "")
+	var list []keyListEntry
+	json.Unmarshal([]byte(body), &list)
+	if len(list) != 1 || !hasKey(list, "retired") {
+		t.Fatalf("keys after renaming default away = %s, want only retired", body)
+	}
+	if client := getKeyDoc(t, base); client["public_key"] != nil {
+		t.Fatalf("actor public_key after renaming default away = %v, want none", client["public_key"])
+	}
+
+	if resp, body := do(t, "PUT", base+"/keys/retired", `{"name":"default"}`); resp.StatusCode != 201 {
+		t.Fatalf("rename onto default = %d: %s", resp.StatusCode, body)
+	}
+	if client := getKeyDoc(t, base); client["public_key"] != def["public_key"] {
+		t.Fatalf("actor public_key after renaming onto default = %v, want %v", client["public_key"], def["public_key"])
+	}
+}
+
 func testPublicKey(t *testing.T) string {
 	t.Helper()
 	key, err := auth.GenerateKey()
