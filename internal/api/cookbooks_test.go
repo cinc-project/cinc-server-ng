@@ -163,6 +163,44 @@ func TestCookbookPutMissingChecksum(t *testing.T) {
 	}
 }
 
+// erchef (chef_cookbook_version:validate_cookbook) checks the URL name against
+// chef_regex's cookbook_name rule (letters, digits, '.', '_', '-'), and
+// metadata.name and the keys of metadata.dependencies and metadata.platforms
+// against the same rule, answering 400 and storing nothing otherwise.
+func TestCookbookPutRejectsInvalidNames(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	body := func(name, meta string) string {
+		return fmt.Sprintf(`{"name":"%s-1.0.0","cookbook_name":"%s","version":"1.0.0","metadata":%s,"all_files":[]}`, name, name, meta)
+	}
+	cases := []struct {
+		url, body, want string
+	}{
+		{"bad@name", body("bad@name", `{"name":"bad@name","version":"1.0.0"}`),
+			"Invalid cookbook name 'bad@name' using regex: 'Malformed cookbook name. Must only contain A-Z, a-z, 0-9, _, . or -'."},
+		{"bad!name", body("bad!name", `{"version":"1.0.0"}`), "Invalid cookbook name 'bad!name'"},
+		{"good", body("good", `{"name":"bad@meta","version":"1.0.0"}`), "Field 'metadata.name' invalid"},
+		{"good", body("good", `{"name":"good","version":"1.0.0","dependencies":{"dep@bad":">= 0.0.0"}}`),
+			"Invalid key 'dep@bad' for metadata.dependencies"},
+		{"good", body("good", `{"name":"good","version":"1.0.0","platforms":{"ubu ntu":">= 0.0.0"}}`),
+			"Invalid key 'ubu ntu' for metadata.platforms"},
+	}
+	for _, c := range cases {
+		resp, out := do(t, "PUT", base+"/cookbooks/"+c.url+"/1.0.0", c.body)
+		if resp.StatusCode != 400 || !strings.Contains(out, c.want) {
+			t.Errorf("PUT %s %s = %d %s, want 400 %q", c.url, c.body, resp.StatusCode, out, c.want)
+		}
+	}
+	if _, out := do(t, "GET", base+"/cookbooks", ""); strings.TrimSpace(out) != "{}" {
+		t.Errorf("refused cookbooks were stored: %s", out)
+	}
+
+	ok := body("good_1.x-y", `{"name":"good_1.x-y","version":"1.0.0","dependencies":{"dep.ok_1-2":">= 0.0.0"},"platforms":{"ubuntu":">= 0.0.0"}}`)
+	if resp, out := do(t, "PUT", base+"/cookbooks/good_1.x-y/1.0.0", ok); resp.StatusCode != 201 {
+		t.Errorf("valid cookbook = %d %s, want 201", resp.StatusCode, out)
+	}
+}
+
 func TestCookbookGetMissing404(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
