@@ -16,7 +16,7 @@ func TestPutKeyReplaceNamedKey(t *testing.T) {
 	do(t, "POST", base+"/clients", `{"name":"web01"}`)
 	do(t, "POST", base+"/clients/web01/keys", `{"name":"key2"}`)
 
-	const replacement = "-----BEGIN PUBLIC KEY-----\nKEY2-REPLACED\n-----END PUBLIC KEY-----\n"
+	replacement := testPublicKeyPEM(t)
 	body, _ := json.Marshal(map[string]any{"public_key": replacement, "expiration_date": "2030-01-01T00:00:00Z"})
 	resp, got := do(t, "PUT", base+"/clients/web01/keys/key2", string(body))
 	if resp.StatusCode != 200 {
@@ -40,7 +40,7 @@ func TestPutDefaultKeyRewritesActorPublicKey(t *testing.T) {
 	base := srv.URL + "/organizations/acme"
 	do(t, "POST", base+"/clients", `{"name":"web01"}`)
 
-	const newPub = "-----BEGIN PUBLIC KEY-----\nNEW-DEFAULT\n-----END PUBLIC KEY-----\n"
+	newPub := testPublicKeyPEM(t)
 	body, _ := json.Marshal(map[string]any{"public_key": newPub})
 	resp, got := do(t, "PUT", base+"/clients/web01/keys/default", string(body))
 	if resp.StatusCode != 200 {
@@ -65,7 +65,8 @@ func TestPutMissingNamedKey404(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 	do(t, "POST", base+"/clients", `{"name":"web01"}`)
-	resp, _ := do(t, "PUT", base+"/clients/web01/keys/ghost", `{"public_key":"x"}`)
+	body, _ := json.Marshal(map[string]any{"public_key": testPublicKeyPEM(t)})
+	resp, _ := do(t, "PUT", base+"/clients/web01/keys/ghost", string(body))
 	if resp.StatusCode != 404 {
 		t.Fatalf("put missing key = %d, want 404", resp.StatusCode)
 	}

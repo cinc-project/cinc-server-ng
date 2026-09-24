@@ -211,3 +211,88 @@ func hasKey(list []keyListEntry, name string) bool {
 	}
 	return false
 }
+
+// testPublicKeyPEM returns a freshly generated RSA public key in PEM form.
+func testPublicKeyPEM(t *testing.T) string {
+	t.Helper()
+	key, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pub)
+}
+
+// badDateMessage is erchef's BAD_DATE_MESSAGE for expiration_date, as it
+// appears JSON-encoded in a response body.
+const badDateMessage = `Field expiration_date is invalid. All dates must be a valid date in ISO8601 form of exactly YYYY-MM-DDThh:mm:ss, eg 2099-02-28T01:00:00, or the string \"infinity\". All times are assumed UTC, so do not include a Z on the end of your date.`
+
+// erchef (chef_key:parse_binary_json) validates a new key's name against
+// chef_regex key_name, its public_key as a PEM public key, and its
+// expiration_date as "infinity" or an ISO 8601 UTC timestamp, answering 400
+// and storing nothing otherwise. It runs for client and user keys alike.
+func TestAddKeyRejectsInvalidFields(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	do(t, "POST", srv.URL+"/users", userBody(`{"username":"alice"}`))
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+	for _, owner := range []string{"/organizations/acme/clients/web01", "/users/alice"} {
+		cases := []struct {
+			body map[string]any
+			want string
+		}{
+			{map[string]any{"name": "bad^name", "create_key": true, "expiration_date": "infinity"}, "Field 'name' invalid"},
+			{map[string]any{"name": "bad name", "create_key": true, "expiration_date": "infinity"}, "Field 'name' invalid"},
+			{map[string]any{"name": "junk1", "public_key": "garbage", "expiration_date": "infinity"}, "Public Key must be a valid key."},
+			{map[string]any{"name": "junk2", "public_key": "-----BEGIN PUBLIC KEY-----\ninvalid_key\n-----END PUBLIC KEY-----", "expiration_date": "infinity"}, "Public Key must be a valid key."},
+			{map[string]any{"name": "junk3", "create_key": true, "expiration_date": "next tuesday"}, badDateMessage},
+			{map[string]any{"name": "junk4", "create_key": true, "expiration_date": "2099-02-28T01:00:00"}, badDateMessage},
+			{map[string]any{"name": "junk5", "create_key": true, "expiration_date": "2099-02-30T01:00:00Z"}, badDateMessage},
+		}
+		for _, c := range cases {
+			body, _ := json.Marshal(c.body)
+			resp, out := do(t, "POST", srv.URL+owner+"/keys", string(body))
+			if resp.StatusCode != 400 || !strings.Contains(out, c.want) {
+				t.Errorf("POST %s/keys %s = %d %s, want 400 %q", owner, body, resp.StatusCode, out, c.want)
+			}
+		}
+		_, out := do(t, "GET", srv.URL+owner+"/keys", "")
+		var list []keyListEntry
+		json.Unmarshal([]byte(out), &list)
+		if len(list) != 1 || list[0].Name != "default" {
+			t.Errorf("refused keys were stored for %s: %s", owner, out)
+		}
+
+		good, _ := json.Marshal(map[string]any{"name": "rot:1.a_b-c", "public_key": testPublicKeyPEM(t), "expiration_date": "2099-02-28T01:00:00Z"})
+		if resp, out := do(t, "POST", srv.URL+owner+"/keys", string(good)); resp.StatusCode != 201 {
+			t.Errorf("valid key for %s = %d %s, want 201", owner, resp.StatusCode, out)
+		}
+	}
+}
+
+// The same checks apply on key PUT, to whichever fields the body carries.
+func TestPutKeyRejectsInvalidFields(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme/clients/web01"
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+	do(t, "POST", base+"/keys", `{"name":"key2","create_key":true,"expiration_date":"infinity"}`)
+	_, before := do(t, "GET", base+"/keys/key2", "")
+
+	for _, key := range []string{"key2", "default"} {
+		for _, c := range []struct{ body, want string }{
+			{`{"name":"bad name"}`, "Field 'name' invalid"},
+			{`{"public_key":"garbage"}`, "Public Key must be a valid key."},
+			{`{"expiration_date":"next tuesday"}`, badDateMessage},
+		} {
+			resp, out := do(t, "PUT", base+"/keys/"+key, c.body)
+			if resp.StatusCode != 400 || !strings.Contains(out, c.want) {
+				t.Errorf("PUT keys/%s %s = %d %s, want 400 %q", key, c.body, resp.StatusCode, out, c.want)
+			}
+		}
+	}
+	if _, after := do(t, "GET", base+"/keys/key2", ""); after != before {
+		t.Errorf("a refused PUT changed key2:\nbefore %s\nafter  %s", before, after)
+	}
+}

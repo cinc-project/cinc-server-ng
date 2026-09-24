@@ -153,6 +153,10 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "Field 'name' missing")
 			return
 		}
+		if msg := validateKeyFields(body); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
 
 		resp := map[string]any{"uri": keysBaseURL(r, segment, name) + "/" + keyName}
 		pub, hasPub := body["public_key"].(string)
@@ -210,6 +214,10 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 		delete(body, "create_key")
 		if createKey && str(body["public_key"]) != "" {
 			writeError(w, http.StatusBadRequest, "Since you requested a new key be created, you cannot also specify a public_key.")
+			return
+		}
+		if msg := validateKeyFields(body); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
 		coll := keysColl(segment, name)
