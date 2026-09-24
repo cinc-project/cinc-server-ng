@@ -236,7 +236,7 @@ const badDateMessage = `Field expiration_date is invalid. All dates must be a va
 // and storing nothing otherwise. It runs for client and user keys alike.
 func TestAddKeyRejectsInvalidFields(t *testing.T) {
 	srv, _ := newTestAPI(t)
-	do(t, "POST", srv.URL+"/users", `{"username":"alice"}`)
+	do(t, "POST", srv.URL+"/users", userBody(`{"username":"alice"}`))
 	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
 	for _, owner := range []string{"/organizations/acme/clients/web01", "/users/alice"} {
 		cases := []struct {
