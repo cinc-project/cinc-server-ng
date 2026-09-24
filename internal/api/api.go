@@ -6,6 +6,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -39,6 +40,9 @@ type API struct {
 	// routes are the patterns registered, so a test can require every mutating
 	// one to be authorized.
 	routes []string
+	// now is the clock that decides whether an actor's key has expired.
+	// Defaults to time.Now.
+	now func() time.Time
 }
 
 // Option configures an API at construction time.
@@ -56,6 +60,16 @@ func WithFileStoreKey(key []byte) Option {
 	return func(a *API) { a.fileStoreKey = key }
 }
 
+// WithClock sets the clock used to decide whether an actor's key has expired.
+// The authentication layer must judge expiry by the same clock.
+func WithClock(now func() time.Time) Option {
+	return func(a *API) {
+		if now != nil {
+			a.now = now
+		}
+	}
+}
+
 // New returns an API backed by st, applying any options.
 func New(st *store.Store, opts ...Option) *API {
 	a := &API{
@@ -63,6 +77,7 @@ func New(st *store.Store, opts ...Option) *API {
 		search:    newSearchCache(),
 		groups:    newGroupIndexCache(),
 		searchIdx: newSearchIndexes(),
+		now:       time.Now,
 	}
 	for _, opt := range opts {
 		opt(a)

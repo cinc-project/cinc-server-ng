@@ -4,19 +4,125 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // Key management implements Chef's v1 key API for actors (clients and users).
-// Every actor has a "default" key derived from its stored public_key; callers
-// may add, fetch, replace, and delete additional named keys. Named keys live in
-// a per-actor collection ("<segment>_keys:<actor>") within the actor's scope
-// (org for clients, global for users). As with actor creation, a key POSTed
-// without a public_key has one generated, and the private key is returned once.
+// Named keys live in a per-actor collection ("<segment>_keys:<actor>") within
+// the actor's scope (org for clients, global for users). As with actor
+// creation, a key POSTed without a public_key has one generated, and the
+// private key is returned once.
+//
+// The "default" key is the stored "default" row when there is one, and is
+// otherwise synthesized from the actor record's public_key (which is where
+// actor creation puts it). Writes through the keys API keep the actor's
+// public_key in step with the default key, so the two never disagree about
+// which key material is the default.
+//
+// Every key the keys API lists authenticates its actor until it expires, as in
+// Chef Infra Server: SigningKeys is the single definition of that set, shared by
+// the key list and the authentication layer.
 
 const defaultKeyName = "default"
+
+// infinity is the expiration_date of a key that never expires.
+const infinity = "infinity"
+
+// keyExpired reports whether a key with this expiration_date has expired at
+// now. "infinity" (or no date at all, which is how a key POSTed without one is
+// treated) never expires; a date that does not parse counts as expired, so a
+// malformed key can never authenticate.
+func keyExpired(expiration string, now time.Time) bool {
+	if expiration == "" || expiration == infinity {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339, expiration)
+	if err != nil {
+		return true
+	}
+	return !at.After(now)
+}
+
+// storedKey is the shape of a row in an actor's keys collection.
+type storedKey struct {
+	PublicKey      string `json:"public_key"`
+	ExpirationDate string `json:"expiration_date"`
+}
+
+// SigningKeys returns the public keys (PEM) that authenticate the named actor
+// at now: every key the keys API lists for it, minus the expired ones.
+// actorPublicKey is the public_key on the actor's record, which is the default
+// key unless a stored "default" row takes its place.
+func SigningKeys(org *store.Org, segment, name, actorPublicKey string, now time.Time) ([]string, error) {
+	var keys []string
+	storedDefault := false
+	err := org.Range(keysColl(segment, name), func(keyName string, raw []byte) bool {
+		if keyName == defaultKeyName {
+			storedDefault = true
+		}
+		var k storedKey
+		if json.Unmarshal(raw, &k) != nil || k.PublicKey == "" || keyExpired(k.ExpirationDate, now) {
+			return true
+		}
+		keys = append(keys, k.PublicKey)
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !storedDefault && actorPublicKey != "" {
+		keys = append(keys, actorPublicKey)
+	}
+	return keys, nil
+}
+
+// setActorPublicKey records pub as the actor's public_key (the default key's
+// material), or removes the field when pub is empty.
+func setActorPublicKey(org *store.Org, segment, name string, actor map[string]any, pub string) error {
+	if pub == "" {
+		delete(actor, "public_key")
+	} else {
+		actor["public_key"] = pub
+	}
+	return org.Put(segment, name, mustEncode(actor))
+}
+
+// setStoredDefaultPublicKey points a stored "default" key row at pub, so an
+// actor update that carries a new public_key rotates the default key even after
+// the keys API has stored it as a row. It does nothing when there is no row.
+func setStoredDefaultPublicKey(org *store.Org, segment, name, pub string) error {
+	coll := keysColl(segment, name)
+	raw, ok, err := org.Get(coll, defaultKeyName)
+	if err != nil || !ok {
+		return err
+	}
+	var row map[string]any
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return err
+	}
+	row["public_key"] = pub
+	return org.Put(coll, defaultKeyName, mustEncode(row))
+}
+
+// deleteActorKeys removes every key an actor holds. A deleted actor's keys must
+// not outlive it: they authenticate by actor name, so a later actor registered
+// under the same name would otherwise inherit them.
+func deleteActorKeys(org *store.Org, segment, name string) error {
+	coll := keysColl(segment, name)
+	names, err := org.Keys(coll)
+	if err != nil {
+		return err
+	}
+	for _, kn := range names {
+		if _, _, err := org.Delete(coll, kn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (a *API) registerKeyRoutes(mux *recordingMux, prefix, segment string, scope scopeFunc) {
 	base := prefix + segment + "/{name}/keys"
@@ -74,7 +180,7 @@ func (a *API) listKeys(segment string, scope scopeFunc) http.HandlerFunc {
 		// The synthetic default key reflects the actor's public_key.
 		if !storedDefault {
 			if pk, _ := actor["public_key"].(string); pk != "" {
-				out = append(out, keyListItem(base, defaultKeyName))
+				out = append(out, keyListItem(base, defaultKeyName, false))
 			}
 		}
 		kns, err := org.Keys(coll)
@@ -82,15 +188,26 @@ func (a *API) listKeys(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		now := a.now()
 		for _, kn := range kns {
-			out = append(out, keyListItem(base, kn))
+			raw, ok, err := org.Get(coll, kn)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				continue
+			}
+			var k storedKey
+			_ = json.Unmarshal(raw, &k)
+			out = append(out, keyListItem(base, kn, keyExpired(k.ExpirationDate, now)))
 		}
 		writeJSON(w, http.StatusOK, out)
 	}
 }
 
-func keyListItem(base, name string) map[string]any {
-	return map[string]any{"name": name, "uri": base + "/" + name, "expired": false}
+func keyListItem(base, name string, expired bool) map[string]any {
+	return map[string]any{"name": name, "uri": base + "/" + name, "expired": expired}
 }
 
 func (a *API) getKey(segment string, scope scopeFunc) http.HandlerFunc {
@@ -140,7 +257,8 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		if _, ok := loadActor(w, org, segment, name); !ok {
+		actor, ok := loadActor(w, org, segment, name)
+		if !ok {
 			return
 		}
 		var body map[string]any
@@ -155,6 +273,12 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 		if msg := validateKeyFields(body); msg != "" {
 			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		// The default key made with the actor is a key like any other, so a
+		// second "default" conflicts with it even though it has no stored row.
+		if keyName == defaultKeyName && str(actor["public_key"]) != "" {
+			writeError(w, http.StatusConflict, "Key already exists")
 			return
 		}
 
@@ -186,6 +310,12 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if keyName == defaultKeyName {
+			if err := setActorPublicKey(org, segment, name, actor, pub); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		writeJSON(w, http.StatusCreated, resp)
 	}
@@ -240,20 +370,37 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 			body["public_key"], privateKey = pub, priv
 		}
 
-		// Updating the synthetic default key rewrites the actor's public_key.
+		// Updating the synthetic default key stores it as a row, so it keeps the
+		// expiration_date it is given, and rewrites the actor's public_key.
 		if keyName == defaultKeyName && !stored {
-			if pub, ok := body["public_key"].(string); ok && pub != "" {
-				actor["public_key"] = pub
-				if err := org.Put(segment, name, mustEncode(actor)); err != nil {
-					writeError(w, http.StatusInternalServerError, err.Error())
-					return
-				}
+			pub := str(actor["public_key"])
+			if pub == "" {
+				writeError(w, http.StatusNotFound, "Cannot find key "+keyName)
+				return
 			}
-			resp := keyObject(defaultKeyName, str(actor["public_key"]))
+			if p := str(body["public_key"]); p != "" {
+				pub = p
+			}
+			expiration := str(body["expiration_date"])
+			if expiration == "" {
+				expiration = infinity
+			}
+			raw := mustEncode(map[string]any{"name": defaultKeyName, "public_key": pub, "expiration_date": expiration})
+			if err := org.Put(coll, defaultKeyName, raw); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if err := setActorPublicKey(org, segment, name, actor, pub); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			if privateKey != "" {
-				resp["private_key"] = privateKey
+				// The private half goes back in the response only; it is never stored.
+				resp := map[string]any{"name": defaultKeyName, "public_key": pub, "expiration_date": expiration, "private_key": privateKey}
+				writeJSON(w, http.StatusOK, resp)
+				return
 			}
-			writeJSON(w, http.StatusOK, resp)
+			writeRaw(w, http.StatusOK, raw)
 			return
 		}
 		body["name"] = keyName
@@ -261,6 +408,12 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 		if err := org.Put(coll, keyName, raw); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if pub := str(body["public_key"]); keyName == defaultKeyName && pub != "" {
+			if err := setActorPublicKey(org, segment, name, actor, pub); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		if privateKey != "" {
 			// The private half goes back in the response only; it is never stored.
@@ -304,6 +457,13 @@ func (a *API) deleteKey(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		if ok {
+			// The actor's public_key mirrors the default key, so it goes too.
+			if keyName == defaultKeyName && str(actor["public_key"]) != "" {
+				if err := setActorPublicKey(org, segment, name, actor, ""); err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
 			writeRaw(w, http.StatusOK, raw)
 			return
 		}

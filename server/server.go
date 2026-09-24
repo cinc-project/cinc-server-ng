@@ -354,6 +354,7 @@ func New(opts Options) (*Server, error) {
 	apiInstance := api.New(st,
 		api.WithACLEnforcement(opts.EnforceACL),
 		api.WithFileStoreKey(fileStoreKey),
+		api.WithClock(opts.Now),
 	)
 	s.api = apiInstance
 	handler := apiInstance.Handler()

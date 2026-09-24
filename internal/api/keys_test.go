@@ -203,6 +203,80 @@ func TestKeyPutCreateKeyFalseIsNotStored(t *testing.T) {
 	}
 }
 
+// The default key made with the actor is a key like any other: adding a
+// second key named "default" conflicts, however the new key is supplied.
+func TestClientKeyAddDefaultConflicts(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	do(t, "POST", base+"/clients", `{"name":"web01"}`)
+	_, before := do(t, "GET", base+"/clients/web01/keys/default", "")
+
+	for _, body := range []string{
+		`{"name":"default","create_key":true,"expiration_date":"infinity"}`,
+		`{"name":"default","public_key":` + jsonString(t, testPublicKey(t)) + `,"expiration_date":"infinity"}`,
+	} {
+		if resp, got := do(t, "POST", base+"/clients/web01/keys", body); resp.StatusCode != 409 {
+			t.Fatalf("POST %s = %d, want 409: %s", body, resp.StatusCode, got)
+		}
+	}
+	if _, after := do(t, "GET", base+"/clients/web01/keys/default", ""); after != before {
+		t.Fatalf("default key changed:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+// PUT on the default key made with the actor keeps the expiration_date it is
+// given, and the public key it does not change.
+func TestClientKeyPutDefaultExpiration(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	do(t, "POST", base+"/clients", `{"name":"web01"}`)
+	var before map[string]any
+	_, raw := do(t, "GET", base+"/clients/web01/keys/default", "")
+	json.Unmarshal([]byte(raw), &before)
+
+	body := `{"name":"default","public_key":` + jsonString(t, before["public_key"].(string)) + `,"expiration_date":"2040-12-31T00:00:00Z"}`
+	if resp, got := do(t, "PUT", base+"/clients/web01/keys/default", body); resp.StatusCode != 200 {
+		t.Fatalf("PUT default = %d: %s", resp.StatusCode, got)
+	}
+	var after map[string]any
+	_, raw = do(t, "GET", base+"/clients/web01/keys/default", "")
+	json.Unmarshal([]byte(raw), &after)
+	if after["expiration_date"] != "2040-12-31T00:00:00Z" {
+		t.Fatalf("expiration_date after PUT = %v, want 2040-12-31T00:00:00Z: %s", after["expiration_date"], raw)
+	}
+	if after["public_key"] != before["public_key"] {
+		t.Fatalf("public_key changed by an expiration-only PUT: %s", raw)
+	}
+	_, raw = do(t, "GET", base+"/clients/web01/keys", "")
+	var list []keyListEntry
+	json.Unmarshal([]byte(raw), &list)
+	if len(list) != 1 || list[0].Name != "default" {
+		t.Fatalf("keys after PUT = %s, want only default", raw)
+	}
+}
+
+func testPublicKey(t *testing.T) string {
+	t.Helper()
+	key, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pub)
+}
+
+func jsonString(t *testing.T, s string) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 func hasKey(list []keyListEntry, name string) bool {
 	for _, k := range list {
 		if k.Name == name {
