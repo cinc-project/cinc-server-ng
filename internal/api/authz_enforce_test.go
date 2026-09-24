@@ -200,9 +200,9 @@ func TestClassifyRequest(t *testing.T) {
 		// Global user ACLs: grant on the user object, evaluated in the global space.
 		{"GET", "/users/bob/_acl", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant"}},
 		{"PUT", "/users/bob/_acl/grant", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant"}},
-		// Org membership changes are gated by the org's groups container, so a
-		// non-member cannot associate itself in (see authz_gaps_test.go).
-		{"POST", "/organizations/acme/users", &authzCheck{aclType: "containers", aclName: "groups", perm: "update"}},
+		// Force-associating a user is superuser-only, as on erchef (see
+		// authz_gaps_test.go for the rest of the membership routes).
+		{"POST", "/organizations/acme/users", &authzCheck{superuserOnly: true, perm: "create"}},
 		// An actor's keys are its credential, so they are gated like the actor.
 		{"GET", "/users/bob/keys", &authzCheck{superuserOnly: true, perm: "read", allowSelf: "bob"}},
 		// Provisioning an org is server-level; listing them stays open.
