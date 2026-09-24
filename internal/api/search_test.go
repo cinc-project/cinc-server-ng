@@ -10,12 +10,24 @@ import (
 // attribute foo.bar so search can exercise nested-attribute matching.
 func seedNode(t *testing.T, base, name, env, bar string) {
 	t.Helper()
-	body := `{"name":"` + name + `","chef_environment":"` + env + `","json_class":"Chef::Node",` +
-		`"normal":{"foo":{"bar":"` + bar + `"}},"run_list":["recipe[nginx]"]}`
-	resp, b := do(t, "PUT", base+"/nodes/"+name, body)
-	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+	resp, b := do(t, "POST", base+"/nodes", searchNodeBody(name, env, bar))
+	if resp.StatusCode != 201 {
 		t.Fatalf("seed node %s = %d: %s", name, resp.StatusCode, b)
 	}
+}
+
+// updateNode rewrites an existing node seeded by seedNode.
+func updateNode(t *testing.T, base, name, env, bar string) {
+	t.Helper()
+	resp, b := do(t, "PUT", base+"/nodes/"+name, searchNodeBody(name, env, bar))
+	if resp.StatusCode != 200 {
+		t.Fatalf("update node %s = %d: %s", name, resp.StatusCode, b)
+	}
+}
+
+func searchNodeBody(name, env, bar string) string {
+	return `{"name":"` + name + `","chef_environment":"` + env + `","json_class":"Chef::Node",` +
+		`"normal":{"foo":{"bar":"` + bar + `"}},"run_list":["recipe[nginx]"]}`
 }
 
 type searchResult struct {
@@ -76,7 +88,7 @@ func TestSearchReflectsUpdatesEndToEnd(t *testing.T) {
 	}
 
 	// Re-index the node with a new attribute value.
-	seedNode(t, base, "web01", "production", "omega")
+	updateNode(t, base, "web01", "production", "omega")
 
 	_, body = do(t, "GET", base+"/search/node?q=foo_bar:alpha", "")
 	json.Unmarshal([]byte(body), &res)
@@ -178,7 +190,7 @@ func TestPartialSearchEmptyAndMissingPaths(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 	// A node with an automatic attribute (ipaddress) and a nested normal one.
-	do(t, "PUT", base+"/nodes/web01",
+	do(t, "POST", base+"/nodes",
 		`{"name":"web01","chef_environment":"production","automatic":{"ipaddress":"10.0.0.5"},"normal":{"foo":{"bar":"alpha"}}}`)
 
 	_, body := do(t, "POST", base+"/search/node?q=name:web01",

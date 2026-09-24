@@ -227,12 +227,16 @@ func (a *API) putDataBagItem(w http.ResponseWriter, r *http.Request) {
 	if !a.bagExists(w, org, bag) {
 		return
 	}
+	item := r.PathValue("item")
+	if !exists(w, r, org, dataBagItemsColl(bag), item, "Cannot find data bag item "+item) {
+		return
+	}
 	raw, _, err := decodeItem(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if err := org.Put(dataBagItemsColl(bag), r.PathValue("item"), raw); err != nil {
+	if err := org.Put(dataBagItemsColl(bag), item, raw); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -267,6 +271,13 @@ func decodeItem(r *http.Request) (raw []byte, id string, err error) {
 	var obj map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
 		return nil, "", err
+	}
+	// Chef::DataBagItem#to_json nests the item's own fields under raw_data
+	// beside its class metadata; unwrap that form so the item is stored as its
+	// fields, the same as a bare body. An item that merely has a raw_data field
+	// (no Chef::DataBagItem json_class) is kept as is.
+	if inner, ok := obj["raw_data"].(map[string]any); ok && obj["json_class"] == "Chef::DataBagItem" {
+		obj = inner
 	}
 	id, _ = obj["id"].(string)
 	return mustEncode(obj), id, nil

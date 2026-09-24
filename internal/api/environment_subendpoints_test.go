@@ -89,8 +89,8 @@ func TestEnvironmentRecipesAndNodes(t *testing.T) {
 	base := srv.URL + "/organizations/acme"
 	seedCookbook(t, base, "apache2", "1.0.0")
 	do(t, "POST", base+"/environments", `{"name":"prod"}`)
-	do(t, "PUT", base+"/nodes/web01", `{"name":"web01","chef_environment":"prod"}`)
-	do(t, "PUT", base+"/nodes/web02", `{"name":"web02","chef_environment":"staging"}`)
+	do(t, "POST", base+"/nodes", `{"name":"web01","chef_environment":"prod"}`)
+	do(t, "POST", base+"/nodes", `{"name":"web02","chef_environment":"staging"}`)
 
 	_, body := do(t, "GET", base+"/environments/prod/recipes", "")
 	var recipes []string

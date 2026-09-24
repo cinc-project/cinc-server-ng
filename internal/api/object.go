@@ -154,6 +154,9 @@ func (a *API) putObject(segment string) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
+		if !exists(w, r, org, segment, name, "Cannot find "+segment+" "+name) {
+			return
+		}
 		raw, _, err := decodeNamedBody(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -165,6 +168,25 @@ func (a *API) putObject(segment string) http.HandlerFunc {
 		}
 		writeRaw(w, http.StatusOK, raw)
 	}
+}
+
+// exists reports whether coll holds key, writing a 404 carrying msg (or a 500
+// on a store error) when it does not. A PUT on a named object is an update, as
+// in erchef: it must find the object rather than create it, since creation goes
+// through POST on the collection (which also grants the creator its ACL). The
+// read the authorization layer already made for this object is reused, so the
+// check costs nothing extra on the enforced hot path.
+func exists(w http.ResponseWriter, r *http.Request, org *store.Org, coll, key, msg string) bool {
+	_, ok, err := viewObject(r, org, coll, key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, msg)
+		return false
+	}
+	return true
 }
 
 func (a *API) deleteObject(segment string) http.HandlerFunc {

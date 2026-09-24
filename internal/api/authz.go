@@ -147,12 +147,15 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	name := r.PathValue("name")
+	if !exists(w, r, org, "groups", name, "Cannot find groups "+name) {
+		return
+	}
 	var obj map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	name := r.PathValue("name")
 	users, clients, groups := groupMembers(obj)
 	// An explicit write replaces the group's membership, so any rows added
 	// incrementally since the last write no longer apply.
