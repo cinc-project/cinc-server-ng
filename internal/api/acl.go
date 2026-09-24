@@ -120,7 +120,37 @@ func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
 			return m, nil
 		}
 	}
-	return defaultACL(), nil
+	return fallbackACL(typ, name), nil
+}
+
+// fallbackACL is the ACL an object with no stored one reports. For most objects
+// that is defaultACL(), which lets every org member (the "users" group) create,
+// update and delete.
+//
+// Two kinds of object must not inherit that, because holding update on them is
+// authority over the org itself rather than over one of its objects:
+//
+//   - The organization. Update on it is what invites, rescinds and removes
+//     members, and no organization ever gets an ACL written for it, so the
+//     fallback is its ACL. Chef's org policy (oc_chef_authz_org_creator) gives
+//     the users group read on the organization and nothing else.
+//   - The default groups. Membership of admins carries update on the
+//     organization, and membership of users carries the default ACL's CRUD, so
+//     a member who could rewrite either could grant themselves (or an outsider)
+//     everything the membership gate withholds. Chef gives the users group no
+//     permission on these groups.
+//
+// Both keep defaultACL's read, which is what lets a member see the org and the
+// groups it belongs to. An ACL written for either through the _acl endpoints
+// still replaces this fallback, as for any object.
+func fallbackACL(typ, name string) map[string]any {
+	acl := defaultACL()
+	if typ == "organizations" || (typ == "groups" && slices.Contains(defaultGroups, name)) {
+		for _, p := range []string{"create", "update", "delete"} {
+			acl[p] = map[string]any{"actors": []string{}, "groups": []string{"admins"}}
+		}
+	}
+	return acl
 }
 
 // The org-scoped object handlers resolve the {org} path value to its store and

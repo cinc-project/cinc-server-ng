@@ -208,7 +208,7 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	case seg == "cookbooks" || seg == "cookbook_artifacts":
 		return classifyCookbook(method, seg, rest, read)
 	case seg == "users" || seg == "association_requests":
-		return classifyOrgMembership(method, rest)
+		return classifyOrgMembership(method, org, rest)
 	case enforceSegs[seg]:
 		return classifyGeneric(method, seg, rest, read)
 	}
@@ -217,24 +217,39 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 
 // classifyOrgMembership gates the org-membership routes:
 // /organizations/{org}/users[/{user}] and the invitations that lead to them,
-// /organizations/{org}/association_requests[/{id}].
+// /organizations/{org}/association_requests[/{id}], the way erchef does
+// (oc_chef_wm_org_associations, oc_chef_wm_org_invites):
 //
-// Changing who belongs to an org is governed by the org's "groups" container,
-// because association writes the org's "users" group — so an actor outside the
-// org, which belongs to none of its groups, can never let itself in. Issuing an
-// invitation is gated the same way: acceptance re-checks that the inviter still
-// has the authority, but an outsider should not be able to create the
-// invitation in the first place. The read routes are left to the handler's own
+//   - Force-associating a user without an invitation is superuser-only. Not
+//     even an org admin may do it.
+//   - Removing a member, inviting, and rescinding an invitation need update on
+//     the organization, which Chef's org policy gives the admins group only
+//     (see fallbackACL). A user may always remove themself.
+//
+// Any other write to these paths is held to update on the organization too,
+// rather than left unclassified. The read routes are left to the handler's own
 // membership check (orgViewAllowed).
-func classifyOrgMembership(method string, rest []string) (*authzCheck, bool) {
+func classifyOrgMembership(method, org string, rest []string) (*authzCheck, bool) {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodDelete:
-		if len(rest) > 2 {
-			return nil, false
-		}
-		return &authzCheck{aclType: "containers", aclName: "groups", perm: "update"}, true
+	default:
+		return nil, false
 	}
-	return nil, false
+	if len(rest) > 2 {
+		return nil, false
+	}
+	if rest[0] == "users" && len(rest) == 1 && method == http.MethodPost {
+		return &authzCheck{superuserOnly: true, perm: "create"}, true
+	}
+	c := &authzCheck{aclType: "organizations", aclName: org, perm: "update"}
+	if rest[0] == "users" && len(rest) == 2 && method == http.MethodDelete {
+		user := rest[1]
+		c.allowSelf = user
+		// A membership that does not exist is a 404 before it is a 403.
+		c.existColl, c.existKey = assocColl, user
+		c.existMsg = "Cannot find user " + user + " in organization " + org
+	}
+	return c, true
 }
 
 // classifyUsers handles the global /users routes (rest is the path after
