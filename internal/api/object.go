@@ -106,6 +106,10 @@ func (a *API) createObject(segment string) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
+		if msg := validateObjectBody(segment, "", raw); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
 		if name == "" {
 			writeError(w, http.StatusBadRequest, "Field 'name' missing")
 			return
@@ -157,6 +161,10 @@ func (a *API) putObject(segment string) http.HandlerFunc {
 		raw, _, err := decodeNamedBody(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if msg := validateObjectBody(segment, name, raw); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
 		if err := org.Put(segment, name, raw); err != nil {
