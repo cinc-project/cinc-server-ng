@@ -23,9 +23,9 @@ var aclTargets = []struct {
 	{"data", "vault", "/organizations/acme/data/vault/_acl", [][3]string{{"POST", "/organizations/acme/data", `{"name":"vault"}`}}},
 	{"cookbooks", "apache", "/organizations/acme/cookbooks/apache/_acl", [][3]string{{"PUT", "/organizations/acme/cookbooks/apache/1.0.0", `{"name":"apache","version":"1.0.0"}`}}},
 	{"cookbook_artifacts", "apache", "/organizations/acme/cookbook_artifacts/apache/_acl", [][3]string{{"PUT", "/organizations/acme/cookbook_artifacts/apache/abc123", `{"name":"apache"}`}}},
-	{"policies", "base", "/organizations/acme/policies/base/_acl", [][3]string{{"POST", "/organizations/acme/policies/base/revisions", `{"revision_id":"r1"}`}}},
-	{"policy_groups", "prod", "/organizations/acme/policy_groups/prod/_acl", [][3]string{{"PUT", "/organizations/acme/policy_groups/prod/policies/base", `{"revision_id":"r1"}`}}},
-	{"users", "alice", "/users/alice/_acl", [][3]string{{"POST", "/users", `{"name":"alice"}`}}},
+	{"policies", "base", "/organizations/acme/policies/base/_acl", [][3]string{{"POST", "/organizations/acme/policies/base/revisions", `{"name":"base","revision_id":"r1","run_list":[],"cookbook_locks":{}}`}}},
+	{"policy_groups", "prod", "/organizations/acme/policy_groups/prod/_acl", [][3]string{{"PUT", "/organizations/acme/policy_groups/prod/policies/base", `{"name":"base","revision_id":"r1","run_list":[],"cookbook_locks":{}}`}}},
+	{"users", "alice", "/users/alice/_acl", [][3]string{{"POST", "/users", userBody(`{"name":"alice"}`)}}},
 }
 
 // TestACLOfMissingObjectIs404 pins erchef's order: the object is looked up
@@ -71,6 +71,8 @@ func TestACLOfExistingObjectIsServed(t *testing.T) {
 	for _, c := range aclTargets {
 		t.Run(c.typ, func(t *testing.T) {
 			srv, _ := newTestAPI(t)
+			// The ACE below names admins, and an ACL PUT refuses unknown groups.
+			do(t, "POST", srv.URL+"/organizations/acme/groups", `{"groupname":"admins"}`)
 			for _, req := range c.setup {
 				if resp, body := do(t, req[0], srv.URL+req[1], req[2]); resp.StatusCode >= 300 {
 					t.Fatalf("setup %s %s = %d: %s", req[0], req[1], resp.StatusCode, body)

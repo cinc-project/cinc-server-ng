@@ -83,7 +83,7 @@ func TestACLUpdatePermission(t *testing.T) {
 func TestACLUpdateRejectsUnknownMembers(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
-	do(t, "PUT", base+"/nodes/web01", `{"name":"web01"}`)
+	do(t, "POST", base+"/nodes", `{"name":"web01"}`)
 	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 	do(t, "POST", base+"/clients", `{"name":"web-client"}`)
 	do(t, "POST", base+"/groups", `{"groupname":"ops"}`)
@@ -253,7 +253,7 @@ func TestPolicyGroupACLPutStatus201(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 	do(t, "POST", base+"/groups", `{"groupname":"admins"}`)
-	do(t, "PUT", base+"/policy_groups/prod/policies/base", `{"revision_id":"r1"}`)
+	do(t, "PUT", base+"/policy_groups/prod/policies/base", `{"name":"base","revision_id":"r1","run_list":[],"cookbook_locks":{}}`)
 	do(t, "POST", base+"/nodes", `{"name":"web01"}`)
 	// policy_group ACL PUT returns 201, matching Chef.
 	if resp, body := do(t, "PUT", base+"/policy_groups/prod/_acl/read", `{"read":{"actors":[],"groups":["admins"]}}`); resp.StatusCode != 201 {
