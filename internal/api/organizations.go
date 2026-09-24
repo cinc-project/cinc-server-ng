@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -16,6 +18,26 @@ import (
 // orgsColl is the global collection holding organization metadata
 // ({name, full_name, guid}).
 const orgsColl = "organizations"
+
+// orgNameRE is erchef's org name rule (oc_chef_organization ORG_NAME_REGEX):
+// a lowercase letter or digit, then up to 254 lowercase letters, digits, '_'
+// or '-'.
+var orgNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,254}$`)
+
+// validOrgFullName reports whether s matches erchef's org full_name rule,
+// ^\S.{0,1022}$: a non-space first character, then up to 1022 more on one
+// line. It is spelled out because Go's regexp caps a repeat count at 1000.
+// Like erchef (whose regex is compiled without unicode), it counts bytes.
+func validOrgFullName(s string) bool {
+	if s == "" || len(s) > 1023 {
+		return false
+	}
+	switch s[0] {
+	case ' ', '\t', '\n', '\v', '\f', '\r':
+		return false
+	}
+	return !strings.Contains(s[1:], "\n")
+}
 
 func (a *API) registerOrganizationRoutes(mux *recordingMux) {
 	mux.HandleFunc("GET /organizations", a.listOrganizations)
@@ -128,7 +150,20 @@ func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Field 'name' missing")
 		return
 	}
-	fullName, _ := obj["full_name"].(string)
+	if !orgNameRE.MatchString(name) {
+		writeError(w, http.StatusBadRequest, "Field 'name' invalid")
+		return
+	}
+	rawFullName, ok := obj["full_name"]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "Field 'full_name' missing")
+		return
+	}
+	fullName, _ := rawFullName.(string)
+	if !validOrgFullName(fullName) {
+		writeError(w, http.StatusBadRequest, "Field 'full_name' invalid")
+		return
+	}
 
 	priv, err := CreateOrganization(a.store, name, fullName)
 	if errors.Is(err, store.ErrConflict) {
@@ -181,8 +216,20 @@ func (a *API) putOrganization(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if fn, ok := update["full_name"].(string); ok {
-		meta["full_name"] = fn
+	// erchef requires a PUT's name to equal the existing org's name and its
+	// full_name to follow the create rule. Both are optional here, so a
+	// body that only changes full_name keeps working.
+	if n, ok := update["name"]; ok && n != name {
+		writeError(w, http.StatusBadRequest, "Field 'name' invalid")
+		return
+	}
+	if fn, ok := update["full_name"]; ok {
+		s, _ := fn.(string)
+		if !validOrgFullName(s) {
+			writeError(w, http.StatusBadRequest, "Field 'full_name' invalid")
+			return
+		}
+		meta["full_name"] = s
 	}
 	encoded := mustEncode(meta)
 	if err := a.store.Global().Put(orgsColl, name, encoded); err != nil {
