@@ -72,14 +72,20 @@ func TestBaselineRoundTrips(t *testing.T) {
 	}
 }
 
-// The committed baseline is read only by the real-server run; check it parses
-// here too, so a bad edit fails the ordinary test suite instead.
+// The committed baseline is read only by the real-server run; check it here
+// too, so a bad edit fails the ordinary test suite instead.
 func TestCommittedBaselineParses(t *testing.T) {
 	data, err := os.ReadFile("baseline.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := differential.ParseBaseline(data); err != nil {
+	entries, err := differential.ParseBaseline(data)
+	if err != nil {
 		t.Fatal(err)
+	}
+	// In the form a run writes it, so the workflow's diff against a run's
+	// baseline shows only real changes.
+	if want := differential.FormatBaseline(entries); string(data) != string(want) {
+		t.Errorf("baseline.json is not in the form a run writes; replace it with a run's output or rewrite it with FormatBaseline")
 	}
 }

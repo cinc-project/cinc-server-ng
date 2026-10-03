@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -233,5 +234,55 @@ func TestAcceptedDifferenceIsExplained(t *testing.T) {
 	}
 	if !explained {
 		t.Fatal("accepted difference was not reported as known")
+	}
+}
+
+// A real Chef Infra Server indexes asynchronously, so a search issued right
+// after a write can miss it there. A step marked Eventually re-asks the
+// reference until it settles; a candidate that disagrees with the settled
+// answer is still reported.
+func TestEventuallyConsistentStepWaitsForTheReference(t *testing.T) {
+	var stale atomic.Int32
+	stale.Store(2)
+	lagging := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/search/") && stale.Add(-1) >= 0 {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"total":0,"start":0,"rows":[]}`))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	reference := startTarget(t, "reference", lagging)
+	candidate := startTarget(t, "candidate", nil)
+	steps := []differential.Step{
+		{Name: "node create", Method: "POST", Path: "/nodes", Body: `{"name":"lag-node"}`},
+		{Name: "search", Method: "GET", Path: "/search/node?q=name:lag-node", Eventually: true},
+	}
+	// Only the search step is under test; behind a proxy, the reference's
+	// self-URLs differ from its address, which is not what this is about.
+	searchDiffs := func(diffs []differential.Difference) (out []differential.Difference) {
+		for _, d := range diffs {
+			if d.Step == "search" {
+				out = append(out, d)
+			}
+		}
+		return out
+	}
+	diffs, err := differential.Run(context.Background(), steps, reference, candidate, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := searchDiffs(diffs); len(got) != 0 {
+		t.Errorf("a lagging reference was reported as a difference: %v", got)
+	}
+
+	// Without the mark, the same lag is a difference: the retry is what hides it.
+	stale.Store(2)
+	steps[0].Body = `{"name":"lag-node-2"}`
+	steps[1] = differential.Step{Name: "search", Method: "GET", Path: "/search/node?q=name:lag-node-2"}
+	if diffs, _ := differential.Run(context.Background(), steps, reference, candidate, nil); len(searchDiffs(diffs)) == 0 {
+		t.Error("an unmarked step did not report the lagging reference")
 	}
 }

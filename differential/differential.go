@@ -96,6 +96,12 @@ type Step struct {
 	ServerRoot bool
 	// Body is the request payload, if any.
 	Body string
+	// Eventually marks a read the reference answers from an eventually
+	// consistent index (search): while its answer differs from the
+	// candidate's, the reference is asked again, for up to settleTimeout, and
+	// only a difference that outlasts that is reported. The step must be
+	// safe to repeat.
+	Eventually bool
 	// SkipBody compares only the status code. Use it for responses that are
 	// inherently unequal — one that returns a freshly generated private key,
 	// say — where normalizing would amount to deleting the whole payload.
@@ -195,6 +201,26 @@ func (t *Target) do(ctx context.Context, step Step) Observation {
 	return obs
 }
 
+// How long an Eventually step waits for the reference to settle, and how
+// often it re-asks. A real server's search index refreshes about once a
+// second.
+const (
+	settleTimeout  = 15 * time.Second
+	settleInterval = 500 * time.Millisecond
+)
+
+// stepDifferences compares one step's two observations.
+func stepDifferences(step Step, ref, can Observation, refBase, canBase string) []Difference {
+	var diffs []Difference
+	if ref.Status != can.Status {
+		diffs = append(diffs, Difference{Step: step.Name, Field: "status", Reference: ref.Status, Candidate: can.Status})
+	}
+	if step.SkipBody {
+		return diffs
+	}
+	return append(diffs, compare(step.Name, "", Normalize(ref.Body, refBase), Normalize(can.Body, canBase))...)
+}
+
 // Run issues every step against both targets and returns the differences,
 // annotated with a reason where one is accepted.
 //
@@ -214,18 +240,15 @@ func Run(ctx context.Context, steps []Step, reference, candidate *Target, accept
 			return diffs, fmt.Errorf("%s: %s: %w", step.Name, candidate.Name, can.Transport)
 		}
 
-		if ref.Status != can.Status {
-			diffs = append(diffs, annotate(Difference{
-				Step: step.Name, Field: "status",
-				Reference: ref.Status, Candidate: can.Status,
-			}, accepted))
+		found := stepDifferences(step, ref, can, reference.BaseURL, candidate.BaseURL)
+		for deadline := time.Now().Add(settleTimeout); step.Eventually && len(found) > 0 && time.Now().Before(deadline); {
+			time.Sleep(settleInterval)
+			if ref = reference.do(ctx, step); ref.Transport != nil {
+				return diffs, fmt.Errorf("%s: %s: %w", step.Name, reference.Name, ref.Transport)
+			}
+			found = stepDifferences(step, ref, can, reference.BaseURL, candidate.BaseURL)
 		}
-		if step.SkipBody {
-			continue
-		}
-		refBody := Normalize(ref.Body, reference.BaseURL)
-		canBody := Normalize(can.Body, candidate.BaseURL)
-		for _, d := range compare(step.Name, "", refBody, canBody) {
+		for _, d := range found {
 			diffs = append(diffs, annotate(d, accepted))
 		}
 	}
