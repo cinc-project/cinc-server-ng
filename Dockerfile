@@ -1,6 +1,6 @@
 # Build a static cinc-server-ng binary and ship it on distroless.
 # Base images are pinned by digest; Dependabot keeps them current.
-FROM golang:1.26@sha256:0f063af2d465d8dcae54cce04278ada488b96f77b42449c8d071e47d016cc65a AS build
+FROM golang:1.27@sha256:e0174e51e81218523251d85d248a90d24c3d5e81543b4f07a5d66229397db190 AS build
 WORKDIR /src
 ARG VERSION=dev
 ARG COMMIT=none
