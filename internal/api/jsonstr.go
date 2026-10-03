@@ -40,9 +40,10 @@ func appendJSONStringContent(dst []byte, s string) []byte {
 		}
 		c, size := utf8.DecodeRuneInString(s[i:])
 		if c == utf8.RuneError && size == 1 {
-			// Invalid UTF-8 byte → U+FFFD, matching encoding/json.
+			// Invalid UTF-8 byte → a literal U+FFFD, matching encoding/json
+			// (which since Go 1.27 writes the character rather than �).
 			dst = append(dst, s[start:i]...)
-			dst = append(dst, '\\', 'u', 'f', 'f', 'f', 'd')
+			dst = append(dst, "�"...)
 			i += size
 			start = i
 			continue
