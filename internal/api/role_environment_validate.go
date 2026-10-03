@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 )
 
 // erchef validates role and environment bodies (chef_role and
@@ -35,8 +37,8 @@ func validateObjectBody(segment, urlName string, raw []byte) string {
 	if segment != "roles" && segment != "environments" {
 		return ""
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	doc, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		return "invalid JSON body"
 	}
 	if segment == "roles" {

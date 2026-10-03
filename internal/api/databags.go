@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -189,12 +190,7 @@ func (a *API) createDataBagItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var item map[string]any
-	if json.Unmarshal(raw, &item) != nil {
-		writeRaw(w, http.StatusCreated, raw)
-		return
-	}
-	writeJSON(w, http.StatusCreated, withCreateEnvelope(bag, item))
+	writeRaw(w, http.StatusCreated, withCreateEnvelope(bag, raw))
 }
 
 func (a *API) getDataBagItem(w http.ResponseWriter, r *http.Request) {
@@ -265,20 +261,26 @@ func (a *API) deleteDataBagItem(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, http.StatusOK, wrapStoredDataBagItem(bag, item, raw))
 }
 
-// decodeItem reads a data bag item body and returns canonical bytes plus its
-// "id" field.
+// decodeItem reads a data bag item body and returns it in the form erchef
+// stores (chefjson.Normalize) plus its first "id" member.
 func decodeItem(r *http.Request) (raw []byte, id string, err error) {
-	var obj map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
+	raw, err = decodeObjectBody(r)
+	if err != nil {
 		return nil, "", err
 	}
 	// Chef::DataBagItem#to_json nests the item's own fields under raw_data
 	// beside its class metadata; unwrap that form so the item is stored as its
 	// fields, the same as a bare body. An item that merely has a raw_data field
 	// (no Chef::DataBagItem json_class) is kept as is.
-	if inner, ok := obj["raw_data"].(map[string]any); ok && obj["json_class"] == "Chef::DataBagItem" {
-		obj = inner
+	if class, _ := chefjson.String(raw, "json_class"); class == "Chef::DataBagItem" {
+		if tree, err := chefjson.Parse(raw); err == nil {
+			if inner, ok := tree.(*chefjson.Object).Get("raw_data"); ok {
+				if innerObj, ok := inner.(*chefjson.Object); ok {
+					raw = chefjson.Marshal(innerObj)
+				}
+			}
+		}
 	}
-	id, _ = obj["id"].(string)
-	return mustEncode(obj), id, nil
+	id, _ = chefjson.String(raw, "id")
+	return raw, id, nil
 }

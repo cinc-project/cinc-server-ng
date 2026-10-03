@@ -5,6 +5,7 @@
 package search
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 )
@@ -60,12 +61,16 @@ func Flatten(doc map[string]any) map[string][]string {
 	return fields
 }
 
-// scalarString renders a JSON scalar as its searchable string form. JSON
-// numbers decode as float64; integers are rendered without a trailing ".0".
+// scalarString renders a JSON scalar as its searchable string form. A number
+// decoded as its literal (json.Number, as cinc-server-ng's stored documents
+// are) is indexed exactly as stored, matching Chef; one decoded as float64 is
+// rendered without a trailing ".0".
 func scalarString(v any) string {
 	switch t := v.(type) {
 	case string:
 		return t
+	case json.Number:
+		return string(t)
 	case bool:
 		return strconv.FormatBool(t)
 	case float64:

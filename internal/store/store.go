@@ -1,7 +1,8 @@
 // Package store is the data store for cinc-server-ng. All Chef objects live here,
 // namespaced by organization then by collection (e.g. "nodes", "roles") then by
-// key. Values are stored as raw canonical JSON so client payloads round-trip
-// exactly.
+// key. Values are stored as raw JSON in the form a real Chef Infra Server
+// stores them (see internal/chefjson), so documents round-trip as they do
+// through erchef.
 //
 // Store and Org are a thin facade over a pluggable Backend (see backend.go): the
 // facade owns the canonical-JSON/copy semantics and the org-handle ergonomics,

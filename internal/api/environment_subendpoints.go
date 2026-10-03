@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -279,12 +280,11 @@ func (a *API) envCookbookVersions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusPreconditionFailed, "Cannot find cookbook "+name)
 			return
 		}
-		var m map[string]any
-		if json.Unmarshal(raw, &m) != nil {
+		m, err := chefjson.DecodeObject(raw)
+		if err != nil {
 			continue
 		}
-		a.injectFileURLs(m, r, org.Name())
-		solved[name] = m
+		solved[name] = json.RawMessage(a.withFileURLs(raw, r, org.Name()))
 		for dep := range manifestDependencies(m) {
 			queue = append(queue, dep)
 		}

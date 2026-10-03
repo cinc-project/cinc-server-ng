@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -197,17 +198,23 @@ func jsonFiles(dir string) ([]string, error) {
 	return out, nil
 }
 
-// readObject reads and canonicalizes a JSON object file.
+// readObject reads a JSON object file and returns it both decoded (the first
+// of a repeated name winning) and in the form the API handlers store
+// (chefjson.Normalize).
 func readObject(path string) (map[string]any, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
+	raw, err := chefjson.Normalize(bytes.NewReader(data))
+	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return obj, canonicalize(obj), nil
+	obj, err := chefjson.DecodeObject(raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return obj, raw, nil
 }
 
 // objectKey returns the value of nameField, or the filename without its
@@ -220,12 +227,16 @@ func objectKey(obj map[string]any, nameField, path string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-// canonicalize re-encodes obj as compact JSON without HTML escaping, matching
-// how the API handlers persist objects.
+// canonicalize encodes a document built here (a cookbook manifest) in the form
+// the API handlers store.
 func canonicalize(obj map[string]any) []byte {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(obj)
-	return bytes.TrimRight(buf.Bytes(), "\n")
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return nil
+	}
+	raw, err := chefjson.Normalize(bytes.NewReader(b))
+	if err != nil {
+		return b
+	}
+	return raw
 }

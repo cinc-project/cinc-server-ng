@@ -97,3 +97,19 @@ func BenchmarkFlatten(b *testing.B) {
 		Flatten(doc)
 	}
 }
+
+// A number decoded as its literal (json.Number) is indexed as written, which is
+// how Chef's search matches it: a stored 1.0 is found by "1.0" and not by "1",
+// and an integer past 2^53 keeps every digit.
+func TestFlattenIndexesNumberLiterals(t *testing.T) {
+	fields := Flatten(map[string]any{
+		"one":  json.Number("1.0"),
+		"big":  json.Number("12345678901234567890"),
+		"tiny": json.Number("0.000001"),
+	})
+	for key, want := range map[string]string{"one": "1.0", "big": "12345678901234567890", "tiny": "0.000001"} {
+		if got := fields[key]; !slices.Equal(got, []string{want}) {
+			t.Errorf("fields[%q] = %v, want [%s]", key, got, want)
+		}
+	}
+}
