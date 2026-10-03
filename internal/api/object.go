@@ -1,12 +1,11 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -77,22 +76,33 @@ func (a *API) listObjects(segment string) http.HandlerFunc {
 	}
 }
 
-// decodeNamedBody reads the request body as a JSON object and returns the
-// canonical bytes plus the value of its "name" field.
+// decodeNamedBody reads the request body as a JSON object and returns it in
+// the form erchef stores (chefjson.Normalize) plus the value of its first
+// "name" member.
 func decodeNamedBody(r *http.Request) (raw []byte, name string, err error) {
-	var obj map[string]any
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&obj); err != nil {
+	raw, err = decodeObjectBody(r)
+	if err != nil {
 		return nil, "", err
 	}
-	n, _ := obj["name"].(string)
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(obj); err != nil {
-		return nil, "", err
+	name, _ = chefjson.String(raw, "name")
+	return raw, name, nil
+}
+
+// errNotObject reports a request body that is valid JSON but not an object.
+var errNotObject = errors.New("request body is not a JSON object")
+
+// decodeObjectBody reads the request body as a JSON object in the form erchef
+// stores: the client's member order, exact integers, and erchef's number and
+// string encoding (see chefjson).
+func decodeObjectBody(r *http.Request) ([]byte, error) {
+	raw, err := chefjson.Normalize(r.Body)
+	if err != nil {
+		return nil, err
 	}
-	return bytes.TrimRight(buf.Bytes(), "\n"), n, nil
+	if raw[0] != '{' {
+		return nil, errNotObject
+	}
+	return raw, nil
 }
 
 func (a *API) createObject(segment string) http.HandlerFunc {

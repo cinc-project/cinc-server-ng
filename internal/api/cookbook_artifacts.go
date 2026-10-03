@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -91,13 +92,7 @@ func (a *API) getArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook artifact named "+name+" with identifier "+ident)
 		return
 	}
-	var m map[string]any
-	if json.Unmarshal(raw, &m) != nil {
-		writeRaw(w, http.StatusOK, raw)
-		return
-	}
-	a.injectFileURLs(m, r, org.Name())
-	writeJSON(w, http.StatusOK, m)
+	writeRaw(w, http.StatusOK, a.withFileURLs(raw, r, org.Name()))
 }
 
 func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
@@ -118,8 +113,13 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var m map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+	raw, err := decodeManifestBody(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	m, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -134,13 +134,12 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := org.Put("cookbook_artifacts", cookbookKey(name, ident), mustEncode(m)); err != nil {
+	if err := org.Put("cookbook_artifacts", cookbookKey(name, ident), raw); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	a.injectFileURLs(m, r, org.Name())
-	writeJSON(w, http.StatusCreated, m)
+	writeRaw(w, http.StatusCreated, a.withFileURLs(raw, r, org.Name()))
 }
 
 func (a *API) deleteArtifactVersion(w http.ResponseWriter, r *http.Request) {
@@ -168,8 +167,7 @@ func (a *API) deleteArtifactVersion(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		a.injectFileURLs(m, r, org.Name())
-		writeJSON(w, http.StatusOK, m)
+		writeRaw(w, http.StatusOK, a.withFileURLs(raw, r, org.Name()))
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)

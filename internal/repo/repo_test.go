@@ -162,3 +162,32 @@ func TestLoadNameFallsBackToFilename(t *testing.T) {
 		t.Fatal("node keyed by filename not loaded")
 	}
 }
+
+// A document loaded from disk is stored exactly as the API would store the
+// same body, so it reads back as a real Chef Infra Server returns it: member
+// order kept, integers exact, floats still floats, and the first of a repeated
+// name naming the object.
+func TestLoadStoresDocumentsAsTheAPIDoes(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{
+		"nodes/web.json":        "{\n  \"normal\": {\"z\": 12345678901234567890, \"a\": 1.0, \"m\": 1e3},\n  \"name\": \"web\",\n  \"name\": \"other\"\n}\n",
+		"data_bags/bag/i1.json": `{"zeta":1,"id":"i1","s":"café\/"}`,
+	})
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	if _, err := Load(org, dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ coll, key, want string }{
+		{"nodes", "web", `{"normal":{"z":12345678901234567890,"a":1.0,"m":1000.0},"name":"web","name":"other"}`},
+		{"databag_items:bag", "i1", `{"zeta":1,"id":"i1","s":"café/"}`},
+	} {
+		raw, ok, err := org.Get(c.coll, c.key)
+		if err != nil || !ok {
+			t.Fatalf("%s/%s not loaded (%v)", c.coll, c.key, err)
+		}
+		if string(raw) != c.want {
+			t.Errorf("%s/%s\n got %s\nwant %s", c.coll, c.key, raw, c.want)
+		}
+	}
+}

@@ -1,6 +1,10 @@
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
+)
 
 // Chef's object envelopes.
 //
@@ -38,40 +42,44 @@ func dataBagItemName(bag, id string) string {
 
 // withCreateEnvelope returns a created data bag item as Chef returns it: the
 // item's own fields, plus the two that say what it is.
-func withCreateEnvelope(bag string, item map[string]any) map[string]any {
-	out := make(map[string]any, len(item)+2)
-	for k, v := range item {
-		out[k] = v
+func withCreateEnvelope(bag string, item []byte) []byte {
+	tree, err := chefjson.Parse(item)
+	if err != nil {
+		return item
 	}
-	out["chef_type"] = chefTypeDataBagItem
-	out["data_bag"] = bag
-	return out
+	obj, ok := tree.(*chefjson.Object)
+	if !ok {
+		return item
+	}
+	obj.Set("chef_type", chefTypeDataBagItem)
+	obj.Set("data_bag", bag)
+	return chefjson.Marshal(obj)
 }
 
-// wrapDataBagItem returns the fully wrapped Chef::DataBagItem form, with the
-// item's own fields moved under raw_data.
-func wrapDataBagItem(bag, id string, item map[string]any) map[string]any {
-	if actualID, ok := item["id"].(string); ok && actualID != "" {
-		id = actualID
-	}
-	return map[string]any{
-		"name":       dataBagItemName(bag, id),
-		"json_class": jsonClassDataBagItem,
-		"chef_type":  chefTypeDataBagItem,
-		"data_bag":   bag,
-		"raw_data":   item,
-	}
-}
-
-// wrapStoredDataBagItem wraps a stored item, returning the original bytes
-// unchanged if they are not a JSON object — a caller should never turn a
-// response it cannot parse into a malformed envelope.
+// wrapStoredDataBagItem returns a stored item in the fully wrapped
+// Chef::DataBagItem form, with the item's own fields, in their stored order,
+// under raw_data. It returns the original bytes unchanged if they are not a
+// JSON object: a caller should never turn a response it cannot parse into a
+// malformed envelope.
 func wrapStoredDataBagItem(bag, id string, raw []byte) []byte {
-	var item map[string]any
-	if json.Unmarshal(raw, &item) != nil {
+	tree, err := chefjson.Parse(raw)
+	if err != nil {
 		return raw
 	}
-	return mustEncode(wrapDataBagItem(bag, id, item))
+	item, ok := tree.(*chefjson.Object)
+	if !ok {
+		return raw
+	}
+	if actualID, ok := chefjson.String(raw, "id"); ok && actualID != "" {
+		id = actualID
+	}
+	return chefjson.Marshal(&chefjson.Object{Members: []chefjson.Member{
+		{Name: "chef_type", Value: chefTypeDataBagItem},
+		{Name: "data_bag", Value: bag},
+		{Name: "json_class", Value: jsonClassDataBagItem},
+		{Name: "name", Value: dataBagItemName(bag, id)},
+		{Name: "raw_data", Value: item},
+	}})
 }
 
 // withClientEnvelope adds the fields Chef reports on an API client.

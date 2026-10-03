@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -434,16 +435,21 @@ func (a *API) deleteGroupPolicy(w http.ResponseWriter, r *http.Request) {
 
 // decodeRevision reads a policy revision body for the policy named in the
 // request path, validates it as erchef does (validatePolicyRevision), and
-// returns canonical bytes plus its "revision_id". The error's text is the
+// returns it in the form erchef stores (chefjson.Normalize) plus its
+// "revision_id". The error's text is the
 // message to answer 400 with.
 func decodeRevision(r *http.Request, policy string) (raw []byte, revID string, err error) {
-	var obj map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
+	raw, err = decodeObjectBody(r)
+	if err != nil {
+		return nil, "", errors.New("invalid JSON body")
+	}
+	obj, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		return nil, "", errors.New("invalid JSON body")
 	}
 	if msg := validatePolicyRevision(policy, obj); msg != "" {
 		return nil, "", errors.New(msg)
 	}
 	revID = obj["revision_id"].(string)
-	return mustEncode(obj), revID, nil
+	return raw, revID, nil
 }

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/search"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -84,8 +85,8 @@ func (a *API) searchDoc(coll, id string, raw []byte, mergeAttrs bool) (merged ma
 		}
 	}
 
-	var doc map[string]any
-	if json.Unmarshal(raw, &doc) != nil {
+	doc, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		return nil, nil, false
 	}
 	searchable := doc

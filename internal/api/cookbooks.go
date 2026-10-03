@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"regexp"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -438,13 +440,7 @@ func (a *API) getCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		writeRaw(w, http.StatusOK, raw)
-		return
-	}
-	a.injectFileURLs(m, r, org.Name())
-	writeJSON(w, http.StatusOK, m)
+	writeRaw(w, http.StatusOK, a.withFileURLs(raw, r, org.Name()))
 }
 
 func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
@@ -455,8 +451,13 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	version := r.PathValue("version")
 
-	var m map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+	raw, err := decodeManifestBody(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	m, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -483,7 +484,7 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := org.Put("cookbooks", cookbookKey(name, version), mustEncode(m)); err != nil {
+	if err := org.Put("cookbooks", cookbookKey(name, version), raw); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -505,8 +506,7 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	if existed {
 		status = http.StatusOK
 	}
-	a.injectFileURLs(m, r, org.Name())
-	writeJSON(w, status, m)
+	writeRaw(w, status, a.withFileURLs(raw, r, org.Name()))
 }
 
 // cookbookNameRE is erchef's cookbook_name rule (chef_regex NAME_REGEX):
@@ -578,8 +578,7 @@ func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		a.injectFileURLs(m, r, org.Name())
-		writeJSON(w, http.StatusOK, m)
+		writeRaw(w, http.StatusOK, a.withFileURLs(raw, r, org.Name()))
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
@@ -752,12 +751,57 @@ func gcOrphanedBlobs(org *store.Org, candidates []string) error {
 	return nil
 }
 
-func (a *API) injectFileURLs(m map[string]any, r *http.Request, org string) {
-	walkFileEntries(m, func(obj map[string]any) {
-		if sum, ok := obj["checksum"].(string); ok {
-			obj["url"] = a.fileStoreURL(r, org, sum, auth.FileStoreGet)
+// errRepeatedNames reports a manifest with a repeated member name.
+var errRepeatedNames = errors.New("manifest repeats a member name")
+
+// decodeManifestBody reads a cookbook or artifact manifest. Unlike other
+// documents, a manifest may not repeat a member name anywhere: the server acts
+// on its checksums itself (the upload check, signed file URLs, blob garbage
+// collection), and with a repeat it would read one member while a Ruby client
+// reads another, so a checksum that was never uploaded could get through.
+// Ruby's Hash cannot hold a repeated key, so no Chef tooling produces one.
+func decodeManifestBody(r *http.Request) ([]byte, error) {
+	raw, err := decodeObjectBody(r)
+	if err != nil {
+		return nil, err
+	}
+	if chefjson.HasRepeatedNames(raw) {
+		return nil, errRepeatedNames
+	}
+	return raw, nil
+}
+
+func (a *API) withFileURLs(raw []byte, r *http.Request, org string) []byte {
+	tree, err := chefjson.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	walkFileObjects(tree, func(obj *chefjson.Object) {
+		if sum, ok := obj.Get("checksum"); ok {
+			if sum, ok := sum.(string); ok {
+				obj.Set("url", a.fileStoreURL(r, org, sum, auth.FileStoreGet))
+			}
 		}
 	})
+	return chefjson.Marshal(tree)
+}
+
+// walkFileObjects is walkFileEntries over a chefjson tree: it calls fn for
+// every object that carries a checksum, at any depth.
+func walkFileObjects(v any, fn func(obj *chefjson.Object)) {
+	switch t := v.(type) {
+	case *chefjson.Object:
+		if _, ok := t.Get("checksum"); ok {
+			fn(t)
+		}
+		for _, m := range t.Members {
+			walkFileObjects(m.Value, fn)
+		}
+	case []any:
+		for _, e := range t {
+			walkFileObjects(e, fn)
+		}
+	}
 }
 
 // manifestRecipes returns the run-list recipe names for a cookbook manifest:

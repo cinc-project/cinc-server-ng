@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/api"
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/repo"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -258,23 +259,23 @@ func jsonFiles(dir string) ([]string, error) {
 	return out, nil
 }
 
-// readObject reads a JSON object file and returns it both decoded and
-// canonicalized (compact, no HTML escaping) to match how the API handlers
-// persist objects.
+// readObject reads a JSON object file and returns it both decoded (the first
+// of a repeated name winning) and in the form the API handlers store
+// (chefjson.Normalize).
 func readObject(path string) (map[string]any, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
+	raw, err := chefjson.Normalize(bytes.NewReader(data))
+	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(obj)
-	return obj, bytes.TrimRight(buf.Bytes(), "\n"), nil
+	obj, err := chefjson.DecodeObject(raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return obj, raw, nil
 }
 
 // objectKey returns the value of nameField, or the filename without its

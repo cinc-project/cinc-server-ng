@@ -1,9 +1,9 @@
 package api
 
 import (
-	"encoding/json"
 	"sync"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/search"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -52,8 +52,8 @@ func newCollIndex(merge bool) *collIndex {
 // decodable JSON is dropped from the index, matching what the scanning path
 // does with it.
 func (c *collIndex) putRaw(id string, raw []byte) {
-	var doc map[string]any
-	if json.Unmarshal(raw, &doc) != nil {
+	doc, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		c.remove(id)
 		return
 	}
