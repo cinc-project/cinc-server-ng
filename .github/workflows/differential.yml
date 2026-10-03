@@ -8,8 +8,15 @@ name: Differential
 # the only thing that checks it against the real implementation, so it is the
 # only thing that can find a response we have confidently got wrong.
 #
-# It installs and reconfigures a full Chef Infra Server, which takes several
-# minutes and a lot of the runner, so it does not run per-PR.
+# It gates every pull request. Installing and reconfiguring the reference server
+# takes about three minutes and the comparison seconds, which is comparable to
+# the knife conformance job. A run fails on any unexplained difference that
+# differential/baseline.json does not already record (see baseline.go); the
+# weekly run also catches a change on the reference side.
+#
+# The reference version is pinned, so an upstream release cannot turn a pull
+# request red without a commit. Bump CINC_SERVER_VERSION deliberately and
+# update the baseline in the same change.
 #
 # Earlier runs could not reach the reference server's API: every path except
 # /_status returned nginx's static landing page. Part of that investigation was
@@ -20,9 +27,16 @@ name: Differential
 # never actually a test of that.
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+
+concurrency:
+  group: differential-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -35,6 +49,7 @@ jobs:
     env:
       ORG: diffs
       DIFF_USER: diffuser
+      CINC_SERVER_VERSION: 15.10.125
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,7 +62,7 @@ jobs:
 
       - name: Install Cinc Server
         run: |
-          curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable
+          curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable -v "$CINC_SERVER_VERSION"
           # Cinc Server reads its configuration from /etc/cinc-project, not the
           # /etc/opscode path Chef Infra Server uses. Show what the package laid
           # down before adding to it, so a future change of layout is visible
@@ -180,7 +195,41 @@ jobs:
           DIFF_CANDIDATE_URL: http://127.0.0.1:8889/organizations/diffs
           DIFF_KEY: /tmp/diff/user.pem
           DIFF_REFERENCE_CA: /tmp/diff/ca.pem
+          DIFF_BASELINE_OUT: /tmp/diff/baseline.json
         run: go test -tags differential ./differential/ -v -timeout 30m
+
+      - name: Baseline for this run
+        if: always()
+        run: |
+          # What differential/baseline.json would need to be for this run to
+          # pass. Commit it only for differences that are known and untriaged;
+          # a new one is usually a regression to fix instead.
+          if [ ! -s /tmp/diff/baseline.json ]; then exit 0; fi
+          if diff -u differential/baseline.json /tmp/diff/baseline.json > /tmp/diff/baseline.diff; then
+            echo "The run matches differential/baseline.json exactly."
+            exit 0
+          fi
+          cat /tmp/diff/baseline.diff
+          echo "::group::Full baseline for this run"
+          cat /tmp/diff/baseline.json
+          echo "::endgroup::"
+          {
+            echo "### differential/baseline.json for this run"
+            echo
+            echo '<details><summary>Changes from the committed baseline</summary>'
+            echo
+            echo '```diff'
+            cat /tmp/diff/baseline.diff
+            echo '```'
+            echo '</details>'
+            echo
+            echo '<details><summary>Full file</summary>'
+            echo
+            echo '```json'
+            cat /tmp/diff/baseline.json
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: cinc-server-ng log
         if: always()

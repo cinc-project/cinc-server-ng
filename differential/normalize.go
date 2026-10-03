@@ -78,8 +78,8 @@ func normalize(v any, key, origin string) any {
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(t))
-		for k, val := range t {
-			out[k] = normalize(val, k, origin)
+		for _, k := range sortedKeys(t, nil) {
+			out[normalizeKey(k, out)] = normalize(t[k], k, origin)
 		}
 		return out
 	case []any:
@@ -108,6 +108,30 @@ func normalize(v any, key, origin string) any {
 var unorderedFields = map[string]bool{
 	"actors": true, "groups": true, "users": true, "clients": true,
 	"containers": true, "recipes": true,
+}
+
+// normalizeKey replaces a key that is an identifier minted by the server (a
+// group named by its authz id, for instance), which would otherwise make the
+// field path itself differ between runs. Keys are visited in sorted order, so
+// several such keys number deterministically: "<guid>", "<guid>#2", ...
+func normalizeKey(k string, taken map[string]any) string {
+	if !guidPattern.MatchString(k) {
+		return k
+	}
+	k = guidPattern.ReplaceAllString(k, placeholderGUID)
+	if !hasKey(taken, k) {
+		return k
+	}
+	for n := 2; ; n++ {
+		if c := fmt.Sprintf("%s#%d", k, n); !hasKey(taken, c) {
+			return c
+		}
+	}
+}
+
+func hasKey(m map[string]any, k string) bool {
+	_, ok := m[k]
+	return ok
 }
 
 func normalizeString(s, key, origin string) string {
