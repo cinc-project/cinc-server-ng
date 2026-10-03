@@ -243,3 +243,42 @@ func TestSearchMatchesStoredNumbersLikeErchef(t *testing.T) {
 		t.Errorf("partial search = %d: %s", resp.StatusCode, body)
 	}
 }
+
+// A manifest names the files the server signs download URLs for and keeps
+// blobs alive for, so it must say one thing: with a repeated name, the
+// server's checks would read one member and a Ruby client (last member wins)
+// another, letting an unuploaded checksum through the upload check.
+func TestManifestWithRepeatedNamesIsRejected(t *testing.T) {
+	srv, st := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := md5hex("package 'x'\n")
+	if err := org.PutBlob(sum, []byte("package 'x'\n")); err != nil {
+		t.Fatal(err)
+	}
+	missing := md5hex("never uploaded")
+	file := func(s string) string {
+		return `{"path":"recipes/default.rb","name":"default.rb","checksum":"` + s + `","specificity":"default"}`
+	}
+	head := `{"name":"qcb-1.2.3","cookbook_name":"qcb","version":"1.2.3","metadata":{"name":"qcb","version":"1.2.3"},`
+
+	// Baseline: the same manifest without a repeat is accepted.
+	if resp, body := do(t, "PUT", base+"/cookbooks/qcb/1.2.3", head+`"recipes":[`+file(sum)+`]}`); resp.StatusCode != 201 {
+		t.Fatalf("baseline PUT = %d: %s", resp.StatusCode, body)
+	}
+	for name, manifest := range map[string]string{
+		"repeated segment":  head + `"recipes":[` + file(sum) + `],"recipes":[` + file(missing) + `]}`,
+		"repeated checksum": head + `"recipes":[{"path":"recipes/default.rb","checksum":"` + sum + `","checksum":"` + missing + `"}]}`,
+	} {
+		if resp, body := do(t, "PUT", base+"/cookbooks/qcb/1.2.4", manifest); resp.StatusCode != 400 {
+			t.Errorf("cookbook with %s = %d: %s", name, resp.StatusCode, body)
+		}
+		ident := md5hex(name) + "00000000"
+		if resp, body := do(t, "PUT", base+"/cookbook_artifacts/qcb/"+ident, manifest); resp.StatusCode != 400 {
+			t.Errorf("artifact with %s = %d: %s", name, resp.StatusCode, body)
+		}
+	}
+}

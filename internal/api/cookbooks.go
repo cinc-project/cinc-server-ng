@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"regexp"
@@ -450,7 +451,7 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	version := r.PathValue("version")
 
-	raw, err := decodeObjectBody(r)
+	raw, err := decodeManifestBody(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -748,6 +749,26 @@ func gcOrphanedBlobs(org *store.Org, candidates []string) error {
 		}
 	}
 	return nil
+}
+
+// errRepeatedNames reports a manifest with a repeated member name.
+var errRepeatedNames = errors.New("manifest repeats a member name")
+
+// decodeManifestBody reads a cookbook or artifact manifest. Unlike other
+// documents, a manifest may not repeat a member name anywhere: the server acts
+// on its checksums itself (the upload check, signed file URLs, blob garbage
+// collection), and with a repeat it would read one member while a Ruby client
+// reads another, so a checksum that was never uploaded could get through.
+// Ruby's Hash cannot hold a repeated key, so no Chef tooling produces one.
+func decodeManifestBody(r *http.Request) ([]byte, error) {
+	raw, err := decodeObjectBody(r)
+	if err != nil {
+		return nil, err
+	}
+	if chefjson.HasRepeatedNames(raw) {
+		return nil, errRepeatedNames
+	}
+	return raw, nil
 }
 
 func (a *API) withFileURLs(raw []byte, r *http.Request, org string) []byte {

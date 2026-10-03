@@ -113,7 +113,7 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	raw, err := decodeObjectBody(r)
+	raw, err := decodeManifestBody(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return

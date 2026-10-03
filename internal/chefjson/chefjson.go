@@ -150,6 +150,15 @@ func String(doc []byte, name string) (string, bool) {
 	return "", false
 }
 
+// HasRepeatedNames reports whether any object in doc, at any depth, has two
+// members with the same name. Normalize keeps such repeats, as erchef does;
+// a caller that acts on a document's contents itself (rather than storing it
+// for a client to read) can use this to refuse a document that says two
+// things, since it would read one member and a Ruby client the other.
+func HasRepeatedNames(doc []byte) bool {
+	return !jsontext.Value(doc).IsValid(jsontext.AllowDuplicateNames(false))
+}
+
 // DecodeObject decodes the JSON object doc for reading: the first member of a
 // repeated name wins, as it does in erchef, and numbers are kept as their
 // literals so no precision is lost. Use Parse to edit a document instead,

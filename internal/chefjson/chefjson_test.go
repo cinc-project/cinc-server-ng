@@ -289,3 +289,17 @@ func sameValue(a, b any) bool {
 		return a == b
 	}
 }
+
+func TestHasRepeatedNames(t *testing.T) {
+	for doc, want := range map[string]bool{
+		`{"a":1,"b":{"a":1}}`:       false,
+		`{"a":1,"a":2}`:             true,
+		`{"x":[{"c":1,"c":1}]}`:     true,
+		`{"x":{"y":{"z":1,"z":2}}}`: true,
+		`[{"a":1},{"a":1}]`:         false,
+	} {
+		if got := HasRepeatedNames([]byte(doc)); got != want {
+			t.Errorf("HasRepeatedNames(%s) = %v, want %v", doc, got, want)
+		}
+	}
+}
