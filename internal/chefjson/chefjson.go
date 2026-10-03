@@ -425,7 +425,7 @@ func appendNumber[S ~[]byte | ~string](dst []byte, lit S) ([]byte, error) {
 		return append(dst, lit...), nil
 	}
 	f, err := strconv.ParseFloat(string(lit), 64)
-	if err != nil {
+	if err != nil && !(f == 0 && errors.Is(err, strconv.ErrRange)) {
 		return nil, fmt.Errorf("chefjson: number %s is out of range", lit)
 	}
 	return appendFloat(dst, f), nil
