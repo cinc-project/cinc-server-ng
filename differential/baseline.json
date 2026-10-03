@@ -336,6 +336,18 @@
     "candidate": "Cannot find roles diff-absent"
   },
   {
+    "step": "search nodes",
+    "field": "rows.length",
+    "reference": "0",
+    "candidate": "1"
+  },
+  {
+    "step": "search nodes",
+    "field": "total",
+    "reference": "0",
+    "candidate": "1"
+  },
+  {
     "step": "unknown route",
     "field": "(body)",
     "reference": "<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n  <meta http-equiv=\"X-UA-Compatible\" content=\"IE=EmulateIE7\" />\n  <title>Cinc - 404 Not Found</title>\n  <link media=\"all\" rel=\"stylesheet\" type=\"text/css\" href=\"/css/all.css\" />\n  <!--[if lt IE 7]><link rel=\"stylesheet\" type=\"text/css\" href=\"/css/lt7.css\" /><![endif]-->\n</head>\n<body>\n  <div class=\"header-block\">\n    <div id=\"header\">\n      <strong class=\"logo\"><a href=\"https://cinc.sh\">Cinc</a></strong>\n    </div>\n  </div>\n  <div id=\"wrapper\">\n    <div id=\"main\">\n      <div class=\"mybox\">\n        <div id=\"content\">\n          <h1>404 - Not Found</h1>\n          <p>Sorry, I can't find what you are looking for.</p>\n        </div>\n      </div>\n    </div>\n  </div>\n  <div class=\"footer-block\">\n    <div id=\"footer\">\n      <div class=\"mybox\">\n      </div>\n      <div class=\"footer-bottom\">\n        <span>Cinc Project based on Chef Infra Server &copy; 2010&thinsp;&ndash;&thinsp;2021 Chef Software, Inc. All Rights Reserved</span>\n      </div>\n    </div>\n  </div>\n</body>\n</html>\n",
