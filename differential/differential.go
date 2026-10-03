@@ -22,7 +22,6 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 )
 
 // chefClientVersion is announced on every request, as a real client does.
@@ -129,7 +129,7 @@ type Difference struct {
 }
 
 func (d Difference) String() string {
-	s := fmt.Sprintf("%s: %s\n    reference: %v\n    candidate: %v", d.Step, d.Field, d.Reference, d.Candidate)
+	s := fmt.Sprintf("%s: %s\n    reference: %s\n    candidate: %s", d.Step, d.Field, render(d.Reference), render(d.Candidate))
 	if d.Reason != "" {
 		s += "\n    accepted: " + d.Reason
 	}
@@ -190,8 +190,11 @@ func (t *Target) do(ctx context.Context, step Step) Observation {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return obs
 	}
-	var decoded any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+	// Decode to what the client received, not to Go values: member order,
+	// repeated names and each number's written form are all kept, so the
+	// comparison can see them (chefjson.Parse).
+	decoded, err := chefjson.Parse(raw)
+	if err != nil {
 		// A non-JSON body is itself a comparable fact; keep it as a string so a
 		// difference in content type shows up rather than being swallowed.
 		obs.Body = string(raw)

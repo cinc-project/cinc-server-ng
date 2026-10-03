@@ -59,7 +59,7 @@ func TestBaselineRoundTrips(t *testing.T) {
 	}
 	want := []differential.BaselineEntry{
 		{Step: "a", Field: "status", Reference: "201", Candidate: "200"},
-		{Step: "b", Field: "x", Reference: "[y]", Candidate: "<nil>"},
+		{Step: "b", Field: "x", Reference: `["y"]`, Candidate: "null"},
 	}
 	if !reflect.DeepEqual(entries, want) {
 		t.Errorf("round trip = %v, want %v", entries, want)
