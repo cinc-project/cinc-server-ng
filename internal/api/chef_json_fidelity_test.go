@@ -282,3 +282,43 @@ func TestManifestWithRepeatedNamesIsRejected(t *testing.T) {
 		}
 	}
 }
+
+// A stored document can repeat a name, as in erchef, so everything that reads
+// one back must take the first member, as validation and naming did. Reading
+// the last instead lets a document be validated as one thing and used as
+// another.
+func TestStoredRepeatsAreReadFirstMemberWins(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+
+	// Validated on its first cookbook_versions; reading the last (a string)
+	// would fail every request for the environment's cookbooks.
+	if resp, body := do(t, "POST", base+"/environments",
+		`{"name":"e1","cookbook_versions":{"apache":">= 1.0.0"},"cookbook_versions":"x"}`); resp.StatusCode != 201 {
+		t.Fatalf("create environment = %d: %s", resp.StatusCode, body)
+	}
+	if resp, body := do(t, "GET", base+"/environments/e1/cookbooks", ""); resp.StatusCode != 200 {
+		t.Errorf("environment cookbooks = %d: %s", resp.StatusCode, body)
+	}
+
+	// The node is in the environment its first chef_environment names, which is
+	// also where search puts it.
+	do(t, "POST", base+"/environments", `{"name":"e2"}`)
+	do(t, "POST", base+"/nodes", `{"name":"n1","chef_environment":"e1","chef_environment":"e2"}`)
+	for env, want := range map[string]bool{"e1": true, "e2": false} {
+		_, body := do(t, "GET", base+"/environments/"+env+"/nodes", "")
+		if got := strings.Contains(body, `"n1"`); got != want {
+			t.Errorf("node listed in %s = %v, want %v: %s", env, got, want, body)
+		}
+	}
+
+	do(t, "POST", base+"/roles", `{"name":"r1","run_list":["recipe[first]"],"run_list":["recipe[second]"]}`)
+	if _, body := do(t, "GET", base+"/roles/r1/environments/_default", ""); !strings.Contains(body, "recipe[first]") {
+		t.Errorf("role run list = %s, want the first run_list", body)
+	}
+
+	if resp, body := do(t, "POST", base+"/data", `{"name":"bag1","name":"bag2"}`); resp.StatusCode != 201 ||
+		!strings.Contains(body, `/data/bag1"`) {
+		t.Errorf("data bag with repeated name = %d: %s", resp.StatusCode, body)
+	}
+}

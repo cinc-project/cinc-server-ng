@@ -59,12 +59,12 @@ func (a *API) createDataBag(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	var obj map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
+	body, err := decodeObjectBody(r)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	name, _ := obj["name"].(string)
+	name, _ := chefjson.String(body, "name")
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "Field 'name' missing")
 		return

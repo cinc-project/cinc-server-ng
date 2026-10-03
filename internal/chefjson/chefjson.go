@@ -159,6 +159,44 @@ func HasRepeatedNames(doc []byte) bool {
 	return !jsontext.Value(doc).IsValid(jsontext.AllowDuplicateNames(false))
 }
 
+// Unmarshal is json.Unmarshal with erchef's reading of a repeated name: the
+// first member wins, at every depth, where encoding/json would take the last.
+// Use it to read a stored document into a Go value.
+func Unmarshal(doc []byte, v any) error {
+	if HasRepeatedNames(doc) {
+		tree, err := Parse(doc)
+		if err != nil {
+			return err
+		}
+		doc = Marshal(firstMembers(tree))
+	}
+	return json.Unmarshal(doc, v)
+}
+
+// firstMembers drops every member of every object in the tree that repeats an
+// earlier member's name.
+func firstMembers(v any) any {
+	switch t := v.(type) {
+	case *Object:
+		seen := make(map[string]bool, len(t.Members))
+		out := &Object{Members: make([]Member, 0, len(t.Members))}
+		for _, m := range t.Members {
+			if !seen[m.Name] {
+				seen[m.Name] = true
+				out.Members = append(out.Members, Member{Name: m.Name, Value: firstMembers(m.Value)})
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = firstMembers(e)
+		}
+		return out
+	}
+	return v
+}
+
 // DecodeObject decodes the JSON object doc for reading: the first member of a
 // repeated name wins, as it does in erchef, and numbers are kept as their
 // literals so no precision is lost. Use Parse to edit a document instead,

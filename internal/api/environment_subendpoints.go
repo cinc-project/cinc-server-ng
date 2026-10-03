@@ -52,7 +52,7 @@ func envConstraints(org *store.Org, env string) (map[string]string, bool, error)
 	var doc struct {
 		CookbookVersions map[string]string `json:"cookbook_versions"`
 	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	if err := chefjson.Unmarshal(raw, &doc); err != nil {
 		return nil, false, err
 	}
 	return doc.CookbookVersions, true, nil
@@ -197,7 +197,7 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 		var node struct {
 			ChefEnvironment string `json:"chef_environment"`
 		}
-		if err := json.Unmarshal(raw, &node); err != nil {
+		if err := chefjson.Unmarshal(raw, &node); err != nil {
 			decodeErr = err
 			return false
 		}
@@ -356,8 +356,8 @@ func loadRole(w http.ResponseWriter, org *store.Org, name string) (map[string]an
 		writeError(w, http.StatusNotFound, "Cannot find role "+name)
 		return nil, false
 	}
-	var role map[string]any
-	if json.Unmarshal(raw, &role) != nil {
+	role, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		return nil, false
 	}
 	return role, true

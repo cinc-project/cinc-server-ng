@@ -303,3 +303,19 @@ func TestHasRepeatedNames(t *testing.T) {
 		}
 	}
 }
+
+func TestUnmarshalIsFirstMemberWins(t *testing.T) {
+	var v struct {
+		Env  string            `json:"chef_environment"`
+		Vers map[string]string `json:"cookbook_versions"`
+		List []map[string]int  `json:"list"`
+	}
+	doc := `{"chef_environment":"a","cookbook_versions":{"x":"= 1.0.0","x":"= 2.0.0"},"chef_environment":"b",` +
+		`"list":[{"k":1,"k":2}],"cookbook_versions":"not an object"}`
+	if err := Unmarshal([]byte(doc), &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Env != "a" || v.Vers["x"] != "= 1.0.0" || v.List[0]["k"] != 1 {
+		t.Errorf("Unmarshal = %+v, want the first of every repeat", v)
+	}
+}
