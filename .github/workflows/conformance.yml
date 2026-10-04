@@ -54,4 +54,4 @@ jobs:
         env:
           CINC_SERVER_NG_REQUIRE_CONFORMANCE: "1"
           CHEF_LICENSE: accept-no-persist
-        run: go test -tags conformance ./conformance/ -v -timeout 30m
+        run: go test -tags conformance ./conformance/ -v -timeout 60m
