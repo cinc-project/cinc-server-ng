@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +90,48 @@ func TestDeletedUsersGrantsAreNotInherited(t *testing.T) {
 	key = addToOrg("dave")
 	if code := statusOf(t, signedAs(t, "dave", key, "GET", base+"/nodes/secret", "")); code != 403 {
 		t.Fatalf("a new user named dave read the node the deleted dave was granted = %d, want 403", code)
+	}
+}
+
+// A user's own ACL lives outside any org, and can name another user. Deleting
+// that other user must take the entry with it there too. (Today a user's ACL
+// does not gate reads of the user record, so the entry grants nothing yet;
+// the test checks the reference is gone rather than an effect.)
+func TestDeletedUserLeavesOtherUsersACLs(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}, EnforceACL: true})
+	users := srv.URL() + "/users"
+	createUserKey(t, srv, "yan")
+	createUserKey(t, srv, "xia")
+
+	if code := statusOf(t, signed(t, srv, "PUT", users+"/yan/_acl/read",
+		`{"read":{"actors":["xia","yan","pivotal"],"groups":[]}}`)); code != 200 {
+		t.Fatalf("grant xia read on yan = %d", code)
+	}
+	readActors := func() string {
+		t.Helper()
+		resp, err := http.DefaultClient.Do(signed(t, srv, "GET", users+"/yan/_acl", ""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var acl struct {
+			Read struct {
+				Actors []string `json:"actors"`
+			} `json:"read"`
+		}
+		if err := json.Unmarshal(raw, &acl); err != nil {
+			t.Fatalf("read yan's ACL: %v: %s", err, raw)
+		}
+		return strings.Join(acl.Read.Actors, ",")
+	}
+	if got := readActors(); !strings.Contains(got, "xia") {
+		t.Fatalf("baseline: yan's read ACL = %s, want xia in it", got)
+	}
+	if code := statusOf(t, signed(t, srv, "DELETE", users+"/xia", "")); code != 200 {
+		t.Fatalf("delete xia = %d", code)
+	}
+	if got := readActors(); strings.Contains(got, "xia") {
+		t.Errorf("yan's read ACL still names the deleted xia: %s", got)
 	}
 }

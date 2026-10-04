@@ -540,10 +540,15 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 
 // removeUserFromOrgs drops a deleted global user from every organization: its
 // membership, every group that names it (document and incremental rows), any
-// invitation pending for it, and every ACL entry naming it. (Dissociating a
+// invitation pending for it, and every ACL entry naming it, there and in the
+// global scope where users' own ACLs live. (Dissociating a
 // user from one org keeps its ACL entries, as Chef does: the actor still
 // exists, and is the same actor if it is invited back.)
 func (a *API) removeUserFromOrgs(user string) error {
+	// Users' own ACLs live in the global scope and can name other users.
+	if err := removeFromACLs(a.store.Global(), "actors", user); err != nil {
+		return err
+	}
 	orgs, err := a.store.ListOrgs()
 	if err != nil {
 		return err
