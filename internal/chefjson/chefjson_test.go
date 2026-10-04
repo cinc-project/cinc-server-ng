@@ -319,3 +319,19 @@ func TestUnmarshalIsFirstMemberWins(t *testing.T) {
 		t.Errorf("Unmarshal = %+v, want the first of every repeat", v)
 	}
 }
+
+// Parse and DecodeObject read one document: anything after the value is an
+// error, as it is for Normalize and encoding/json.
+func TestParseAndDecodeObjectRejectTrailingData(t *testing.T) {
+	for _, doc := range []string{`{"a":1} x`, `{"a":1}{"b":2}`, `[1] [2]`} {
+		if _, err := Parse([]byte(doc)); err == nil {
+			t.Errorf("Parse(%s) accepted trailing data", doc)
+		}
+		if _, err := DecodeObject([]byte(doc)); err == nil {
+			t.Errorf("DecodeObject(%s) accepted trailing data", doc)
+		}
+	}
+	if _, err := Parse([]byte("{\"a\":1}\n  ")); err != nil {
+		t.Errorf("Parse rejected trailing whitespace: %v", err)
+	}
+}

@@ -203,7 +203,7 @@ func firstMembers(v any) any {
 // which keeps member order and repeats.
 func DecodeObject(doc []byte) (map[string]any, error) {
 	dec := jsontext.NewDecoder(bytes.NewReader(doc), jsontext.AllowDuplicateNames(true))
-	v, err := decode(dec, false)
+	v, err := decodeOne(dec, false)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +253,20 @@ func (o *Object) Set(name string, v any) {
 // Marshal writes the tree back out.
 func Parse(doc []byte) (any, error) {
 	dec := jsontext.NewDecoder(bytes.NewReader(doc), jsontext.AllowDuplicateNames(true))
-	return decode(dec, true)
+	return decodeOne(dec, true)
+}
+
+// decodeOne reads exactly one value: anything but whitespace after it is an
+// error, as it is for Normalize and encoding/json.
+func decodeOne(dec *jsontext.Decoder, ordered bool) (any, error) {
+	v, err := decode(dec, ordered)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := dec.ReadToken(); err != io.EOF {
+		return nil, errors.New("chefjson: unexpected data after the top-level value")
+	}
+	return v, nil
 }
 
 // decode reads one value. ordered selects *Object (for Parse) over a

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/cinc-project/cinc-server-ng/differential"
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/server"
 )
 
@@ -163,6 +165,50 @@ func TestDifferenceInBodyIsDetected(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("tampered field was not reported; the harness would pass a real regression.\ngot: %v", unknown)
+	}
+}
+
+// A response that holds the same values in a different member order is a
+// different response to a client, and must be reported as one: decoding into
+// Go maps used to make this, a float written as an integer, and an integer
+// rounded past 2^53 all invisible.
+func TestDifferenceInMemberOrderIsDetected(t *testing.T) {
+	reference := startTarget(t, "reference", nil)
+	candidate := startTarget(t, "candidate", func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasSuffix(r.URL.Path, "/nodes/diff-node") || r.Method != http.MethodGet {
+				next.ServeHTTP(w, r)
+				return
+			}
+			rec := httptest.NewRecorder()
+			next.ServeHTTP(rec, r)
+			body := rec.Body.Bytes()
+			if tree, err := chefjson.Parse(body); err == nil {
+				if obj, ok := tree.(*chefjson.Object); ok {
+					slices.Reverse(obj.Members)
+					body = chefjson.Marshal(obj)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(rec.Code)
+			_, _ = w.Write(body)
+		})
+	})
+
+	diffs, err := differential.Run(context.Background(), differential.Script("pivotal"),
+		reference, candidate, differential.AcceptedDifferences())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	_, unknown := differential.Split(diffs)
+	var found bool
+	for _, d := range unknown {
+		if d.Step == "node read" && d.Field == "(body){members}" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("reordered members were not reported.\ngot: %v", unknown)
 	}
 }
 

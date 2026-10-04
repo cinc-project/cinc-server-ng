@@ -1,10 +1,15 @@
 package differential
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 )
 
 // Normalization exists because two servers cannot produce byte-identical
@@ -76,6 +81,18 @@ func originOf(base string) string {
 
 func normalize(v any, key, origin string) any {
 	switch t := v.(type) {
+	case *chefjson.Object:
+		out := &chefjson.Object{Members: make([]chefjson.Member, 0, len(t.Members))}
+		taken := map[string]any{}
+		for _, m := range t.Members {
+			name := m.Name
+			if guidPattern.MatchString(name) {
+				name = normalizeKey(name, taken)
+				taken[name] = nil
+			}
+			out.Members = append(out.Members, chefjson.Member{Name: name, Value: normalize(m.Value, m.Name, origin)})
+		}
+		return out
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for _, k := range sortedKeys(t, nil) {
@@ -149,15 +166,37 @@ func normalizeString(s, key, origin string) string {
 // sortAny orders a slice of decoded JSON values deterministically by their
 // rendered form, which is enough to make set-like arrays comparable.
 func sortAny(vals []any) {
-	sort.Slice(vals, func(i, j int) bool {
-		return fmt.Sprintf("%v", vals[i]) < fmt.Sprintf("%v", vals[j])
+	sort.SliceStable(vals, func(i, j int) bool {
+		return render(vals[i]) < render(vals[j])
 	})
+}
+
+// render writes a value as a report or the baseline shows it: a string as
+// itself, anything else as the JSON a client received, so it is exact (1.0 is
+// not 1) and the same on every run.
+func render(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case int:
+		return strconv.Itoa(t)
+	case map[string]any:
+		return fmt.Sprintf("%v", t)
+	}
+	return string(chefjson.Marshal(v))
 }
 
 // compare walks two normalized values and reports every disagreement, with a
 // dotted path so a difference deep in a document is actionable.
 func compare(step, path string, reference, candidate any) []Difference {
 	switch ref := reference.(type) {
+	case *chefjson.Object:
+		can, ok := candidate.(*chefjson.Object)
+		if !ok {
+			return []Difference{{Step: step, Field: pathOr(path), Reference: typeName(reference), Candidate: typeName(candidate)}}
+		}
+		return compareObjects(step, path, ref, can)
+
 	case map[string]any:
 		can, ok := candidate.(map[string]any)
 		if !ok {
@@ -193,11 +232,99 @@ func compare(step, path string, reference, candidate any) []Difference {
 		return diffs
 
 	default:
-		if fmt.Sprintf("%v", reference) != fmt.Sprintf("%v", candidate) {
+		if typeName(reference) != typeName(candidate) || render(reference) != render(candidate) {
 			return []Difference{{Step: step, Field: pathOr(path), Reference: reference, Candidate: candidate}}
 		}
 		return nil
 	}
+}
+
+// compareObjects compares two objects as a client receives them. Members are
+// matched by name (each occurrence of a repeated name with the same occurrence
+// on the other side), and the sequence of member names is compared too, so a reordering or a repeated name
+// is reported, once, at "<path>{members}". Only names both sides have take
+// part in that comparison: a member missing on one side is already reported as
+// missing.
+func compareObjects(step, path string, ref, can *chefjson.Object) []Difference {
+	refNames, canNames := memberNames(ref), memberNames(can)
+	refSet, canSet := nameSet(refNames), nameSet(canNames)
+
+	var diffs []Difference
+	if a, b := onlyIn(refNames, canSet), onlyIn(canNames, refSet); !slices.Equal(a, b) {
+		diffs = append(diffs, Difference{
+			Step: step, Field: pathOr(path) + "{members}",
+			Reference: strings.Join(a, ","), Candidate: strings.Join(b, ","),
+		})
+	}
+	union := make([]string, 0, len(refSet)+len(canSet))
+	for name := range refSet {
+		union = append(union, name)
+	}
+	for name := range canSet {
+		if !refSet[name] {
+			union = append(union, name)
+		}
+	}
+	sort.Strings(union)
+	for _, name := range union {
+		refVals, canVals := memberValues(ref, name), memberValues(can, name)
+		switch {
+		case len(canVals) == 0:
+			diffs = append(diffs, Difference{Step: step, Field: join(path, name), Reference: refVals[0], Candidate: "<missing>"})
+		case len(refVals) == 0:
+			diffs = append(diffs, Difference{Step: step, Field: join(path, name), Reference: "<missing>", Candidate: canVals[0]})
+		default:
+			// A repeated name is compared occurrence by occurrence, as far as
+			// both sides have one; a different number of occurrences is
+			// already reported once, at {members}.
+			for i := range min(len(refVals), len(canVals)) {
+				field := name
+				if i > 0 {
+					field = fmt.Sprintf("%s#%d", name, i+1)
+				}
+				diffs = append(diffs, compare(step, join(path, field), refVals[i], canVals[i])...)
+			}
+		}
+	}
+	return diffs
+}
+
+// memberValues returns the value of every member called name, in order.
+func memberValues(o *chefjson.Object, name string) []any {
+	var vals []any
+	for _, m := range o.Members {
+		if m.Name == name {
+			vals = append(vals, m.Value)
+		}
+	}
+	return vals
+}
+
+func memberNames(o *chefjson.Object) []string {
+	names := make([]string, len(o.Members))
+	for i, m := range o.Members {
+		names[i] = m.Name
+	}
+	return names
+}
+
+func nameSet(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
+	}
+	return set
+}
+
+// onlyIn returns the names that set also contains, in order and with repeats.
+func onlyIn(names []string, set map[string]bool) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if set[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func sortedKeys(a, b map[string]any) []string {
@@ -233,8 +360,12 @@ func pathOr(path string) string {
 
 func typeName(v any) string {
 	switch v.(type) {
-	case map[string]any:
+	case map[string]any, *chefjson.Object:
 		return "<object>"
+	case json.Number:
+		return "<number>"
+	case bool:
+		return "<bool>"
 	case []any:
 		return "<array>"
 	case nil:

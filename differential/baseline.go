@@ -34,8 +34,8 @@ func entryOf(d Difference) BaselineEntry {
 	return BaselineEntry{
 		Step:      d.Step,
 		Field:     d.Field,
-		Reference: fmt.Sprintf("%v", d.Reference),
-		Candidate: fmt.Sprintf("%v", d.Candidate),
+		Reference: render(d.Reference),
+		Candidate: render(d.Candidate),
 	}
 }
 
