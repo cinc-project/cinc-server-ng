@@ -158,6 +158,58 @@ func TestEnforceACLMemberMayLeave(t *testing.T) {
 	}
 }
 
+// A group an admin creates is governed the way erchef governs it: its ACL comes
+// from the groups container, on which Chef's org policy gives the users group
+// read and nothing else. Were a plain member able to rewrite such a group, it
+// could join any group an admin had granted something, and so take whatever
+// that group holds; were it able to create groups, it could mint its own.
+func TestEnforceACLPlainMemberCannotManageCustomGroups(t *testing.T) {
+	f := newOrgMembershipFixture(t)
+
+	// The admin makes a group, and a data bag only admins and that group may
+	// read.
+	steps := []struct{ method, url, body string }{
+		{"POST", f.acme + "/groups", `{"groupname":"readers"}`},
+		{"POST", f.acme + "/data", `{"name":"vault"}`},
+		{"PUT", f.acme + "/data/vault/_acl/read", `{"read":{"actors":[],"groups":["admins","readers"]}}`},
+	}
+	for _, s := range steps {
+		if code := f.as(t, "boss", f.bossKey, s.method, s.url, s.body); code/100 != 2 {
+			t.Fatalf("admin %s %s = %d, want 2xx", s.method, s.url, code)
+		}
+	}
+
+	// Baseline: the member cannot read the bag, but can read the group.
+	if code := f.as(t, "member", f.memberKey, "GET", f.acme+"/data/vault", ""); code != http.StatusForbidden {
+		t.Fatalf("member reads the vault before any change = %d, want 403", code)
+	}
+	if code := f.as(t, "member", f.memberKey, "GET", f.acme+"/groups/readers", ""); code != http.StatusOK {
+		t.Fatalf("member reads the readers group = %d, want 200", code)
+	}
+
+	join := `{"groupname":"readers","actors":{"users":["member"],"clients":[],"groups":[]}}`
+	if code := f.as(t, "member", f.memberKey, "PUT", f.acme+"/groups/readers", join); code != http.StatusForbidden {
+		t.Errorf("member adds itself to readers = %d, want 403", code)
+	}
+	if code := f.as(t, "member", f.memberKey, "GET", f.acme+"/data/vault", ""); code != http.StatusForbidden {
+		t.Errorf("member reads the vault after trying to join readers = %d, want 403", code)
+	}
+	if code := f.as(t, "member", f.memberKey, "DELETE", f.acme+"/groups/readers", ""); code != http.StatusForbidden {
+		t.Errorf("member deletes readers = %d, want 403", code)
+	}
+	if code := f.as(t, "member", f.memberKey, "POST", f.acme+"/groups", `{"groupname":"mine"}`); code != http.StatusForbidden {
+		t.Errorf("member creates a group = %d, want 403", code)
+	}
+
+	// The admin still manages the group, and its grant then reaches the member.
+	if code := f.as(t, "boss", f.bossKey, "PUT", f.acme+"/groups/readers", join); code != http.StatusOK {
+		t.Fatalf("admin adds member to readers = %d, want 200", code)
+	}
+	if code := f.as(t, "member", f.memberKey, "GET", f.acme+"/data/vault", ""); code != http.StatusOK {
+		t.Errorf("member in readers reads the vault = %d, want 200", code)
+	}
+}
+
 // Someone outside the org is refused all of it, as before.
 func TestEnforceACLOutsiderCannotManageMembership(t *testing.T) {
 	f := newOrgMembershipFixture(t)

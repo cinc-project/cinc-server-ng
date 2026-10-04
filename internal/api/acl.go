@@ -175,18 +175,21 @@ func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
 //     members, and no organization ever gets an ACL written for it, so the
 //     fallback is its ACL. Chef's org policy (oc_chef_authz_org_creator) gives
 //     the users group read on the organization and nothing else.
-//   - The default groups. Membership of admins carries update on the
-//     organization, and membership of users carries the default ACL's CRUD, so
-//     a member who could rewrite either could grant themselves (or an outsider)
-//     everything the membership gate withholds. Chef gives the users group no
-//     permission on these groups.
+//   - Groups, and the groups container. Membership is permission: a member
+//     who could rewrite admins would hold update on the organization, and one
+//     who could rewrite any group an admin had granted something would hold
+//     that grant. Chef's org policy gives the users group read on the groups
+//     container and nothing more, and a group created in it takes its ACL from
+//     the container; the default groups give users no more than that either.
+//     So creating a group, and changing or deleting one, is the admins' (or
+//     whoever an ACL written for it names).
 //
-// Both keep defaultACL's read, which is what lets a member see the org and the
-// groups it belongs to. An ACL written for either through the _acl endpoints
-// still replaces this fallback, as for any object.
+// All keep defaultACL's read, which is what lets a member see the org and the
+// groups it belongs to. An ACL written for any of them through the _acl
+// endpoints still replaces this fallback, as for any object.
 func fallbackACL(typ, name string) map[string]any {
 	acl := defaultACL()
-	if typ == "organizations" || (typ == "groups" && slices.Contains(defaultGroups, name)) {
+	if typ == "organizations" || typ == "groups" || (typ == "containers" && name == "groups") {
 		for _, p := range []string{"create", "update", "delete"} {
 			acl[p] = map[string]any{"actors": []string{}, "groups": []string{"admins"}}
 		}
