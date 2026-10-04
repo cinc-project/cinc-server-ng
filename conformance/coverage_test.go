@@ -65,7 +65,6 @@ var cliExclusions = map[string]string{
 	"gem":               "runs gem in the CLI's embedded Ruby",
 	"generate":          "generates local repositories, cookbooks and templates",
 	"shell-init":        "prints shell configuration",
-	"export":            "writes a policy and its cookbooks to a local directory",
 	"describe-cookbook": "computes a local cookbook's identifier",
 	"license":           "manages the local Chef license",
 }
