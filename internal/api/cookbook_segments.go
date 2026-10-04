@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
@@ -89,7 +90,7 @@ func toSegments(obj *chefjson.Object) {
 			segment, rest = "root_files", asString(name)
 		}
 		entry.Set("name", rest)
-		bySegment[segment] = append([]any{entry}, bySegment[segment]...)
+		bySegment[segment] = append(bySegment[segment], entry)
 	}
 	segments := make([]chefjson.Member, 0, len(cookbookSegments))
 	for _, s := range cookbookSegments {
@@ -97,6 +98,9 @@ func toSegments(obj *chefjson.Object) {
 		if list == nil {
 			list = []any{}
 		}
+		// Most recent first, reversed once: prepending each file would make
+		// every read of a large manifest quadratic in its files.
+		slices.Reverse(list)
 		segments = append(segments, chefjson.Member{Name: s, Value: list})
 	}
 	replaceMember(obj, "all_files", segments)

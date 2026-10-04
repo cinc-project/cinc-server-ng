@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 )
 
 // doAt is do with a server API version, which decides a cookbook manifest's
@@ -169,5 +173,41 @@ func TestCookbookManifestShapeFollowsAPIVersion(t *testing.T) {
 	}
 	if files := manifestFiles(t, string(solved["probe"])); files["all_files"] != nil || files["recipes"] == nil {
 		t.Errorf("depsolver manifest at v0 = %v, want segments", files)
+	}
+}
+
+// Converting a manifest is linear in its files: it runs on every read, so a
+// cost quadratic in the number of files in a segment would let one large
+// upload slow every request for it.
+func TestToSegmentsIsLinear(t *testing.T) {
+	build := func(n int) *chefjson.Object {
+		files := make([]any, n)
+		for i := range files {
+			files[i] = &chefjson.Object{Members: []chefjson.Member{{Name: "name", Value: "files/f" + strconv.Itoa(i)}}}
+		}
+		return &chefjson.Object{Members: []chefjson.Member{{Name: "all_files", Value: files}}}
+	}
+	timeIt := func(n int) time.Duration {
+		obj := build(n)
+		start := time.Now()
+		toSegments(obj)
+		return time.Since(start)
+	}
+	timeIt(1000) // warm up
+	small, large := timeIt(20000), timeIt(160000)
+	// 8x the files: linear is ~8x, quadratic ~64x. Allow generous noise.
+	if large > 25*small+50*time.Millisecond {
+		t.Errorf("toSegments on 160k files took %v, on 20k %v: not linear", large, small)
+	}
+	obj := build(3)
+	toSegments(obj)
+	files, _ := obj.Get("files")
+	var names []string
+	for _, f := range files.([]any) {
+		n, _ := f.(*chefjson.Object).Get("name")
+		names = append(names, n.(string))
+	}
+	if strings.Join(names, ",") != "f2,f1,f0" {
+		t.Errorf("segment order = %v, want most recent first", names)
 	}
 }
