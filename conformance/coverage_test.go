@@ -28,8 +28,33 @@ import (
 // that does talk to the server is tested, however awkward.
 
 // knifeExclusions are knife subcommands that cannot be exercised against the
-// server, with the reason.
+// server, with the reason. A key ending in " *" covers a whole plugin's
+// commands ("ec2 *" is every "ec2 ..." command); use it only for a plugin none
+// of whose commands talk to a Chef Infra Server.
 var knifeExclusions = map[string]string{
+	// Cloud and virtualization plugins Workstation bundles: they drive a
+	// provider's API to create and manage machines, not a Chef Infra Server.
+	"azurerm *": "manages Azure resources, not a Chef Infra Server",
+	"ec2 *":     "manages AWS EC2 resources, not a Chef Infra Server",
+	"google *":  "manages Google Cloud resources, not a Chef Infra Server",
+	"vcenter *": "manages VMware vCenter resources, not a Chef Infra Server",
+	"vra *":     "manages VMware vRealize Automation resources, not a Chef Infra Server",
+	"vro *":     "runs VMware vRealize Orchestrator workflows, not a Chef Infra Server",
+	"vsphere *": "manages VMware vSphere resources, not a Chef Infra Server",
+	// Windows remoting: like bootstrap and ssh, these need a target host.
+	"bootstrap azurerm":           "provisions an Azure VM and bootstraps it; see bootstrap",
+	"bootstrap windows certstore": "bootstraps a Windows host over WinRM; see bootstrap",
+	"bootstrap windows ssh":       "bootstraps a Windows host over SSH; see bootstrap",
+	"bootstrap windows winrm":     "bootstraps a Windows host over WinRM; see bootstrap",
+	"winrm":                       "runs commands on nodes over WinRM; its server side is a node search, covered by knife search",
+	"wsman test":                  "tests WinRM connectivity to a host",
+	"windows cert generate":       "generates a local WinRM certificate",
+	"windows cert install":        "installs a WinRM certificate on the local Windows machine",
+	"windows listener create":     "configures a WinRM listener on the local Windows machine",
+	// knife tidy's server commands are tested; these two are not server-facing.
+	"tidy backup clean": "cleans a local knife-ec-backup directory, not a server",
+	"tidy notify":       "emails a tidy report to org admins over SMTP",
+
 	"bootstrap": "connects to a target host over SSH or WinRM to install and run the client; the " +
 		"server side of a bootstrap (client registration, node creation, the first converge) is " +
 		"covered by TestKnifeClientBootstrapFlow and the policy converge",
@@ -67,6 +92,9 @@ var cliExclusions = map[string]string{
 	"shell-init":        "prints shell configuration",
 	"describe-cookbook": "computes a local cookbook's identifier",
 	"license":           "manages the local Chef license",
+	"help":              "prints the CLI's help",
+	"completion":        "prints a shell completion script",
+	"supermarket":       "talks to a Supermarket, not a Chef Infra Server",
 }
 
 var (
@@ -139,7 +167,7 @@ func gaps(label string, commands []string, tool string, exclusions map[string]st
 
 	var problems []string
 	for _, c := range commands {
-		_, excluded := exclusions[c]
+		excluded := isExcluded(c, exclusions)
 		switch {
 		case ran[c] && excluded:
 			problems = append(problems, fmt.Sprintf("%s %s: excluded, but a test runs it; drop the exclusion", label, c))
@@ -152,6 +180,20 @@ func gaps(label string, commands []string, tool string, exclusions map[string]st
 	}
 	sort.Strings(problems)
 	return problems
+}
+
+// isExcluded reports whether command is excluded, by name or by a plugin
+// prefix ("ec2 *").
+func isExcluded(command string, exclusions map[string]string) bool {
+	if _, ok := exclusions[command]; ok {
+		return true
+	}
+	for key := range exclusions {
+		if prefix, ok := strings.CutSuffix(key, " *"); ok && strings.HasPrefix(command, prefix+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // longestCommand returns the longest command whose words prefix args.
@@ -256,7 +298,7 @@ func TestCoverageListsCommands(t *testing.T) {
 		}
 	}
 	for c := range knifeExclusions {
-		if !slices.Contains(kc, c) {
+		if !strings.HasSuffix(c, " *") && !slices.Contains(kc, c) {
 			t.Logf("exclusion %q is not a command of this knife (%s); it may be from another version", c, knife)
 		}
 	}
