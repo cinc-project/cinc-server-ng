@@ -240,8 +240,8 @@ func compare(step, path string, reference, candidate any) []Difference {
 }
 
 // compareObjects compares two objects as a client receives them. Members are
-// matched by name (the first of a repeated name, as Chef reads it), and the
-// sequence of member names is compared too, so a reordering or a repeated name
+// matched by name (each occurrence of a repeated name with the same occurrence
+// on the other side), and the sequence of member names is compared too, so a reordering or a repeated name
 // is reported, once, at "<path>{members}". Only names both sides have take
 // part in that comparison: a member missing on one side is already reported as
 // missing.
@@ -267,18 +267,37 @@ func compareObjects(step, path string, ref, can *chefjson.Object) []Difference {
 	}
 	sort.Strings(union)
 	for _, name := range union {
-		refVal, inRef := ref.Get(name)
-		canVal, inCan := can.Get(name)
+		refVals, canVals := memberValues(ref, name), memberValues(can, name)
 		switch {
-		case inRef && !inCan:
-			diffs = append(diffs, Difference{Step: step, Field: join(path, name), Reference: refVal, Candidate: "<missing>"})
-		case !inRef && inCan:
-			diffs = append(diffs, Difference{Step: step, Field: join(path, name), Reference: "<missing>", Candidate: canVal})
+		case len(canVals) == 0:
+			diffs = append(diffs, Difference{Step: step, Field: join(path, name), Reference: refVals[0], Candidate: "<missing>"})
+		case len(refVals) == 0:
+			diffs = append(diffs, Difference{Step: step, Field: join(path, name), Reference: "<missing>", Candidate: canVals[0]})
 		default:
-			diffs = append(diffs, compare(step, join(path, name), refVal, canVal)...)
+			// A repeated name is compared occurrence by occurrence, as far as
+			// both sides have one; a different number of occurrences is
+			// already reported once, at {members}.
+			for i := range min(len(refVals), len(canVals)) {
+				field := name
+				if i > 0 {
+					field = fmt.Sprintf("%s#%d", name, i+1)
+				}
+				diffs = append(diffs, compare(step, join(path, field), refVals[i], canVals[i])...)
+			}
 		}
 	}
 	return diffs
+}
+
+// memberValues returns the value of every member called name, in order.
+func memberValues(o *chefjson.Object, name string) []any {
+	var vals []any
+	for _, m := range o.Members {
+		if m.Name == name {
+			vals = append(vals, m.Value)
+		}
+	}
+	return vals
 }
 
 func memberNames(o *chefjson.Object) []string {

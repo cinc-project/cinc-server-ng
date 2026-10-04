@@ -77,3 +77,11 @@ func TestRenderIsDeterministicJSON(t *testing.T) {
 		t.Errorf("render(string) = %s", got)
 	}
 }
+
+// Every occurrence of a repeated name is compared, not only the first.
+func TestRepeatedMembersAreComparedEachOccurrence(t *testing.T) {
+	got := compare("step", "", parsed(t, `{"a":1,"a":2}`), parsed(t, `{"a":1,"a":3}`))
+	if len(got) != 1 || got[0].Field != "a#2" || render(got[0].Reference) != "2" || render(got[0].Candidate) != "3" {
+		t.Errorf("got %v, want one difference at a#2 (2 vs 3)", got)
+	}
+}
