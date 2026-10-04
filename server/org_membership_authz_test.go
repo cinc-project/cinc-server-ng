@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 )
 
@@ -207,6 +208,85 @@ func TestEnforceACLPlainMemberCannotManageCustomGroups(t *testing.T) {
 	}
 	if code := f.as(t, "member", f.memberKey, "GET", f.acme+"/data/vault", ""); code != http.StatusOK {
 		t.Errorf("member in readers reads the vault = %d, want 200", code)
+	}
+}
+
+// Deleting a group takes its grants with it. In Chef an ACL, and a group's
+// nested groups, name a group by its authz id, and deleting the group deletes
+// those references; a group later created under the same name is a new group
+// that holds nothing. Here both name it by its name, so a reference left behind
+// is a latent grant to whoever is put in the next group of that name.
+func TestEnforceACLDeletedGroupLeavesNoGrant(t *testing.T) {
+	f := newOrgMembershipFixture(t)
+	vault := f.acme + "/data/vault"
+
+	// readers is granted read on the vault directly; inner is granted it by
+	// being nested in outer, which is.
+	for _, s := range []struct{ method, url, body string }{
+		{"POST", f.acme + "/groups", `{"groupname":"readers"}`},
+		{"POST", f.acme + "/groups", `{"groupname":"inner"}`},
+		{"POST", f.acme + "/groups", `{"groupname":"outer"}`},
+		{"PUT", f.acme + "/groups/outer", `{"groupname":"outer","actors":{"users":[],"clients":[],"groups":["inner"]}}`},
+		{"POST", f.acme + "/data", `{"name":"vault"}`},
+		{"PUT", vault + "/_acl/read", `{"read":{"actors":[],"groups":["admins","readers","outer"]}}`},
+	} {
+		if code := f.as(t, "boss", f.bossKey, s.method, s.url, s.body); code/100 != 2 {
+			t.Fatalf("admin %s %s = %d, want 2xx", s.method, s.url, code)
+		}
+	}
+	// Baseline: neither plain member can read the vault.
+	for _, u := range []struct {
+		name string
+		key  []byte
+	}{{"member", f.memberKey}, {"other", f.otherKey}} {
+		if code := f.as(t, u.name, u.key, "GET", vault, ""); code != http.StatusForbidden {
+			t.Fatalf("%s reads the vault before any grant = %d, want 403", u.name, code)
+		}
+	}
+
+	for _, g := range []string{"readers", "inner"} {
+		if code := f.as(t, "boss", f.bossKey, "DELETE", f.acme+"/groups/"+g, ""); code != http.StatusOK {
+			t.Fatalf("admin deletes %s = %d, want 200", g, code)
+		}
+		if code := f.as(t, "boss", f.bossKey, "POST", f.acme+"/groups", `{"groupname":"`+g+`"}`); code != http.StatusCreated {
+			t.Fatalf("admin recreates %s = %d, want 201", g, code)
+		}
+		join := `{"groupname":"` + g + `","actors":{"users":["other"],"clients":[],"groups":[]}}`
+		if code := f.as(t, "boss", f.bossKey, "PUT", f.acme+"/groups/"+g, join); code != http.StatusOK {
+			t.Fatalf("admin adds other to the new %s = %d, want 200", g, code)
+		}
+		if code := f.as(t, "other", f.otherKey, "GET", vault, ""); code != http.StatusForbidden {
+			t.Errorf("other, in a new group named %s, reads the vault = %d, want 403", g, code)
+		}
+		// Clear it again, so the next case is judged on its own.
+		if code := f.as(t, "boss", f.bossKey, "DELETE", f.acme+"/groups/"+g, ""); code != http.StatusOK {
+			t.Fatalf("admin deletes the new %s = %d, want 200", g, code)
+		}
+	}
+
+	resp, err := http.DefaultClient.Do(signed(t, f.srv, "GET", vault+"/_acl", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var acl map[string]map[string][]string
+	if err := json.NewDecoder(resp.Body).Decode(&acl); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := acl["read"]["groups"]; !slices.Equal(got, []string{"admins", "outer"}) {
+		t.Errorf("vault read groups after deleting readers = %v, want [admins outer]", got)
+	}
+	resp, err = http.DefaultClient.Do(signed(t, f.srv, "GET", f.acme+"/groups/outer", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outer map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&outer); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := outer["groups"]; len(got.([]any)) != 0 {
+		t.Errorf("outer's groups after deleting inner = %v, want none", got)
 	}
 }
 
