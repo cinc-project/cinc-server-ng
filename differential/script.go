@@ -78,10 +78,12 @@ func Script(actor string) []Step {
 		{Name: "data bag missing", Method: "GET", Path: "/data/diff-absent"},
 
 		// --- search -----------------------------------------------------------
+		// A real server indexes asynchronously, so a search right after the
+		// writes above can miss them there; Eventually waits for it to settle.
 		{Name: "search indexes", Method: "GET", Path: "/search"},
-		{Name: "search nodes", Method: "GET", Path: "/search/node?q=role:backend"},
-		{Name: "search nodes all", Method: "GET", Path: "/search/node?q=*:*"},
-		{Name: "search data bag", Method: "GET", Path: "/search/diff-bag?q=*:*"},
+		{Name: "search nodes", Method: "GET", Path: "/search/node?q=role:backend", Eventually: true},
+		{Name: "search nodes all", Method: "GET", Path: "/search/node?q=*:*", Eventually: true},
+		{Name: "search data bag", Method: "GET", Path: "/search/diff-bag?q=*:*", Eventually: true},
 		{Name: "search unknown index", Method: "GET", Path: "/search/diff-absent?q=*:*"},
 
 		// --- authorization objects ------------------------------------------

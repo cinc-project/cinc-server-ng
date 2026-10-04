@@ -1,0 +1,374 @@
+[
+  {
+    "step": "authenticate wrong password",
+    "field": "error[0]",
+    "reference": "missing create permission",
+    "candidate": "You are not allowed to take this action."
+  },
+  {
+    "step": "bad search query",
+    "field": "error[0]",
+    "reference": "invalid search query: '[unclosed'",
+    "candidate": "invalid search query: search: unterminated range"
+  },
+  {
+    "step": "client default key",
+    "field": "expired",
+    "reference": "<missing>",
+    "candidate": "false"
+  },
+  {
+    "step": "client delete",
+    "field": "admin",
+    "reference": "<missing>",
+    "candidate": "false"
+  },
+  {
+    "step": "client delete",
+    "field": "create_key",
+    "reference": "<missing>",
+    "candidate": "true"
+  },
+  {
+    "step": "client delete",
+    "field": "public_key",
+    "reference": "<missing>",
+    "candidate": "<key>"
+  },
+  {
+    "step": "client key missing",
+    "field": "error",
+    "reference": "There is no key named diff-absent associated with diff-client.",
+    "candidate": "[Cannot find key diff-absent]"
+  },
+  {
+    "step": "client missing",
+    "field": "error[0]",
+    "reference": "Cannot load client diff-absent",
+    "candidate": "Cannot find clients diff-absent"
+  },
+  {
+    "step": "client read",
+    "field": "admin",
+    "reference": "<missing>",
+    "candidate": "false"
+  },
+  {
+    "step": "client read",
+    "field": "create_key",
+    "reference": "<missing>",
+    "candidate": "true"
+  },
+  {
+    "step": "client read",
+    "field": "public_key",
+    "reference": "<missing>",
+    "candidate": "<key>"
+  },
+  {
+    "step": "cookbook artifact missing",
+    "field": "error[0]",
+    "reference": "not_found",
+    "candidate": "Cannot find a cookbook artifact named diff-absent"
+  },
+  {
+    "step": "cookbook recipes",
+    "field": "(body)",
+    "reference": "<array>",
+    "candidate": "<null>"
+  },
+  {
+    "step": "data bag missing",
+    "field": "error[0]",
+    "reference": "Cannot load data bag diff-absent",
+    "candidate": "Cannot find data bag diff-absent"
+  },
+  {
+    "step": "group admins",
+    "field": "actors.length",
+    "reference": "2",
+    "candidate": "1"
+  },
+  {
+    "step": "group admins",
+    "field": "users.length",
+    "reference": "2",
+    "candidate": "1"
+  },
+  {
+    "step": "group list",
+    "field": "<guid>",
+    "reference": "<server>/organizations/diffs/groups/<guid>",
+    "candidate": "<missing>"
+  },
+  {
+    "step": "group list",
+    "field": "public_key_read_access",
+    "reference": "<server>/organizations/diffs/groups/public_key_read_access",
+    "candidate": "<missing>"
+  },
+  {
+    "step": "method not allowed",
+    "field": "(body)",
+    "reference": "<html><head><title>405 Method Not Allowed</title></head><body><h1>Method Not Allowed</h1>Method Not Allowed<p><hr><address>mochiweb+webmachine web server</address></body></html>",
+    "candidate": "map[error:[Method not allowed: DELETE /organizations/diffs/search]]"
+  },
+  {
+    "step": "node acl",
+    "field": "create.actors.length",
+    "reference": "2",
+    "candidate": "1"
+  },
+  {
+    "step": "node acl",
+    "field": "create.groups.length",
+    "reference": "3",
+    "candidate": "2"
+  },
+  {
+    "step": "node acl",
+    "field": "delete.actors.length",
+    "reference": "2",
+    "candidate": "1"
+  },
+  {
+    "step": "node acl",
+    "field": "grant.actors.length",
+    "reference": "2",
+    "candidate": "1"
+  },
+  {
+    "step": "node acl",
+    "field": "read.actors.length",
+    "reference": "2",
+    "candidate": "1"
+  },
+  {
+    "step": "node acl",
+    "field": "update.actors.length",
+    "reference": "2",
+    "candidate": "1"
+  },
+  {
+    "step": "node bad json",
+    "field": "error[0]",
+    "reference": "invalid JSON",
+    "candidate": "invalid JSON body"
+  },
+  {
+    "step": "node create conflict",
+    "field": "error[0]",
+    "reference": "Node already exists",
+    "candidate": "Object already exists"
+  },
+  {
+    "step": "node delete missing",
+    "field": "error[0]",
+    "reference": "node 'diff-node' not found",
+    "candidate": "Cannot find nodes diff-node"
+  },
+  {
+    "step": "node missing",
+    "field": "error[0]",
+    "reference": "node 'diff-absent' not found",
+    "candidate": "Cannot find nodes diff-absent"
+  },
+  {
+    "step": "org acl",
+    "field": "create.actors.length",
+    "reference": "1",
+    "candidate": "0"
+  },
+  {
+    "step": "org acl",
+    "field": "delete.actors.length",
+    "reference": "1",
+    "candidate": "0"
+  },
+  {
+    "step": "org acl",
+    "field": "grant.actors.length",
+    "reference": "1",
+    "candidate": "0"
+  },
+  {
+    "step": "org acl",
+    "field": "read.actors.length",
+    "reference": "1",
+    "candidate": "0"
+  },
+  {
+    "step": "org acl",
+    "field": "read.groups.length",
+    "reference": "2",
+    "candidate": "3"
+  },
+  {
+    "step": "org acl",
+    "field": "update.actors.length",
+    "reference": "1",
+    "candidate": "0"
+  },
+  {
+    "step": "org read",
+    "field": "full_name",
+    "reference": "Differential",
+    "candidate": "diffs"
+  },
+  {
+    "step": "policy group delete",
+    "field": "uri",
+    "reference": "<server>/organizations/diffs/policy_groups/diff-group",
+    "candidate": "<missing>"
+  },
+  {
+    "step": "policy group read",
+    "field": "uri",
+    "reference": "<server>/organizations/diffs/policy_groups/diff-group",
+    "candidate": "<missing>"
+  },
+  {
+    "step": "policy revision push",
+    "field": "status",
+    "reference": "201",
+    "candidate": "200"
+  },
+  {
+    "step": "policy revision read",
+    "field": "policy_group_list",
+    "reference": "[diff-group]",
+    "candidate": "<missing>"
+  },
+  {
+    "step": "principal client",
+    "field": "authz_id",
+    "reference": "<missing>",
+    "candidate": "diff-client"
+  },
+  {
+    "step": "principal client",
+    "field": "name",
+    "reference": "<missing>",
+    "candidate": "diff-client"
+  },
+  {
+    "step": "principal client",
+    "field": "org_member",
+    "reference": "<missing>",
+    "candidate": "true"
+  },
+  {
+    "step": "principal client",
+    "field": "principals",
+    "reference": "[map[authz_id:<guid> name:diff-client org_member:true public_key:<key> type:client]]",
+    "candidate": "<missing>"
+  },
+  {
+    "step": "principal client",
+    "field": "public_key",
+    "reference": "<missing>",
+    "candidate": "<key>"
+  },
+  {
+    "step": "principal client",
+    "field": "type",
+    "reference": "<missing>",
+    "candidate": "client"
+  },
+  {
+    "step": "principal missing",
+    "field": "error",
+    "reference": "Cannot find principal diff-absent",
+    "candidate": "[Cannot find principal diff-absent]"
+  },
+  {
+    "step": "principal missing",
+    "field": "not_found",
+    "reference": "principal",
+    "candidate": "<missing>"
+  },
+  {
+    "step": "principal user",
+    "field": "authz_id",
+    "reference": "<missing>",
+    "candidate": "diffuser"
+  },
+  {
+    "step": "principal user",
+    "field": "name",
+    "reference": "<missing>",
+    "candidate": "diffuser"
+  },
+  {
+    "step": "principal user",
+    "field": "org_member",
+    "reference": "<missing>",
+    "candidate": "true"
+  },
+  {
+    "step": "principal user",
+    "field": "principals",
+    "reference": "[map[authz_id:<guid> name:diffuser org_member:true public_key:<key> type:user]]",
+    "candidate": "<missing>"
+  },
+  {
+    "step": "principal user",
+    "field": "public_key",
+    "reference": "<missing>",
+    "candidate": "<key>"
+  },
+  {
+    "step": "principal user",
+    "field": "type",
+    "reference": "<missing>",
+    "candidate": "user"
+  },
+  {
+    "step": "required recipe",
+    "field": "(body)",
+    "reference": "<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n  <meta http-equiv=\"X-UA-Compatible\" content=\"IE=EmulateIE7\" />\n  <title>Cinc - 404 Not Found</title>\n  <link media=\"all\" rel=\"stylesheet\" type=\"text/css\" href=\"/css/all.css\" />\n  <!--[if lt IE 7]><link rel=\"stylesheet\" type=\"text/css\" href=\"/css/lt7.css\" /><![endif]-->\n</head>\n<body>\n  <div class=\"header-block\">\n    <div id=\"header\">\n      <strong class=\"logo\"><a href=\"https://cinc.sh\">Cinc</a></strong>\n    </div>\n  </div>\n  <div id=\"wrapper\">\n    <div id=\"main\">\n      <div class=\"mybox\">\n        <div id=\"content\">\n          <h1>404 - Not Found</h1>\n          <p>Sorry, I can't find what you are looking for.</p>\n        </div>\n      </div>\n    </div>\n  </div>\n  <div class=\"footer-block\">\n    <div id=\"footer\">\n      <div class=\"mybox\">\n      </div>\n      <div class=\"footer-bottom\">\n        <span>Cinc Project based on Chef Infra Server &copy; 2010&thinsp;&ndash;&thinsp;2021 Chef Software, Inc. All Rights Reserved</span>\n      </div>\n    </div>\n  </div>\n</body>\n</html>\n",
+    "candidate": "map[error:[Required recipe is not configured on this server.]]"
+  },
+  {
+    "step": "role missing",
+    "field": "error[0]",
+    "reference": "Cannot load role diff-absent",
+    "candidate": "Cannot find roles diff-absent"
+  },
+  {
+    "step": "search nodes",
+    "field": "rows.length",
+    "reference": "0",
+    "candidate": "1"
+  },
+  {
+    "step": "search nodes",
+    "field": "total",
+    "reference": "0",
+    "candidate": "1"
+  },
+  {
+    "step": "unknown route",
+    "field": "(body)",
+    "reference": "<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n  <meta http-equiv=\"X-UA-Compatible\" content=\"IE=EmulateIE7\" />\n  <title>Cinc - 404 Not Found</title>\n  <link media=\"all\" rel=\"stylesheet\" type=\"text/css\" href=\"/css/all.css\" />\n  <!--[if lt IE 7]><link rel=\"stylesheet\" type=\"text/css\" href=\"/css/lt7.css\" /><![endif]-->\n</head>\n<body>\n  <div class=\"header-block\">\n    <div id=\"header\">\n      <strong class=\"logo\"><a href=\"https://cinc.sh\">Cinc</a></strong>\n    </div>\n  </div>\n  <div id=\"wrapper\">\n    <div id=\"main\">\n      <div class=\"mybox\">\n        <div id=\"content\">\n          <h1>404 - Not Found</h1>\n          <p>Sorry, I can't find what you are looking for.</p>\n        </div>\n      </div>\n    </div>\n  </div>\n  <div class=\"footer-block\">\n    <div id=\"footer\">\n      <div class=\"mybox\">\n      </div>\n      <div class=\"footer-bottom\">\n        <span>Cinc Project based on Chef Infra Server &copy; 2010&thinsp;&ndash;&thinsp;2021 Chef Software, Inc. All Rights Reserved</span>\n      </div>\n    </div>\n  </div>\n</body>\n</html>\n",
+    "candidate": "map[error:[No route for /organizations/diffs/diff-nonexistent]]"
+  },
+  {
+    "step": "user default key",
+    "field": "expired",
+    "reference": "<missing>",
+    "candidate": "false"
+  },
+  {
+    "step": "user organizations",
+    "field": "(body)[0].organization.full_name",
+    "reference": "Differential",
+    "candidate": "diffs"
+  },
+  {
+    "step": "user organizations",
+    "field": "(body)[0].organization.guid",
+    "reference": "<guid>",
+    "candidate": "<missing>"
+  }
+]

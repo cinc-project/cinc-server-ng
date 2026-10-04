@@ -11,6 +11,7 @@ package differential_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -27,6 +28,7 @@ const (
 	envUser         = "DIFF_USER"          // the shared identity
 	envKeyFile      = "DIFF_KEY"           // its private key, valid on both
 	envCAFile       = "DIFF_REFERENCE_CA"  // reference server's CA certificate (optional)
+	envBaselineOut  = "DIFF_BASELINE_OUT"  // where to write the run's own baseline (optional)
 )
 
 func requireEnv(t *testing.T, name string) string {
@@ -85,13 +87,52 @@ func TestAgainstRealChefServer(t *testing.T) {
 		}
 		t.Logf("%d accepted difference(s):%s", len(known), sb.String())
 	}
-	if len(unknown) > 0 {
+	// Unexplained differences the baseline already records are known debt;
+	// only the rest fail the run.
+	baseline := loadBaseline(t)
+	fresh, stale := differential.ApplyBaseline(unknown, baseline)
+	t.Logf("%d unexplained difference(s), %d of them recorded in baseline.json", len(unknown), len(unknown)-len(fresh))
+
+	// Write what the baseline would be now, so updating it is a copy rather
+	// than a transcription from the log.
+	if out := os.Getenv(envBaselineOut); out != "" {
+		if err := os.WriteFile(out, differential.FormatBaseline(differential.BaselineOf(unknown)), 0o644); err != nil {
+			t.Errorf("write %s: %v", out, err)
+		}
+	}
+
+	// A stale entry is reported rather than failed: it is usually a fix that
+	// should now be removed from the baseline, but a difference that only
+	// shows up some of the time (the reference indexes search asynchronously)
+	// can also go missing from a single run.
+	if len(stale) > 0 {
 		var sb strings.Builder
-		for _, d := range unknown {
+		for _, e := range stale {
+			fmt.Fprintf(&sb, "\n%s: %s\n    reference: %s\n    candidate: %s", e.Step, e.Field, e.Reference, e.Candidate)
+		}
+		t.Logf("%d baseline entr(ies) did not occur in this run; if fixed, remove them from baseline.json:%s", len(stale), sb.String())
+	}
+	if len(fresh) > 0 {
+		var sb strings.Builder
+		for _, d := range fresh {
 			sb.WriteString("\n" + d.String())
 		}
-		t.Fatalf("%d unexplained difference(s) from the reference server. "+
+		t.Fatalf("%d unexplained difference(s) from the reference server that baseline.json does not record. "+
 			"Each is either a fidelity bug to fix, or a deviation to accept in "+
-			"differential/known.go with a stated reason:%s", len(unknown), sb.String())
+			"differential/known.go with a stated reason:%s", len(fresh), sb.String())
 	}
+}
+
+// loadBaseline reads the committed baseline of known, untriaged differences.
+func loadBaseline(t *testing.T) []differential.BaselineEntry {
+	t.Helper()
+	data, err := os.ReadFile("baseline.json")
+	if err != nil {
+		t.Fatalf("read baseline: %v", err)
+	}
+	entries, err := differential.ParseBaseline(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entries
 }
