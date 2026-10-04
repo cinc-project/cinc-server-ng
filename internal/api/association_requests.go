@@ -214,9 +214,11 @@ func (a *API) userInvites(user string) ([]map[string]any, error) {
 func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 	user, id := r.PathValue("user"), r.PathValue("id")
 
-	// Only the invitee may respond to their own invitation; a third party (org
-	// admin or anyone else) is forbidden. With no actor the endpoint stays open.
-	if actor, ok := actorFromContext(r.Context()); ok && actor.Name != user {
+	// Only the invitee may respond to their own invitation, or the superuser on
+	// their behalf (knife org user add does exactly that); any other third
+	// party, an org admin included, is forbidden. With no actor the endpoint
+	// stays open.
+	if actor, ok := actorFromContext(r.Context()); ok && actor.Name != user && !actor.IsGlobalAdmin {
 		writeStringError(w, http.StatusForbidden, "You are not allowed to take this action.")
 		return
 	}

@@ -98,9 +98,9 @@ func TestClassifyOrgMembershipRoutes(t *testing.T) {
 	}
 }
 
-// The organization and the default groups must not fall back to defaultACL,
-// which grants update to every member: update on the organization is what
-// manages membership, and admins/users membership is what carries it.
+// The organization, every group and the groups container must not fall back to
+// defaultACL, which grants update to every member: update on the organization
+// is what manages membership, and group membership is what carries a grant.
 func TestFallbackACLReservesOrgAuthorityToAdmins(t *testing.T) {
 	for _, c := range []struct{ typ, name string }{
 		{"organizations", "acme"},
@@ -108,6 +108,8 @@ func TestFallbackACLReservesOrgAuthorityToAdmins(t *testing.T) {
 		{"groups", "users"},
 		{"groups", "clients"},
 		{"groups", "billing-admins"},
+		{"groups", "ops"},
+		{"containers", "groups"},
 	} {
 		acl := fallbackACL(c.typ, c.name)
 		for _, p := range []string{"create", "update", "delete", "grant"} {
@@ -120,8 +122,10 @@ func TestFallbackACLReservesOrgAuthorityToAdmins(t *testing.T) {
 		}
 	}
 	// Any other object keeps the permissive default.
-	if got := anyStrings(fallbackACL("groups", "ops")["update"].(map[string]any)["groups"]); !slices.Contains(got, "users") {
-		t.Errorf("groups/ops update groups = %v, want the default", got)
+	for _, c := range [][2]string{{"nodes", "web01"}, {"containers", "nodes"}} {
+		if got := anyStrings(fallbackACL(c[0], c[1])["update"].(map[string]any)["groups"]); !slices.Contains(got, "users") {
+			t.Errorf("%s/%s update groups = %v, want the default", c[0], c[1], got)
+		}
 	}
 }
 

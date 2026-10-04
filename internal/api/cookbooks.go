@@ -453,7 +453,7 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 
 	raw, err := decodeManifestBody(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeManifestError(w, err)
 		return
 	}
 	m, err := chefjson.DecodeObject(raw)
@@ -768,13 +768,33 @@ func decodeManifestBody(r *http.Request) ([]byte, error) {
 	if chefjson.HasRepeatedNames(raw) {
 		return nil, errRepeatedNames
 	}
+	if err := checkManifestShape(r, raw); err != nil {
+		return nil, err
+	}
 	return raw, nil
 }
 
+// writeManifestError answers a manifest decodeManifestBody refused: with
+// Chef's message for one in another API version's shape, as invalid JSON
+// otherwise.
+func writeManifestError(w http.ResponseWriter, err error) {
+	if msg, ok := err.(manifestShapeError); ok {
+		writeError(w, http.StatusBadRequest, string(msg))
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid JSON body")
+}
+
+// withFileURLs returns a stored manifest as the request's client reads it: in
+// the shape its API version uses (shapeManifest), with each file's download
+// URL added.
 func (a *API) withFileURLs(raw []byte, r *http.Request, org string) []byte {
 	tree, err := chefjson.Parse(raw)
 	if err != nil {
 		return raw
+	}
+	if obj, ok := tree.(*chefjson.Object); ok {
+		shapeManifest(obj, requestAPIVersion(r))
 	}
 	walkFileObjects(tree, func(obj *chefjson.Object) {
 		if sum, ok := obj.Get("checksum"); ok {

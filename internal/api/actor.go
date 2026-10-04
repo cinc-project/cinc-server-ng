@@ -404,12 +404,31 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			lowerEmail(obj)
 			obj = mergeUser(stored, obj)
 		}
+		// At API v0, "private_key": true asks the server to regenerate the
+		// actor's default key and return the new private key: what `knife
+		// client reregister` and `knife user reregister` send (they pin v0).
+		// The request was already authorized as an update of this actor.
+		regenerate := obj["private_key"] == true && requestAPIVersion(r) == 0
 		delete(obj, "private_key")
 		// A PUT that omits the public key must not silently drop the actor's
 		// existing key — that would break its authentication. Carry the stored
 		// key forward (key changes go through the keys API, not a bare update),
 		// normalizing a nested chef_key to the top-level field either way.
 		pub := bodyPublicKey(obj)
+		var privateKey string
+		if regenerate {
+			key, err := auth.GenerateKey()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "key generation failed")
+				return
+			}
+			pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "key encoding failed")
+				return
+			}
+			pub, privateKey = string(pubPEM), string(auth.EncodePrivateKeyPEM(key))
+		}
 		if pub != "" {
 			// The body's key replaces the default key, which may be a row the
 			// keys API stored rather than the actor's own public_key.
@@ -442,6 +461,12 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if privateKey != "" {
+			// The private key is returned once and never stored.
+			obj["private_key"] = privateKey
+			writeJSON(w, http.StatusOK, obj)
+			return
+		}
 		writeRaw(w, http.StatusOK, raw)
 	}
 }
@@ -453,21 +478,41 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		// A user's org memberships, group memberships and pending invitations
-		// go with it, as they do on Chef (ON DELETE CASCADE, plus the authz actor
-		// leaving every group). They name the user by bare name, so anything left
-		// behind would be inherited by the next user created under that name.
-		// They are cleared before the record, so a failure part-way leaves a
-		// user that still exists and whose delete can simply be retried.
-		if segment == "users" {
-			if _, ok, err := org.Get(segment, name); err != nil {
+		if _, ok, err := org.Get(segment, name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if !ok {
+			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
+			return
+		}
+		// Everything that names the actor goes before the actor itself. ACLs,
+		// groups, keys, memberships and invitations name it by bare name, so
+		// anything left behind would be inherited by the next actor created
+		// under that name, as it is not on Chef, where they name an authz id
+		// and are deleted with it (ON DELETE CASCADE). Cleared first, a failure
+		// part-way leaves an actor that still exists, with less than it had,
+		// whose delete can simply be retried.
+		var cleanup []func() error
+		switch segment {
+		case "users":
+			// Its org memberships, group memberships, pending invitations, and
+			// every ACL entry naming it.
+			cleanup = append(cleanup, func() error { return a.removeUserFromOrgs(name) })
+		case "clients":
+			// Registration put it in the org's "clients" group, and ACLs may
+			// name it. A client and a user sharing a name are one principal to
+			// authorization, so dropping the name fails closed.
+			cleanup = append(cleanup,
+				func() error { return removeFromACLs(org, "actors", name) },
+				func() error { return removeActorFromAllGroups(org, memberClients, name) })
+		}
+		cleanup = append(cleanup,
+			func() error { return deleteACL(org, segment, name) },
+			func() error { return deleteActorKeys(org, segment, name) })
+		for _, step := range cleanup {
+			if err := step(); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
-			} else if ok {
-				if err := a.removeUserFromOrgs(name); err != nil {
-					writeError(w, http.StatusInternalServerError, err.Error())
-					return
-				}
 			}
 		}
 		raw, ok, err := org.Delete(segment, name)
@@ -479,31 +524,21 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 			return
 		}
-		if err := deleteACL(org, segment, name); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if err := deleteActorKeys(org, segment, name); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		// Registration put the client in the org's "clients" group. Membership
-		// must not outlive the actor: the group grants permission by name, so a
-		// later client registered under the same name would inherit it.
-		if segment == "clients" {
-			if err := removeActorFromAllGroups(org, memberClients, name); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
 		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), raw))
 	}
 }
 
-// removeUserFromOrgs drops a global user from every organization: its
-// membership, every group that names it (document and incremental rows), and
-// any invitation pending for it.
+// removeUserFromOrgs drops a deleted global user from every organization: its
+// membership, every group that names it (document and incremental rows), any
+// invitation pending for it, and every ACL entry naming it, there and in the
+// global scope where users' own ACLs live. (Dissociating a
+// user from one org keeps its ACL entries, as Chef does: the actor still
+// exists, and is the same actor if it is invited back.)
 func (a *API) removeUserFromOrgs(user string) error {
+	// Users' own ACLs live in the global scope and can name other users.
+	if err := removeFromACLs(a.store.Global(), "actors", user); err != nil {
+		return err
+	}
 	orgs, err := a.store.ListOrgs()
 	if err != nil {
 		return err
@@ -523,6 +558,9 @@ func (a *API) removeUserFromOrgs(user string) error {
 			return err
 		}
 		if err := removeActorFromAllGroups(org, memberUsers, user); err != nil {
+			return err
+		}
+		if err := removeFromACLs(org, "actors", user); err != nil {
 			return err
 		}
 	}

@@ -16,6 +16,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,51 +27,103 @@ import (
 	"github.com/cinc-project/cinc-server-ng/server"
 )
 
-// requireEnvVar makes a missing knife a failure rather than a skip. CI sets it,
+// requireEnvVar makes a missing tool a failure rather than a skip. CI sets it,
 // because a conformance job that silently executes nothing while reporting
 // success is worse than having no conformance job at all.
 const requireEnvVar = "CINC_SERVER_NG_REQUIRE_CONFORMANCE"
 
-// unavailable reports that knife cannot be used: it fails when conformance is
+// unavailable reports that a tool cannot be used: it fails when conformance is
 // required, and skips otherwise so a local `go test ./...` stays usable.
 func unavailable(t *testing.T, format string, args ...any) {
 	t.Helper()
 	if os.Getenv(requireEnvVar) != "" {
-		t.Fatalf("conformance is required (%s set) but knife is unusable: "+format,
+		t.Fatalf("conformance is required (%s set) but a tool is unusable: "+format,
 			append([]any{requireEnvVar}, args...)...)
 	}
 	t.Skipf(format, args...)
 }
 
-// knifeBin locates a runnable knife. Honor $KNIFE, else look on PATH.
+// findTool locates a runnable tool: $env if set, else the first of names on
+// PATH that answers --version. Cinc Workstation and the upstream gems name the
+// same tools differently (cinc vs chef-cli, cinc-client vs chef-client).
+func findTool(env string, names ...string) (string, error) {
+	candidates := names
+	if bin := os.Getenv(env); bin != "" {
+		candidates = []string{bin}
+	}
+	var lastErr error
+	for _, name := range candidates {
+		bin, err := exec.LookPath(name)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if out, err := exec.Command(bin, "--version").CombinedOutput(); err != nil {
+			lastErr = fmt.Errorf("%s --version: %v\n%s", bin, err, out)
+			continue
+		}
+		return bin, nil
+	}
+	return "", fmt.Errorf("none of %v is runnable (set $%s): %v", candidates, env, lastErr)
+}
+
 func knifeBin(t *testing.T) string {
 	t.Helper()
-	bin := os.Getenv("KNIFE")
-	if bin == "" {
-		var err error
-		if bin, err = exec.LookPath("knife"); err != nil {
-			unavailable(t, "knife not found on PATH; set $KNIFE or install cinc-workstation")
-		}
-	}
-	if out, err := exec.Command(bin, "--version").CombinedOutput(); err != nil {
-		unavailable(t, "knife (%s) is not runnable: %v\n%s", bin, err, out)
+	bin, err := findTool("KNIFE", "knife")
+	if err != nil {
+		unavailable(t, "knife: %v", err)
 	}
 	return bin
 }
 
-// harness runs knife against a cinc-server-ng server that enforces ACLs.
+// policyCLIBin is the Policyfile CLI: `cinc` in Cinc Workstation, `chef-cli`
+// from the gem, `chef` in Chef Workstation.
+func policyCLIBin(t *testing.T) string {
+	t.Helper()
+	bin, err := findTool("CINC_CLI", "cinc", "chef-cli", "chef")
+	if err != nil {
+		unavailable(t, "Policyfile CLI: %v", err)
+	}
+	return bin
+}
+
+// clientBin is the client that converges a node: cinc-client or chef-client.
+func clientBin(t *testing.T) string {
+	t.Helper()
+	bin, err := findTool("CINC_CLIENT", "cinc-client", "chef-client")
+	if err != nil {
+		unavailable(t, "client: %v", err)
+	}
+	return bin
+}
+
+// The identities every test can act as. The bootstrap admin is a superuser,
+// which bypasses ACLs, so commands run by default as alice: an ordinary user
+// who is an admin of the org, as a real operator is. That way every command a
+// test runs also exercises authorization.
+const (
+	orgName  = "acme"
+	userName = "alice"
+)
+
+// harness runs knife and the Policyfile CLI against a cinc-server-ng server
+// that enforces ACLs.
 type harness struct {
-	knife   string
-	dir     string
+	knife string
+	dir   string
+	srv   *server.Server
+	// superRB configures the bootstrap superuser; userRB configures alice.
+	superRB string
+	userRB  string
+	// knifeRB is the default identity for run: alice.
 	knifeRB string
-	srv     *server.Server
 }
 
 func setup(t *testing.T) *harness {
 	t.Helper()
 	knife := knifeBin(t)
 
-	srv, err := server.New(server.Options{Orgs: []string{"acme"}, EnforceACL: true})
+	srv, err := server.New(server.Options{Orgs: []string{orgName}, EnforceACL: true})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -89,48 +142,144 @@ func setup(t *testing.T) *harness {
 	write(t, filepath.Join(dir, "cookbooks", "mycook", "recipes", "default.rb"), "package 'nginx'\n")
 
 	h := &harness{knife: knife, dir: dir, srv: srv}
-	h.knifeRB = h.writeConfig(t, "knife.rb", srv.AdminName(), filepath.Join(dir, "admin.pem"))
+	h.superRB = h.writeConfig(t, "super.rb", srv.AdminName(), filepath.Join(dir, "admin.pem"))
+
+	// alice is created and made an org admin through knife itself, as an
+	// operator would.
+	alicePEM := filepath.Join(dir, userName+".pem")
+	h.runAs(t, h.superRB, "user", "create", userName, "--email", userName+"@example.com",
+		"--password", "correct-horse-battery", "--first-name", "Alice", "--last-name", "Admin",
+		"--file", alicePEM)
+	h.runAs(t, h.superRB, "org", "user", "add", orgName, userName, "--admin")
+	h.userRB = h.writeConfig(t, "knife.rb", userName, alicePEM)
+	h.knifeRB = h.userRB
 	return h
 }
 
 // writeConfig emits a knife.rb naming a particular identity, so the suite can
-// act as somebody other than the bootstrap admin.
+// act as somebody other than the default.
 func (h *harness) writeConfig(t *testing.T, name, nodeName, keyPath string) string {
 	t.Helper()
 	path := filepath.Join(h.dir, name)
 	write(t, path, strings.Join([]string{
 		"node_name '" + nodeName + "'",
 		"client_key '" + keyPath + "'",
-		"chef_server_url '" + h.srv.URL() + "/organizations/acme'",
+		"chef_server_url '" + h.srv.URL() + "/organizations/" + orgName + "'",
 		"ssl_verify_mode :verify_none",
 		"cookbook_path ['" + filepath.Join(h.dir, "cookbooks") + "']",
+		"chef_repo_path '" + filepath.Join(h.dir, "repo") + "'",
 		"",
 	}, "\n"))
 	return path
 }
 
-// run executes a knife subcommand as the admin and fails on a non-zero exit.
+// run executes a knife subcommand as alice and fails on a non-zero exit.
 func (h *harness) run(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := h.try(h.knifeRB, args...)
+	return h.runAs(t, h.knifeRB, args...)
+}
+
+// runAs executes a knife subcommand under a given config and fails on a
+// non-zero exit.
+func (h *harness) runAs(t *testing.T, config string, args ...string) string {
+	t.Helper()
+	out, err := h.try(config, nil, args...)
 	if err != nil {
 		t.Fatalf("knife %s\n  error: %v\n  output: %s", strings.Join(args, " "), err, out)
 	}
 	return out
 }
 
-// runAs executes a knife subcommand under a given config, returning the output
-// and whether it succeeded, so a test can assert on a denial.
-func (h *harness) runAs(config string, args ...string) (string, error) {
-	return h.try(config, args...)
+// tryAs runs a knife subcommand under a given config, returning the output and
+// whether it succeeded, so a test can assert on a refusal.
+func (h *harness) tryAs(config string, args ...string) (string, error) {
+	return h.try(config, nil, args...)
 }
 
-func (h *harness) try(config string, args ...string) (string, error) {
+// edit runs an interactive knife subcommand (one that opens $EDITOR) as alice,
+// with an editor that rewrites the document using the Ruby expression expr,
+// in which `doc` is the parsed JSON. That makes the edit commands testable for
+// what they are meant to do: change the object, not merely round-trip it.
+func (h *harness) edit(t *testing.T, expr string, args ...string) string {
+	t.Helper()
+	script := filepath.Join(h.dir, fmt.Sprintf("editor-%d.rb", time.Now().UnixNano()))
+	write(t, script, "require 'json'\npath = ARGV.last\ndoc = JSON.parse(File.read(path))\n"+
+		expr+"\nFile.write(path, JSON.pretty_generate(doc))\n")
+	editor := rubyBin(t) + " " + script
+	out, err := h.try(h.knifeRB, []string{"EDITOR=" + editor, "VISUAL=" + editor}, args...)
+	if err != nil {
+		t.Fatalf("knife %s (editing)\n  error: %v\n  output: %s", strings.Join(args, " "), err, out)
+	}
+	return out
+}
+
+// rubyBin finds the Ruby that knife runs on, for editor scripts.
+func rubyBin(t *testing.T) string {
+	t.Helper()
+	for _, candidate := range []string{"/opt/cinc-workstation/embedded/bin/ruby", "/opt/chef-workstation/embedded/bin/ruby"} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	bin, err := exec.LookPath("ruby")
+	if err != nil {
+		unavailable(t, "ruby not found for the editor script: %v", err)
+	}
+	return bin
+}
+
+func (h *harness) try(config string, env []string, args ...string) (string, error) {
+	recordKnife(args)
 	args = append(args, "--config", config)
 	cmd := exec.Command(h.knife, args...)
-	cmd.Env = append(os.Environ(), "HOME="+h.dir) // avoid the user's ~/.chef
+	cmd.Dir = h.dir
+	cmd.Env = append(append(os.Environ(), "HOME="+h.dir), env...) // avoid the user's ~/.chef
+	cmd.Stdin = strings.NewReader(strings.Repeat("Y\n", 20))      // answer confirmation prompts
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// cli runs a Policyfile CLI command as alice in dir, failing on a non-zero
+// exit. The CLI reads the same config as knife.
+func (h *harness) cli(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := h.tryCLI(dir, args...)
+	if err != nil {
+		t.Fatalf("policyfile cli %s\n  error: %v\n  output: %s", strings.Join(args, " "), err, out)
+	}
+	return out
+}
+
+func (h *harness) tryCLI(dir string, args ...string) (string, error) {
+	recordCLI(args)
+	bin, err := findTool("CINC_CLI", "cinc", "chef-cli", "chef")
+	if err != nil {
+		return "", err
+	}
+	full := append(append([]string{}, args...), "--config", h.knifeRB)
+	if !cliTakesConfig(args) {
+		full = args
+	}
+	cmd := exec.Command(bin, full...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "HOME="+h.dir, "CHEF_LICENSE=accept-no-persist")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// cliTakesConfig reports whether a Policyfile CLI command accepts --config:
+// only the ones that talk to the server do.
+func cliTakesConfig(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "push", "push-archive", "show-policy", "diff", "clean-policy-revisions",
+		"clean-policy-cookbooks", "delete-policy-group", "delete-policy", "undelete",
+		"install", "update":
+		return true
+	}
+	return false
 }
 
 // showJSON runs a knife show in JSON mode and decodes it, so assertions can
@@ -140,13 +289,26 @@ func (h *harness) try(config string, args ...string) (string, error) {
 func (h *harness) showJSON(t *testing.T, args ...string) map[string]any {
 	t.Helper()
 	out := h.run(t, append(args, "--format", "json")...)
-	// knife may print warnings before the document; start at the first brace.
+	return decodeObject(t, strings.Join(args, " "), out)
+}
+
+// raw issues a knife raw GET as alice and decodes the JSON object it returns:
+// the way a test checks what a command actually did on the server.
+func (h *harness) raw(t *testing.T, path string) map[string]any {
+	t.Helper()
+	return decodeObject(t, "raw "+path, h.run(t, "raw", path))
+}
+
+// decodeObject decodes the JSON object in a command's output, skipping any
+// warnings printed before it.
+func decodeObject(t *testing.T, what, out string) map[string]any {
+	t.Helper()
 	if i := strings.IndexByte(out, '{'); i > 0 {
 		out = out[i:]
 	}
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(out), &doc); err != nil {
-		t.Fatalf("knife %s: output is not JSON: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("%s: output is not a JSON object: %v\n%s", what, err, out)
 	}
 	return doc
 }
@@ -338,7 +500,7 @@ func TestKnifeACLEnforcement(t *testing.T) {
 
 	// The client authenticates and, being in the org's clients group, may read
 	// the node under Chef's default ACL.
-	if out, err := h.runAs(nodeCfg, "node", "show", "web01"); err != nil {
+	if out, err := h.tryAs(nodeCfg, "node", "show", "web01"); err != nil {
 		t.Fatalf("client should be able to read a node by default: %v\n%s", err, out)
 	}
 
@@ -352,7 +514,7 @@ func TestKnifeACLEnforcement(t *testing.T) {
 	// business and varies by version ("you are not authorized for this action"),
 	// so the assertion is that the request was refused as an authorization
 	// failure rather than on the exact phrasing.
-	out, err := h.runAs(nodeCfg, "node", "show", "web01")
+	out, err := h.tryAs(nodeCfg, "node", "show", "web01")
 	if err == nil {
 		t.Fatalf("client read a node whose ACL excludes it:\n%s", out)
 	}
@@ -361,7 +523,7 @@ func TestKnifeACLEnforcement(t *testing.T) {
 	}
 
 	// The admin is unaffected, since the superuser bypasses ACLs.
-	if out, err := h.runAs(h.knifeRB, "node", "show", "web01"); err != nil {
+	if out, err := h.tryAs(h.superRB, "node", "show", "web01"); err != nil {
 		t.Fatalf("admin should still read the node: %v\n%s", err, out)
 	}
 }
@@ -376,11 +538,11 @@ func TestKnifeClientBootstrapFlow(t *testing.T) {
 
 	write(t, filepath.Join(h.dir, "node2.json"),
 		`{"name":"node2","chef_environment":"_default","json_class":"Chef::Node","chef_type":"node"}`)
-	if out, err := h.runAs(nodeCfg, "node", "from", "file", filepath.Join(h.dir, "node2.json")); err != nil {
+	if out, err := h.tryAs(nodeCfg, "node", "from", "file", filepath.Join(h.dir, "node2.json")); err != nil {
 		t.Fatalf("a registered client must be able to create its own node: %v\n%s", err, out)
 	}
 	// And update it, which is what every converge does at the end of a run.
-	if out, err := h.runAs(nodeCfg, "node", "from", "file", filepath.Join(h.dir, "node2.json")); err != nil {
+	if out, err := h.tryAs(nodeCfg, "node", "from", "file", filepath.Join(h.dir, "node2.json")); err != nil {
 		t.Fatalf("a client must be able to update the node it created: %v\n%s", err, out)
 	}
 }

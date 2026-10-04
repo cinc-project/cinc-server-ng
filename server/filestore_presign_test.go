@@ -130,15 +130,16 @@ func TestCookbookRoundTripThroughSignedFileStore(t *testing.T) {
 		t.Fatalf("upload = %d, want 200: %s", code, body)
 	}
 
-	// 2. Publish a manifest referencing the uploaded checksum.
+	// 2. Publish a manifest referencing the uploaded checksum, in the all_files
+	// shape a client speaking server API v2 uses.
 	manifest := `{"name":"nginx-1.0.0","cookbook_name":"nginx","version":"1.0.0",` +
 		`"all_files":[{"name":"recipes/default.rb","path":"recipes/default.rb","checksum":"` + checksum + `","specificity":"default"}]}`
-	if code := statusOf(t, signed(t, srv, "PUT", base+"/cookbooks/nginx/1.0.0", manifest)); code != http.StatusCreated {
+	if code := statusOf(t, signedAt(t, srv, "2", "PUT", base+"/cookbooks/nginx/1.0.0", manifest)); code != http.StatusCreated {
 		t.Fatalf("publish cookbook = %d, want 201", code)
 	}
 
 	// 3. Read the cookbook back and follow the download URL it advertises.
-	resp, err := http.DefaultClient.Do(signed(t, srv, "GET", base+"/cookbooks/nginx/1.0.0", ""))
+	resp, err := http.DefaultClient.Do(signedAt(t, srv, "2", "GET", base+"/cookbooks/nginx/1.0.0", ""))
 	if err != nil {
 		t.Fatal(err)
 	}

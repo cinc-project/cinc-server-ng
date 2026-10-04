@@ -18,25 +18,25 @@ func TestOverwritingACookbookVersionCollectsOrphanedBlobs(t *testing.T) {
 	oldSum, newSum := md5hex(oldContent), md5hex(newContent)
 
 	for content, sum := range map[string]string{oldContent: oldSum, newContent: newSum} {
-		if resp, body := do(t, "PUT", base+"/file_store/"+sum, content); resp.StatusCode != http.StatusOK {
+		if resp, body := doAt(t, "2", "PUT", base+"/file_store/"+sum, content); resp.StatusCode != http.StatusOK {
 			t.Fatalf("upload = %d: %s", resp.StatusCode, body)
 		}
 	}
-	if resp, body := do(t, "PUT", base+"/cookbooks/nginx/1.0.0",
+	if resp, body := doAt(t, "2", "PUT", base+"/cookbooks/nginx/1.0.0",
 		manifest("nginx", "1.0.0", oldSum)); resp.StatusCode >= 300 {
 		t.Fatalf("first put = %d: %s", resp.StatusCode, body)
 	}
 	// Re-upload the same version with different content, as `knife upload` does
 	// after an edit.
-	if resp, body := do(t, "PUT", base+"/cookbooks/nginx/1.0.0",
+	if resp, body := doAt(t, "2", "PUT", base+"/cookbooks/nginx/1.0.0",
 		manifest("nginx", "1.0.0", newSum)); resp.StatusCode >= 300 {
 		t.Fatalf("second put = %d: %s", resp.StatusCode, body)
 	}
 
-	if resp, _ := do(t, "GET", base+"/file_store/"+newSum, ""); resp.StatusCode != http.StatusOK {
+	if resp, _ := doAt(t, "2", "GET", base+"/file_store/"+newSum, ""); resp.StatusCode != http.StatusOK {
 		t.Errorf("the current file body is gone = %d, want 200", resp.StatusCode)
 	}
-	if resp, _ := do(t, "GET", base+"/file_store/"+oldSum, ""); resp.StatusCode != http.StatusNotFound {
+	if resp, _ := doAt(t, "2", "GET", base+"/file_store/"+oldSum, ""); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("the replaced file body survived the overwrite = %d, want 404", resp.StatusCode)
 	}
 }
@@ -53,23 +53,23 @@ func TestOverwriteKeepsBlobsSharedWithAnotherVersion(t *testing.T) {
 	sharedSum, newSum := md5hex(shared), md5hex(replacement)
 
 	for content, sum := range map[string]string{shared: sharedSum, replacement: newSum} {
-		if resp, _ := do(t, "PUT", base+"/file_store/"+sum, content); resp.StatusCode != http.StatusOK {
+		if resp, _ := doAt(t, "2", "PUT", base+"/file_store/"+sum, content); resp.StatusCode != http.StatusOK {
 			t.Fatalf("upload %s failed", sum)
 		}
 	}
 	// Two versions reference the same file body.
 	for _, v := range []string{"1.0.0", "2.0.0"} {
-		if resp, body := do(t, "PUT", base+"/cookbooks/nginx/"+v,
+		if resp, body := doAt(t, "2", "PUT", base+"/cookbooks/nginx/"+v,
 			manifest("nginx", v, sharedSum)); resp.StatusCode >= 300 {
 			t.Fatalf("put %s = %d: %s", v, resp.StatusCode, body)
 		}
 	}
 	// Overwrite one of them to point elsewhere.
-	if resp, body := do(t, "PUT", base+"/cookbooks/nginx/1.0.0",
+	if resp, body := doAt(t, "2", "PUT", base+"/cookbooks/nginx/1.0.0",
 		manifest("nginx", "1.0.0", newSum)); resp.StatusCode >= 300 {
 		t.Fatalf("overwrite = %d: %s", resp.StatusCode, body)
 	}
-	if resp, _ := do(t, "GET", base+"/file_store/"+sharedSum, ""); resp.StatusCode != http.StatusOK {
+	if resp, _ := doAt(t, "2", "GET", base+"/file_store/"+sharedSum, ""); resp.StatusCode != http.StatusOK {
 		t.Errorf("a body still referenced by 2.0.0 was collected = %d, want 200", resp.StatusCode)
 	}
 }

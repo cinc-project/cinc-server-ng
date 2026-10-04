@@ -6,6 +6,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -126,7 +127,32 @@ func (a *API) Handler() http.Handler {
 	if a.enforceACL {
 		h = a.authzMiddleware(h)
 	}
-	return withAPIVersion(h)
+	return withoutTrailingSlash(withAPIVersion(h))
+}
+
+// withoutTrailingSlash routes "/users/" as "/users", as Chef Infra Server does
+// (webmachine matches path tokens, so a trailing slash is not one), and real
+// clients rely on it: knife user create posts to "/users/". It is the
+// outermost layer on purpose: authorization classifies requests by path, and
+// an unrecognized read is allowed through, so a slash that survived to that
+// point could make "/nodes/web01/" skip its ACL check and then route anyway.
+func withoutTrailingSlash(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if len(p) <= 1 || !strings.HasSuffix(p, "/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		r = r.Clone(r.Context())
+		r.URL.Path = strings.TrimRight(p, "/")
+		if r.URL.Path == "" {
+			r.URL.Path = "/"
+		}
+		if r.URL.RawPath != "" {
+			r.URL.RawPath = strings.TrimRight(r.URL.RawPath, "/")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // org resolves the {org} path value to its store, writing a 404 and returning

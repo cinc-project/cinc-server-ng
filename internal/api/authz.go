@@ -62,7 +62,7 @@ func (a *API) registerAuthzRoutes(mux *recordingMux) {
 	mux.HandleFunc("POST "+groups, a.createGroup)
 	mux.HandleFunc("GET "+groups+"/{name}", a.getGroup)
 	mux.HandleFunc("PUT "+groups+"/{name}", a.putGroup)
-	mux.HandleFunc("DELETE "+groups+"/{name}", a.deleteObject("groups"))
+	mux.HandleFunc("DELETE "+groups+"/{name}", a.deleteGroup)
 	mux.HandleFunc("HEAD "+groups+"/{name}", a.headObject("groups"))
 
 	// Containers are keyed by "containername"; list and read are what tooling
@@ -174,6 +174,91 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRaw(w, http.StatusOK, doc)
+}
+
+// deleteGroup deletes a group and every reference to it.
+//
+// erchef names a group in an ACL, or in another group, by its authz id, and
+// deleting the group deletes those references with it, so a group created
+// later under the same name holds nothing. Here both name it by its name, so a
+// reference left behind would be a grant to whoever is put in the next group
+// of that name. The group's ACL, its incremental membership rows, its place in
+// other groups (document and rows), and its entries in the org's ACLs all go.
+func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
+	org := a.org(w, r)
+	if org == nil {
+		return
+	}
+	name := r.PathValue("name")
+	if _, ok, err := org.Get("groups", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
+		return
+	}
+	// References go before the group itself, so a failure part-way leaves a
+	// group that has lost some grants (and whose delete can be retried), never
+	// a deleted group whose grants wait for the next group of its name.
+	for _, step := range []func() error{
+		func() error { return removeFromACLs(org, "groups", name) },
+		func() error { return removeActorFromAllGroups(org, memberGroups, name) },
+		func() error { return clearMembers(org, name) },
+		func() error { return deleteACL(org, "groups", name) },
+	} {
+		if err := step(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	raw, ok, err := org.Delete("groups", name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
+		return
+	}
+	writeRaw(w, http.StatusOK, raw)
+}
+
+// removeFromACLs drops name from the actors or groups (kind) of every ACE of
+// every ACL stored in org: what deleting a group, a client or a user must do,
+// since an ACL names them by bare name and would otherwise grant whatever is
+// created next under it. ACLs are collected during the scan and rewritten after
+// it, since a Range callback must not write back into the store.
+func removeFromACLs(org *store.Org, kind, name string) error {
+	changed := map[string][]byte{}
+	if err := org.Range("acls", func(key string, raw []byte) bool {
+		var acl map[string]any
+		if json.Unmarshal(raw, &acl) != nil {
+			return true
+		}
+		var dirty bool
+		for _, perm := range aclPerms {
+			ace, ok := acl[perm].(map[string]any)
+			if !ok {
+				continue
+			}
+			if kept, removed := without(anyStrings(ace[kind]), name); removed {
+				ace[kind] = kept
+				dirty = true
+			}
+		}
+		if dirty {
+			changed[key] = mustEncode(acl)
+		}
+		return true
+	}); err != nil {
+		return err
+	}
+	for key, raw := range changed {
+		if err := org.Put("acls", key, raw); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // knownGroupMembers keeps only the members of a group update that exist: users
