@@ -484,6 +484,19 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 		// behind would be inherited by the next user created under that name.
 		// They are cleared before the record, so a failure part-way leaves a
 		// user that still exists and whose delete can simply be retried.
+		// A client's ACL entries go first for the same reason, once it is known
+		// to exist: on a missing client this would strip a same-named user's.
+		if segment == "clients" {
+			if _, ok, err := org.Get(segment, name); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			} else if ok {
+				if err := removeFromACLs(org, "actors", name); err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
+		}
 		if segment == "users" {
 			if _, ok, err := org.Get(segment, name); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
@@ -525,9 +538,11 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 	}
 }
 
-// removeUserFromOrgs drops a global user from every organization: its
-// membership, every group that names it (document and incremental rows), and
-// any invitation pending for it.
+// removeUserFromOrgs drops a deleted global user from every organization: its
+// membership, every group that names it (document and incremental rows), any
+// invitation pending for it, and every ACL entry naming it. (Dissociating a
+// user from one org keeps its ACL entries, as Chef does: the actor still
+// exists, and is the same actor if it is invited back.)
 func (a *API) removeUserFromOrgs(user string) error {
 	orgs, err := a.store.ListOrgs()
 	if err != nil {
@@ -548,6 +563,9 @@ func (a *API) removeUserFromOrgs(user string) error {
 			return err
 		}
 		if err := removeActorFromAllGroups(org, memberUsers, user); err != nil {
+			return err
+		}
+		if err := removeFromACLs(org, "actors", user); err != nil {
 			return err
 		}
 	}

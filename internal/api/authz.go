@@ -190,6 +190,27 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
+	if _, ok, err := org.Get("groups", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
+		return
+	}
+	// References go before the group itself, so a failure part-way leaves a
+	// group that has lost some grants (and whose delete can be retried), never
+	// a deleted group whose grants wait for the next group of its name.
+	for _, step := range []func() error{
+		func() error { return removeFromACLs(org, "groups", name) },
+		func() error { return removeActorFromAllGroups(org, memberGroups, name) },
+		func() error { return clearMembers(org, name) },
+		func() error { return deleteACL(org, "groups", name) },
+	} {
+		if err := step(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	raw, ok, err := org.Delete("groups", name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -199,24 +220,15 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
 		return
 	}
-	for _, step := range []func() error{
-		func() error { return deleteACL(org, "groups", name) },
-		func() error { return clearMembers(org, name) },
-		func() error { return removeActorFromAllGroups(org, memberGroups, name) },
-		func() error { return removeGroupFromACLs(org, name) },
-	} {
-		if err := step(); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
 	writeRaw(w, http.StatusOK, raw)
 }
 
-// removeGroupFromACLs drops group from every ACE of every ACL stored in org.
-// ACLs are collected during the scan and rewritten after it, since a Range
-// callback must not write back into the store.
-func removeGroupFromACLs(org *store.Org, group string) error {
+// removeFromACLs drops name from the actors or groups (kind) of every ACE of
+// every ACL stored in org: what deleting a group, a client or a user must do,
+// since an ACL names them by bare name and would otherwise grant whatever is
+// created next under it. ACLs are collected during the scan and rewritten after
+// it, since a Range callback must not write back into the store.
+func removeFromACLs(org *store.Org, kind, name string) error {
 	changed := map[string][]byte{}
 	if err := org.Range("acls", func(key string, raw []byte) bool {
 		var acl map[string]any
@@ -229,8 +241,8 @@ func removeGroupFromACLs(org *store.Org, group string) error {
 			if !ok {
 				continue
 			}
-			if groups, removed := without(anyStrings(ace["groups"]), group); removed {
-				ace["groups"] = groups
+			if kept, removed := without(anyStrings(ace[kind]), name); removed {
+				ace[kind] = kept
 				dirty = true
 			}
 		}
