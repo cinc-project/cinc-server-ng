@@ -157,6 +157,13 @@ func parseAPIVersion(header string) (version int, ok bool) {
 	return n, true
 }
 
+// requestAPIVersion is the server API version a request asked for;
+// withAPIVersion has already rejected a malformed or unsupported one.
+func requestAPIVersion(r *http.Request) int {
+	v, _ := parseAPIVersion(r.Header.Get("X-Ops-Server-API-Version"))
+	return v
+}
+
 // setVersionHeader writes the X-Ops-Server-API-Version negotiation document.
 // Chef encodes the values as JSON strings, which clients parse back to ints.
 func setVersionHeader(w http.ResponseWriter, requested, response int) {

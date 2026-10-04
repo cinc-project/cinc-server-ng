@@ -404,12 +404,31 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			lowerEmail(obj)
 			obj = mergeUser(stored, obj)
 		}
+		// At API v0, "private_key": true asks the server to regenerate the
+		// actor's default key and return the new private key: what `knife
+		// client reregister` and `knife user reregister` send (they pin v0).
+		// The request was already authorized as an update of this actor.
+		regenerate := obj["private_key"] == true && requestAPIVersion(r) == 0
 		delete(obj, "private_key")
 		// A PUT that omits the public key must not silently drop the actor's
 		// existing key — that would break its authentication. Carry the stored
 		// key forward (key changes go through the keys API, not a bare update),
 		// normalizing a nested chef_key to the top-level field either way.
 		pub := bodyPublicKey(obj)
+		var privateKey string
+		if regenerate {
+			key, err := auth.GenerateKey()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "key generation failed")
+				return
+			}
+			pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "key encoding failed")
+				return
+			}
+			pub, privateKey = string(pubPEM), string(auth.EncodePrivateKeyPEM(key))
+		}
 		if pub != "" {
 			// The body's key replaces the default key, which may be a row the
 			// keys API stored rather than the actor's own public_key.
@@ -440,6 +459,12 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		raw := mustEncode(obj)
 		if err := org.Put(segment, name, raw); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if privateKey != "" {
+			// The private key is returned once and never stored.
+			obj["private_key"] = privateKey
+			writeJSON(w, http.StatusOK, obj)
 			return
 		}
 		writeRaw(w, http.StatusOK, raw)
