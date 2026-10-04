@@ -105,8 +105,16 @@ func getBody(t *testing.T, url string) string {
 	return string(body)
 }
 
-// signed builds a request signed with the server's admin key.
+// signed builds a request signed with the server's admin key, at server API
+// version 1.
 func signed(t *testing.T, srv *Server, method, url, body string) *http.Request {
+	t.Helper()
+	return signedAt(t, srv, "1", method, url, body)
+}
+
+// signedAt is signed at a given server API version, which is part of what
+// protocol 1.3 signs.
+func signedAt(t *testing.T, srv *Server, version, method, url, body string) *http.Request {
 	t.Helper()
 	key, err := auth.ParsePrivateKey(srv.AdminKey())
 	if err != nil {
@@ -120,7 +128,7 @@ func signed(t *testing.T, srv *Server, method, url, body string) *http.Request {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("X-Ops-Server-API-Version", "1")
+	req.Header.Set("X-Ops-Server-API-Version", version)
 	ts := time.Now().UTC().Format(time.RFC3339)
 	if err := auth.SignRequest(req, srv.AdminName(), ts, []byte(body), key); err != nil {
 		t.Fatalf("sign: %v", err)

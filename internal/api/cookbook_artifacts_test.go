@@ -9,7 +9,7 @@ import (
 func TestCookbookArtifactsEmptyList(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
-	resp, body := do(t, "GET", base+"/cookbook_artifacts", "")
+	resp, body := doAt(t, "2", "GET", base+"/cookbook_artifacts", "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("empty list = %d, want 200: %s", resp.StatusCode, body)
 	}
@@ -23,10 +23,10 @@ func TestCookbookArtifactImmutableReupload(t *testing.T) {
 	base := srv.URL + "/organizations/acme"
 	sum := uploadBlob(t, base, "package 'nginx'\n")
 	const ident = "1234567890abcdef1234567890abcdef12345678"
-	if resp, body := do(t, "PUT", base+"/cookbook_artifacts/nginx/"+ident, manifest("nginx", "1.0.0", sum)); resp.StatusCode != 201 {
+	if resp, body := doAt(t, "2", "PUT", base+"/cookbook_artifacts/nginx/"+ident, manifest("nginx", "1.0.0", sum)); resp.StatusCode != 201 {
 		t.Fatalf("first put = %d: %s", resp.StatusCode, body)
 	}
-	resp, body := do(t, "PUT", base+"/cookbook_artifacts/nginx/"+ident, manifest("nginx", "1.0.0", sum))
+	resp, body := doAt(t, "2", "PUT", base+"/cookbook_artifacts/nginx/"+ident, manifest("nginx", "1.0.0", sum))
 	if resp.StatusCode != 409 {
 		t.Fatalf("re-upload = %d, want 409: %s", resp.StatusCode, body)
 	}
@@ -37,7 +37,7 @@ func TestCookbookArtifactImmutableReupload(t *testing.T) {
 func uploadBlob(t *testing.T, base, content string) string {
 	t.Helper()
 	sum := md5hex(content)
-	resp, body := do(t, "PUT", base+"/file_store/"+sum, content)
+	resp, body := doAt(t, "2", "PUT", base+"/file_store/"+sum, content)
 	if resp.StatusCode != 200 {
 		t.Fatalf("upload blob = %d: %s", resp.StatusCode, body)
 	}
@@ -52,13 +52,13 @@ func TestCookbookArtifactLifecycle(t *testing.T) {
 	const ident = "1234567890abcdef1234567890abcdef12345678"
 
 	// PUT the artifact under an opaque identifier.
-	resp, body := do(t, "PUT", base+"/cookbook_artifacts/nginx/"+ident, manifest("nginx", "1.0.0", sum))
+	resp, body := doAt(t, "2", "PUT", base+"/cookbook_artifacts/nginx/"+ident, manifest("nginx", "1.0.0", sum))
 	if resp.StatusCode != 201 && resp.StatusCode != 200 {
 		t.Fatalf("put artifact = %d: %s", resp.StatusCode, body)
 	}
 
 	// List exposes the artifact keyed by identifier (not version).
-	_, body = do(t, "GET", base+"/cookbook_artifacts", "")
+	_, body = doAt(t, "2", "GET", base+"/cookbook_artifacts", "")
 	var list map[string]struct {
 		URL      string `json:"url"`
 		Versions []struct {
@@ -72,7 +72,7 @@ func TestCookbookArtifactLifecycle(t *testing.T) {
 	}
 
 	// GET the artifact: file URLs injected from the shared blob store.
-	_, body = do(t, "GET", base+"/cookbook_artifacts/nginx/"+ident, "")
+	_, body = doAt(t, "2", "GET", base+"/cookbook_artifacts/nginx/"+ident, "")
 	var cb map[string]any
 	json.Unmarshal([]byte(body), &cb)
 	files, _ := cb["all_files"].([]any)
@@ -84,17 +84,17 @@ func TestCookbookArtifactLifecycle(t *testing.T) {
 	}
 
 	// GET single artifact by name.
-	resp, body = do(t, "GET", base+"/cookbook_artifacts/nginx", "")
+	resp, body = doAt(t, "2", "GET", base+"/cookbook_artifacts/nginx", "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("get artifact by name = %d: %s", resp.StatusCode, body)
 	}
 
 	// Delete it.
-	resp, _ = do(t, "DELETE", base+"/cookbook_artifacts/nginx/"+ident, "")
+	resp, _ = doAt(t, "2", "DELETE", base+"/cookbook_artifacts/nginx/"+ident, "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("delete artifact = %d", resp.StatusCode)
 	}
-	resp, _ = do(t, "GET", base+"/cookbook_artifacts/nginx/"+ident, "")
+	resp, _ = doAt(t, "2", "GET", base+"/cookbook_artifacts/nginx/"+ident, "")
 	if resp.StatusCode != 404 {
 		t.Fatalf("get deleted artifact = %d", resp.StatusCode)
 	}
@@ -103,7 +103,7 @@ func TestCookbookArtifactLifecycle(t *testing.T) {
 func TestCookbookArtifactMissingChecksum(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
-	resp, body := do(t, "PUT", base+"/cookbook_artifacts/nginx/abc", manifest("nginx", "1.0.0", md5hex("nope")))
+	resp, body := doAt(t, "2", "PUT", base+"/cookbook_artifacts/nginx/abc", manifest("nginx", "1.0.0", md5hex("nope")))
 	if resp.StatusCode != 400 {
 		t.Fatalf("artifact with missing checksum = %d, want 400: %s", resp.StatusCode, body)
 	}
@@ -112,11 +112,11 @@ func TestCookbookArtifactMissingChecksum(t *testing.T) {
 func TestCookbookArtifactMissing404(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
-	resp, _ := do(t, "GET", base+"/cookbook_artifacts/ghost", "")
+	resp, _ := doAt(t, "2", "GET", base+"/cookbook_artifacts/ghost", "")
 	if resp.StatusCode != 404 {
 		t.Fatalf("missing artifact = %d, want 404", resp.StatusCode)
 	}
-	resp, _ = do(t, "GET", base+"/cookbook_artifacts/ghost/abc", "")
+	resp, _ = doAt(t, "2", "GET", base+"/cookbook_artifacts/ghost/abc", "")
 	if resp.StatusCode != 404 {
 		t.Fatalf("missing artifact identifier = %d, want 404", resp.StatusCode)
 	}
@@ -136,11 +136,11 @@ func TestUniverse(t *testing.T) {
 			{"name": "recipes/default.rb", "path": "recipes/default.rb", "checksum": "` + sum + `", "specificity": "default"}
 		]
 	}`
-	if resp, body := do(t, "PUT", base+"/cookbooks/nginx/1.0.0", m); resp.StatusCode >= 300 {
+	if resp, body := doAt(t, "2", "PUT", base+"/cookbooks/nginx/1.0.0", m); resp.StatusCode >= 300 {
 		t.Fatalf("put cookbook = %d: %s", resp.StatusCode, body)
 	}
 
-	_, body := do(t, "GET", base+"/universe", "")
+	_, body := doAt(t, "2", "GET", base+"/universe", "")
 	var universe map[string]map[string]struct {
 		LocationType string         `json:"location_type"`
 		LocationPath string         `json:"location_path"`
