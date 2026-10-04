@@ -18,6 +18,8 @@ jobs:
   conformance:
     name: knife against cinc-server-ng
     runs-on: ubuntu-latest
+    env:
+      CINC_WORKSTATION_VERSION: 26.3.0
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,16 +30,28 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Pinned: the suite fails unless every knife and Policyfile CLI command
+      # is tested or excluded (conformance/coverage_test.go), so a new
+      # Workstation release that adds a command must not fail an unrelated pull
+      # request. Bump this deliberately, and cover the new commands with it.
       - name: Install Cinc Workstation
-        run: curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-workstation -c stable
+        run: curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-workstation -c stable -v "$CINC_WORKSTATION_VERSION"
 
-      - name: Locate knife
+      - name: Locate the tools
         run: |
+          echo "/opt/cinc-workstation/bin" >> "$GITHUB_PATH"
           export PATH="/opt/cinc-workstation/bin:$PATH"
           knife --version
-          echo "KNIFE=$(command -v knife)" >> "$GITHUB_ENV"
+          cinc --version
+          cinc-client --version
+          {
+            echo "KNIFE=$(command -v knife)"
+            echo "CINC_CLI=$(command -v cinc)"
+            echo "CINC_CLIENT=$(command -v cinc-client)"
+          } >> "$GITHUB_ENV"
 
       - name: Run conformance suite
         env:
           CINC_SERVER_NG_REQUIRE_CONFORMANCE: "1"
-        run: go test -tags conformance ./conformance/ -v
+          CHEF_LICENSE: accept-no-persist
+        run: go test -tags conformance ./conformance/ -v -timeout 30m
