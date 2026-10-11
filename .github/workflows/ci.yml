@@ -30,4 +30,4 @@ jobs:
         with:
           # Pinned so a new linter release cannot turn a green branch red
           # without a commit. Matches the version `make lint` documents.
-          version: v2.13.2
+          version: v2.14.0
