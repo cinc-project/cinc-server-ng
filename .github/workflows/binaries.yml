@@ -24,7 +24,9 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          # No cache in a release build: the Actions cache is shared across refs,
+          # so a poisoned entry from a lower-trust run would ship in the assets.
+          cache: false
 
       - name: Build archives
         env:
