@@ -107,6 +107,8 @@ func run(args []string, out io.Writer) error {
 		case "version", "--version", "-version":
 			fmt.Fprintf(out, "cinc-server-ng %s (commit %s, built %s)\n", version, commit, buildDate)
 			return nil
+		case "healthcheck":
+			return healthcheck(args[1:], out)
 		}
 	}
 
