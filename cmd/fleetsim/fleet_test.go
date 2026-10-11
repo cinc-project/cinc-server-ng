@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +36,22 @@ func TestSelectStuckCeil(t *testing.T) {
 	got := selectStuck([]string{"a", "b", "c"}, 0.02, rand.New(rand.NewSource(1)))
 	if len(got) != 1 {
 		t.Fatalf("got %d, want 1", len(got))
+	}
+}
+
+// TestSelectStuckOutOfRangeFrac pins that a fraction outside [0,1] (including
+// NaN, which converts to an unspecified int) clamps instead of panicking on a
+// negative allocation or slice bound.
+func TestSelectStuckOutOfRangeFrac(t *testing.T) {
+	names := []string{"a", "b", "c"}
+	for _, tc := range []struct {
+		frac float64
+		want int
+	}{{-0.5, 0}, {math.Inf(-1), 0}, {math.NaN(), 0}, {1.5, 3}, {math.Inf(1), 3}} {
+		got := selectStuck(names, tc.frac, rand.New(rand.NewSource(1)))
+		if len(got) != tc.want {
+			t.Errorf("frac %v: got %d stuck, want %d", tc.frac, len(got), tc.want)
+		}
 	}
 }
 

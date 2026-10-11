@@ -64,6 +64,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "need -base")
 		os.Exit(2)
 	}
+	if !(*stuck >= 0 && *stuck <= 1) {
+		fmt.Fprintln(os.Stderr, "-stuck must be between 0 and 1")
+		os.Exit(2)
+	}
 	c, err := newClient(*base, *user, *keyPEM, time.Duration(*timeoutMS)*time.Millisecond)
 	if err != nil {
 		log.Fatalf("client: %v", err)
