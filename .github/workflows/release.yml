@@ -55,8 +55,9 @@ jobs:
             VERSION=${{ github.event.release.tag_name }}
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ env.BUILD_DATE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # No layer cache: this publishes the image, and the Actions cache is
+          # shared across refs, so a poisoned entry would ship in the release.
+          no-cache: true
           # BuildKit attestations attached to the image index: a full provenance
           # record (mode=max) and an SPDX SBOM, inspectable with
           # `docker buildx imagetools inspect --format '{{json .SBOM}}' <ref>`.
