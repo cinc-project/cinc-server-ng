@@ -235,6 +235,12 @@ docker run -p 8889:8889 -v cinc-data:/data \
   ghcr.io/cinc-project/cinc-server-ng:latest --storage sqlite --db /data/cinc.db
 ```
 
+The image defines a `HEALTHCHECK` that runs `cinc-server-ng healthcheck`, which
+probes `/_status` on `127.0.0.1:8889` and exits non-zero unless it answers 200.
+If you change the listen port, override the check with `--addr` (for example
+`--health-cmd "/cinc-server-ng healthcheck --addr 127.0.0.1:9000"`). The same
+subcommand works as a Kubernetes `exec` probe.
+
 ## Compatibility with Chef Infra Server
 
 Fidelity is the point of this project, so it is tested three ways, each

@@ -17,5 +17,8 @@ COPY --from=build /cinc-server-ng /cinc-server-ng
 COPY --from=build --chown=65532:65532 /data /data
 USER 65532:65532
 EXPOSE 8889
+# distroless has no shell or curl, so the binary probes its own /_status.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/cinc-server-ng", "healthcheck", "--addr", "127.0.0.1:8889"]
 ENTRYPOINT ["/cinc-server-ng"]
 CMD ["--addr", "0.0.0.0:8889"]
