@@ -406,7 +406,11 @@ func (s *Server) Start() error {
 	}
 	s.listener = ln
 	s.url = "http://" + ln.Addr().String()
-	s.httpSrv = &http.Server{Handler: s.handler}
+	s.httpSrv = &http.Server{
+		Handler:           s.handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
+	}
 	go func() {
 		if err := s.httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			// Serve errors after Close are expected; nothing to do here.
@@ -454,3 +458,13 @@ func (s *Server) Store() *store.Store { return s.store }
 // Metrics returns the server's instrument registry, so an embedding program can
 // gather the same numbers /_stats serves.
 func (s *Server) Metrics() *metrics.Registry { return s.api.Metrics() }
+
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers (the Slowloris defence). Real chef-client and knife send headers
+// immediately. Only the header phase is bounded: a ReadTimeout or WriteTimeout
+// would cap whole bodies and cut off large cookbook transfers on slow links.
+var readHeaderTimeout = 10 * time.Second
+
+// idleTimeout closes keep-alive connections that sit unused, so idle sockets
+// cannot accumulate either. Clients reconnect transparently.
+var idleTimeout = 2 * time.Minute
