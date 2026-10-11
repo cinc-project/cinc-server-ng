@@ -23,7 +23,12 @@ func selectStuck(names []string, frac float64, rng *rand.Rand) map[string]bool {
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
 	rng.Shuffle(len(sorted), func(i, j int) { sorted[i], sorted[j] = sorted[j], sorted[i] })
-	k := min(int(math.Ceil(frac*float64(len(sorted)))), len(sorted))
+	// Clamp before converting: NaN or a negative fraction would otherwise give a
+	// negative k and panic on the allocation and slice bound below.
+	if !(frac > 0) {
+		frac = 0
+	}
+	k := min(int(math.Ceil(min(frac, 1)*float64(len(sorted)))), len(sorted))
 	stuck := make(map[string]bool, k)
 	for _, name := range sorted[:k] {
 		stuck[name] = true
