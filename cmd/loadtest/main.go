@@ -26,6 +26,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -52,6 +53,7 @@ var (
 	label     = flag.String("label", "server", "label for output")
 	caCert    = flag.String("cacert", "", "PEM certificate to trust in addition to the system roots, for a server using its own CA")
 	chefVer   = flag.String("chefversion", "18.10.17", "value for the X-Chef-Version header, which a Chef Infra Server front end uses to tell an API client from a browser")
+	jsonOut   = flag.String("json", "", "also write the results as JSON to this path, for cmd/benchreport")
 )
 
 var signer struct {
@@ -61,6 +63,47 @@ var signer struct {
 }
 
 type op struct{ name, method, path, body string }
+
+// result is one run against one server, as written by -json. A negative
+// latency or QPS means the phase had no successful request to measure.
+type result struct {
+	Label string     `json:"label"`
+	Base  string     `json:"base"`
+	Auth  bool       `json:"auth"`
+	Conc  int        `json:"conc"`
+	Ops   []opResult `json:"ops"`
+}
+
+type opResult struct {
+	Name   string  `json:"name"`
+	ColdMS float64 `json:"cold_ms"`
+	P50MS  float64 `json:"p50_ms"`
+	P95MS  float64 `json:"p95_ms"`
+	QPS1   float64 `json:"qps1"`
+	QPSC   float64 `json:"qpsc"`
+	// Errors counts requests that failed or answered other than 2xx, across
+	// the cold, warm and concurrent phases.
+	Errors int `json:"errors"`
+}
+
+// failed reports whether any request in the run failed. A run with failures
+// is not a measurement of the server: it may be timing rejections.
+func (r result) failed() bool {
+	for _, o := range r.Ops {
+		if o.Errors > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func writeResult(path string, r result) error {
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
 
 func main() {
 	flag.Parse()
@@ -77,7 +120,12 @@ func main() {
 	}
 
 	fmt.Printf("== %s (%s, auth=%v) ==\n", *label, *base, signer.on)
-	seed(*seedN)
+	created, failed := seed(*seedN)
+	fmt.Printf("seeded %d nodes (%d newly created)\n", *seedN, created)
+	if failed > 0 {
+		fmt.Fprintf(os.Stderr, "loadtest: %d of %d nodes failed to seed; check the URL and signing identity\n", failed, *seedN)
+		os.Exit(1)
+	}
 
 	// The cold sample of each op is its first request after seeding. cinc-server-ng's
 	// match-all (*:*) search returns whole objects without flattening, so the
@@ -94,17 +142,36 @@ func main() {
 	}
 	presign(ops)
 
-	fmt.Printf("%-18s %9s %9s %9s %12s %12s\n",
-		"operation", "cold ms", "p50 ms", "p95 ms", "QPS@1", fmt.Sprintf("QPS@%d", *conc))
+	res := result{Label: *label, Base: *base, Auth: signer.on, Conc: *conc}
+	fmt.Printf("%-18s %9s %9s %9s %12s %12s %8s\n",
+		"operation", "cold ms", "p50 ms", "p95 ms", "QPS@1", fmt.Sprintf("QPS@%d", *conc), "errors")
 	for _, o := range ops {
 		cold := timeOne(o)
-		p50, p95, qps1 := warmPhase(o, *warmN)
-		qpsC := qpsPhase(o, *conc, time.Duration(*durMS)*time.Millisecond)
-		fmt.Printf("%-18s %9s %9s %9s %12s %12s\n",
-			o.name, f(cold), f(p50), f(p95), n(qps1), n(qpsC))
+		p50, p95, qps1, warmErrs := warmPhase(o, *warmN)
+		qpsC, qpsErrs := qpsPhase(o, *conc, time.Duration(*durMS)*time.Millisecond)
+		errs := warmErrs + qpsErrs
+		if cold < 0 {
+			errs++
+		}
+		res.Ops = append(res.Ops, opResult{
+			Name: o.name, ColdMS: cold, P50MS: p50, P95MS: p95, QPS1: qps1, QPSC: qpsC, Errors: errs,
+		})
+		fmt.Printf("%-18s %9s %9s %9s %12s %12s %8d\n",
+			o.name, f(cold), f(p50), f(p95), n(qps1), n(qpsC), errs)
 		time.Sleep(500 * time.Millisecond) // let a fragile server drain between ops
 	}
+	if *jsonOut != "" {
+		must(writeResult(*jsonOut, res))
+	}
+	if res.failed() {
+		fmt.Fprintln(os.Stderr, "loadtest: some requests failed or were rejected; these numbers do not measure the server")
+		os.Exit(1)
+	}
 }
+
+// ok reports whether a status from status() is a success worth timing. A
+// rejected request answers fast, so timing it measures the rejection.
+func ok(code int) bool { return code >= 200 && code < 300 }
 
 func nodeBody(name, env, bar string) string {
 	return fmt.Sprintf(`{"name":"%s","chef_environment":"%s","json_class":"Chef::Node","chef_type":"node",`+
@@ -114,9 +181,10 @@ func nodeBody(name, env, bar string) string {
 		`"default":{},"override":{},"run_list":["recipe[nginx]","recipe[base]"]}`, name, env, bar)
 }
 
-func seed(count int) {
+// seed creates count nodes, updating any that already exist, and returns how
+// many were created and how many could not be written at all.
+func seed(count int) (created, failed int) {
 	c := newClient()
-	created := 0
 	for i := range count {
 		env := "production"
 		if i%2 == 1 {
@@ -124,13 +192,17 @@ func seed(count int) {
 		}
 		body := nodeBody(fmt.Sprintf("node%d", i), env, fmt.Sprintf("v%d", i))
 		switch status(c, signReq("POST", *base+"/nodes", body)) {
-		case 201:
+		case http.StatusCreated:
 			created++
-		case 409:
-			status(c, signReq("PUT", fmt.Sprintf("%s/nodes/node%d", *base, i), body))
+		case http.StatusConflict:
+			if !ok(status(c, signReq("PUT", fmt.Sprintf("%s/nodes/node%d", *base, i), body))) {
+				failed++
+			}
+		default:
+			failed++
 		}
 	}
-	fmt.Printf("seeded %d nodes (%d newly created)\n", count, created)
+	return created, failed
 }
 
 // signReq builds a request and signs it inline (used only for one-time seeding).
@@ -221,14 +293,15 @@ func status(c *http.Client, req *http.Request) int {
 func timeOne(o op) float64 {
 	c := newClient()
 	start := time.Now()
-	if status(c, cloneReq(o)) == 0 {
+	if !ok(status(c, cloneReq(o))) {
 		return -1
 	}
 	return msSince(start)
 }
 
-// warmPhase measures sequential steady-state latency and single-connection QPS.
-func warmPhase(o op, samples int) (p50, p95, qps1 float64) {
+// warmPhase measures sequential steady-state latency and single-connection QPS
+// over the successful samples, and counts the rest as errors.
+func warmPhase(o op, samples int) (p50, p95, qps1 float64, errs int) {
 	c := newClient()
 	for range 20 { // warm-up
 		status(c, cloneReq(o))
@@ -237,7 +310,8 @@ func warmPhase(o op, samples int) (p50, p95, qps1 float64) {
 	total := time.Duration(0)
 	for range samples {
 		s := time.Now()
-		if status(c, cloneReq(o)) == 0 {
+		if !ok(status(c, cloneReq(o))) {
+			errs++
 			continue
 		}
 		d := time.Since(s)
@@ -245,17 +319,17 @@ func warmPhase(o op, samples int) (p50, p95, qps1 float64) {
 		lat = append(lat, float64(d.Microseconds())/1000.0)
 	}
 	if len(lat) == 0 {
-		return -1, -1, -1
+		return -1, -1, -1, errs
 	}
 	sort.Float64s(lat)
-	return lat[len(lat)*50/100], lat[len(lat)*95/100], float64(len(lat)) / total.Seconds()
+	return lat[len(lat)*50/100], lat[len(lat)*95/100], float64(len(lat)) / total.Seconds(), errs
 }
 
 // qpsPhase measures throughput at concurrency c over dur, counting only
-// successful (2xx) responses. Idle connections are closed afterward so a fragile
-// server can recover before the next op.
-func qpsPhase(o op, c int, dur time.Duration) float64 {
-	var ok int64
+// successful (2xx) responses, and returns the rest as errors. Idle connections
+// are closed afterward so a fragile server can recover before the next op.
+func qpsPhase(o op, c int, dur time.Duration) (qps float64, errs int) {
+	var good, bad int64
 	deadline := time.Now().Add(dur)
 	clients := make([]*http.Client, c)
 	var wg sync.WaitGroup
@@ -266,8 +340,10 @@ func qpsPhase(o op, c int, dur time.Duration) float64 {
 		go func(cl *http.Client) {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
-				if code := status(cl, cloneReq(o)); code >= 200 && code < 300 {
-					atomic.AddInt64(&ok, 1)
+				if ok(status(cl, cloneReq(o))) {
+					atomic.AddInt64(&good, 1)
+				} else {
+					atomic.AddInt64(&bad, 1)
 				}
 			}
 		}(clients[w])
@@ -277,7 +353,7 @@ func qpsPhase(o op, c int, dur time.Duration) float64 {
 	for _, cl := range clients {
 		cl.CloseIdleConnections()
 	}
-	return float64(ok) / elapsed.Seconds()
+	return float64(good) / elapsed.Seconds(), int(bad)
 }
 
 func msSince(t time.Time) float64 { return float64(time.Since(t).Microseconds()) / 1000.0 }
