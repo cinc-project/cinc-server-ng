@@ -36,11 +36,12 @@ job (in-memory backend, ~100 ms boot, embeddable directly in Go tests) and then
 keeps going: it verifies Mixlib signatures rather than trusting the caller,
 enforces ACLs so `403`-dependent behavior is exercised instead of assumed, treats
 Policyfiles as first-class, persists to SQLite when the state must outlive the
-process, and exposes metrics for running it under real fleet load. Measured
-against chef-zero 15.1.11 it is ~23-78x faster per request and ~50-390x at
-concurrency 10. Against a Chef Infra Server on the same machine, with durable
-SQLite storage, it serves ~18-33x the throughput on object reads and writes and
-~4-6x on search ([benchmarks](docs/benchmarks/v0.15.0.md)). The practical payoff:
+process, and exposes metrics for running it under real fleet load. Measured on
+one machine, it serves ~50-160x chef-zero's throughput at concurrency 10. Against
+Chef Infra Server, with durable SQLite storage, it serves ~18-37x the throughput
+on object reads and writes and ~6-8x on search, at a peak of 37 MiB of memory
+where Chef Infra Server idles at 5.2 GiB ([benchmarks](docs/benchmarks/v0.15.0.md)).
+The practical payoff:
 the server you test against and the server your fleet checks in to are the same
 software, so "passes against chef-zero, breaks against the real server" stops
 being a category of bug.

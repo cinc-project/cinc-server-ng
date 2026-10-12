@@ -1,0 +1,53 @@
+{
+  "label": "Chef Infra Server",
+  "base": "https://<runner-fqdn>/organizations/bench",
+  "auth": true,
+  "conc": 10,
+  "ops": [
+    {
+      "name": "GET node",
+      "cold_ms": 6.449,
+      "p50_ms": 45.003,
+      "p95_ms": 46.18,
+      "qps1": 22.166068423579677,
+      "qpsc": 209.73178132117118,
+      "errors": 0
+    },
+    {
+      "name": "GET node list",
+      "cold_ms": 13.647,
+      "p50_ms": 47.986,
+      "p95_ms": 49.971,
+      "qps1": 20.84341289255155,
+      "qpsc": 188.4685063855267,
+      "errors": 0
+    },
+    {
+      "name": "PUT node",
+      "cold_ms": 20.736,
+      "p50_ms": 54.998,
+      "p95_ms": 56.045,
+      "qps1": 18.192797019798086,
+      "qpsc": 164.4982720290461,
+      "errors": 0
+    },
+    {
+      "name": "search *:*",
+      "cold_ms": 433.677,
+      "p50_ms": 39.61,
+      "p95_ms": 54.564,
+      "qps1": 24.794886746643712,
+      "qpsc": 51.47959058057787,
+      "errors": 0
+    },
+    {
+      "name": "search filtered",
+      "cold_ms": 45.281,
+      "p50_ms": 22.166,
+      "p95_ms": 29.285,
+      "qps1": 44.02686030158957,
+      "qpsc": 90.73596246412167,
+      "errors": 0
+    }
+  ]
+}

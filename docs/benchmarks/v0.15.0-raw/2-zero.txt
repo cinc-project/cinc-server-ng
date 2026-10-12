@@ -1,0 +1,8 @@
+== chef-zero (http://127.0.0.1:8892/organizations/bench, auth=false) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10   errors
+GET node               6.163    44.992    45.080           22          214        0
+GET node list          7.466    46.999    47.913           21          156        0
+PUT node               5.144    45.002    45.113           22          209        0
+search *:*            65.279    59.979    64.252           16           17        0
+search filtered       49.169    35.814    38.163           28           27        0
