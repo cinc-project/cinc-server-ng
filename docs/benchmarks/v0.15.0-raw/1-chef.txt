@@ -1,0 +1,8 @@
+== Chef Infra Server (https://<runner-fqdn>/organizations/bench, auth=true) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10   errors
+GET node              48.030    45.003    46.051           22          210        0
+GET node list         12.322    48.063    50.039           21          187        0
+PUT node              39.129    54.997    56.038           18          162        0
+search *:*           971.196    36.355    49.142           27           64        0
+search filtered       41.159    20.586    27.027           48          105        0

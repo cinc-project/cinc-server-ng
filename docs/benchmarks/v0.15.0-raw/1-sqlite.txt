@@ -1,0 +1,8 @@
+== cinc-server-ng (SQLite) (http://127.0.0.1:8890/organizations/bench, auth=true) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10   errors
+GET node               0.848     0.426     0.492         2304         7175        0
+GET node list          1.178     0.709     0.944         1363         3078        0
+PUT node               1.483     0.506     0.571         1947         6167        0
+search *:*             5.614     4.100     4.899          238          419        0
+search filtered       23.841     3.513     4.450          269          516        0
