@@ -1,35 +1,35 @@
 name: Benchmark vs Chef Infra Server
 
-# Runs the same load generator against a real Chef Infra Server (the FOSS Cinc
-# Server distribution) and against cinc-server-ng, on the same host, with the same
-# seeded data and the same signing identity.
+# Like-for-like benchmarks, all on one runner.
 #
-# READ THE CAVEATS IN THE SUMMARY THIS PRINTS BEFORE QUOTING ANY NUMBER. The two
-# are not like for like, and the differences all favour cinc-server-ng:
+# The servers job measures Chef Infra Server (the FOSS Cinc Server build),
+# chef-zero, and cinc-server-ng (SQLite, in memory, and without auth) with the
+# same load generator, the same seeded data and, where a server verifies
+# signatures, the same signing identity. Only one server is up while it is
+# measured, so none competes with another for the runner's cores; each is
+# measured several times in a rotating order and every cell of the report is
+# the median. Memory is sampled for every run (PSS across the server's whole
+# process tree), idle and under load. See scripts/compare-servers.sh.
 #
-#   - Chef Infra Server is erchef, PostgreSQL, OpenSearch, bifrost, bookshelf
-#     and nginx sharing a runner. cinc-server-ng is one Go process on the same box,
-#     so they are competing for the same cores.
-#   - Chef is reached over HTTPS through nginx; cinc-server-ng over plain HTTP with
-#     no proxy hop.
-#   - Chef writes durably through PostgreSQL and indexes into OpenSearch.
-#     cinc-server-ng here is in memory.
-#   - Chef implements a great deal cinc-server-ng does not.
+# The go-bench job runs cinc-server-ng's Go benchmarks for the latest release
+# and for this commit on the same VM, interleaved, and compares them with
+# benchstat: the only like-for-like way to compare two versions, since Chef
+# has no equivalent of these benchmarks.
 #
-# What this measures honestly is what each gives you on one machine, which is
-# the question that matters when choosing a server to put in a test pipeline.
-# It is not a claim about Chef Infra Server's performance on hardware it was
-# sized for.
+# Read the caveats in the summary before quoting a number.
 
 on:
   # A workflow_dispatch workflow is only dispatchable once it is on the default
-  # branch, so changes to this file are validated by running it — scoped to this
-  # file alone, since a full Chef Infra Server install is not something to put on
-  # every pull request.
+  # branch, so changes to the harness are validated by running it — scoped to
+  # the harness alone, since a full Chef Infra Server install is not something
+  # to put on every pull request.
   pull_request:
     paths:
       - .github/workflows/benchmark-vs-chef-server.yml
       - cmd/loadtest/**
+      - cmd/benchreport/**
+      - scripts/compare-servers.sh
+      - scripts/memsample.sh
   workflow_dispatch:
     inputs:
       seed:
@@ -38,33 +38,45 @@ on:
       conc:
         description: "concurrency for the QPS phase"
         default: "10"
+      warm:
+        description: "sequential samples per operation for p50/p95/QPS@1"
+        default: "1000"
+      reps:
+        description: "times each server is measured; the report takes medians"
+        default: "3"
+      base_ref:
+        description: "release to compare the Go benchmarks against (default: latest tag)"
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
-  benchmark:
-    name: cinc-server-ng vs Chef Infra Server
+  servers:
+    name: Chef Infra Server, chef-zero and cinc-server-ng
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       ORG: bench
       BENCH_USER: benchuser
       SEED: ${{ inputs.seed || '500' }}
       CONC: ${{ inputs.conc || '10' }}
+      WARM: ${{ inputs.warm || '1000' }}
+      REPS: ${{ inputs.reps || '3' }}
+      CHEF_ZERO_VERSION: 15.1.11
     steps:
       - name: Validate inputs
         run: |
           # These come from whoever dispatched the run. They are only ever used
           # quoted, but a benchmark parameter has no business being anything
           # other than a number, so reject the rest rather than reason about it.
-          for pair in "seed:$SEED" "conc:$CONC"; do
+          for pair in "seed:$SEED" "conc:$CONC" "warm:$WARM" "reps:$REPS"; do
             name=${pair%%:*}; value=${pair#*:}
             case "$value" in
               ''|*[!0-9]*) echo "$name must be a positive integer, got: $value" >&2; exit 1;;
             esac
           done
-          echo "seed=$SEED conc=$CONC"
+          echo "seed=$SEED conc=$CONC warm=$WARM reps=$REPS"
 
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,6 +86,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Build the harness and the server
+        run: |
+          # Built once, up front, so no measurement includes a compile.
+          mkdir -p /tmp/bin
+          go build -o /tmp/bin/cinc-server-ng ./cmd/cinc-server-ng
+          go build -o /tmp/bin/loadtest ./cmd/loadtest
+          go build -o /tmp/bin/benchreport ./cmd/benchreport
+
+      - name: Install chef-zero
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ruby ruby-dev build-essential
+          sudo gem install --no-document chef-zero -v "$CHEF_ZERO_VERSION"
+          chef-zero --version
 
       - name: Install Cinc Server
         run: |
@@ -110,7 +137,7 @@ jobs:
             | openssl x509 -outform PEM > /tmp/bench/ca.pem
           echo "REF_URL=https://$(hostname -f)/organizations/$ORG" >> "$GITHUB_ENV"
 
-      - name: Start cinc-server-ng with the same identity
+      - name: Give cinc-server-ng the same identity
         run: |
           set -euo pipefail
           mkdir -p /tmp/state/users "/tmp/state/organizations/$ORG/groups"
@@ -122,87 +149,115 @@ jobs:
           cat > "/tmp/state/organizations/$ORG/groups/admins.json" <<EOF
           {"groupname":"admins","users":["$BENCH_USER"],"clients":[],"groups":[]}
           EOF
-          go build -o /tmp/cinc-server-ng ./cmd/cinc-server-ng
-          # Two instances: in memory, and on SQLite. The SQLite one is the fair
-          # comparison against Chef Infra Server, which writes durably through
-          # PostgreSQL - the in-memory one is not a durable system at all.
-          # Group commit stays at its default (on), which is what a deployment gets.
-          /tmp/cinc-server-ng --addr 127.0.0.1:8889 --orgs "$ORG" --state /tmp/state \
-            >/tmp/cinc-server-ng-memory.log 2>&1 &
-          /tmp/cinc-server-ng --addr 127.0.0.1:8890 --orgs "$ORG" --state /tmp/state \
-            --storage sqlite --db /tmp/cinc-server-ng.db >/tmp/cinc-server-ng-sqlite.log 2>&1 &
-          for port in 8889 8890; do
-            ready=""
-            for _ in $(seq 1 60); do
-              if curl -fsS "http://127.0.0.1:$port/_status" >/dev/null; then ready=1; break; fi
-              sleep 1
-            done
-            if [ -z "$ready" ]; then
-              echo "cinc-server-ng on $port did not come up:"
-              cat /tmp/cinc-server-ng-memory.log /tmp/cinc-server-ng-sqlite.log
-              exit 1
-            fi
-          done
 
-      - name: Benchmark Chef Infra Server
-        run: |
-          go run ./cmd/loadtest -label "Chef Infra Server" \
-            -base "$REF_URL" -user "$BENCH_USER" -keypem /tmp/bench/user.pem \
-            -cacert /tmp/bench/ca.pem \
-            -seed "$SEED" -conc "$CONC" | tee /tmp/chef.txt
-
-      - name: Benchmark cinc-server-ng (SQLite, durable)
-        run: |
-          go run ./cmd/loadtest -label "cinc-server-ng - SQLite" \
-            -base "http://127.0.0.1:8890/organizations/$ORG" \
-            -user "$BENCH_USER" -keypem /tmp/bench/user.pem \
-            -seed "$SEED" -conc "$CONC" | tee /tmp/cinczero-sqlite.txt
-
-      - name: Benchmark cinc-server-ng (in memory)
-        run: |
-          go run ./cmd/loadtest -label "cinc-server-ng - in memory" \
-            -base "http://127.0.0.1:8889/organizations/$ORG" \
-            -user "$BENCH_USER" -keypem /tmp/bench/user.pem \
-            -seed "$SEED" -conc "$CONC" | tee /tmp/cinczero.txt
+      - name: Run the comparison
+        env:
+          BIN: /tmp/bin
+          OUT: /tmp/results
+          USER_KEY: /tmp/bench/user.pem
+          STATE_DIR: /tmp/state
+          CACERT: /tmp/bench/ca.pem
+        run: scripts/compare-servers.sh
 
       - name: Summary
         if: always()
         run: |
           {
-            echo "## cinc-server-ng vs Chef Infra Server"
+            echo "## Like-for-like: Chef Infra Server, chef-zero and cinc-server-ng"
             echo
-            echo "Host: \`$(uname -msr)\`, $(nproc) cores · Go $(go version | awk '{print $3}')"
-            echo "Params: seed=$SEED conc=$CONC · both signed with the same identity"
+            echo "Host: \`$(uname -msr)\`, $(nproc) cores, $(awk '/MemTotal/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo) · Go $(go version | awk '{print $3}') · Cinc Server $(sudo cat /opt/cinc-project/version-manifest.txt 2>/dev/null | awk 'NR==1 {print $2}') · chef-zero $CHEF_ZERO_VERSION"
             echo
-            echo '### Chef Infra Server (durable: PostgreSQL + OpenSearch)'
-            echo '```'; cat /tmp/chef.txt 2>/dev/null || echo "(did not run)"; echo '```'
-            echo '### cinc-server-ng - SQLite (durable)'
-            echo '```'; cat /tmp/cinczero-sqlite.txt 2>/dev/null || echo "(did not run)"; echo '```'
-            echo '### cinc-server-ng - in memory'
-            echo '```'; cat /tmp/cinczero.txt 2>/dev/null || echo "(did not run)"; echo '```'
+            echo "Params: seed=$SEED conc=$CONC warm=$WARM · each server measured $REPS times, one at a time, in rotating order; every cell is the median."
             echo
+            /tmp/bin/benchreport -runs '/tmp/results/run-*.json' -mem '/tmp/results/mem-*.json' 2>&1 || echo "(no results)"
             echo "### Reading these honestly"
             echo
-            echo "**Compare the SQLite row against Chef.** Both persist every write, so that is the"
-            echo "durable-against-durable comparison. The in-memory row is here because it is what a"
-            echo "CI fixture actually runs, not because it is a fair match for a database."
-            echo
-            echo "Even then these are not like for like, and the remaining differences favour cinc-server-ng:"
-            echo
-            echo "- Chef Infra Server is erchef, PostgreSQL, OpenSearch, bifrost, bookshelf and nginx"
-            echo "  sharing this runner with both cinc-server-ng instances and the load generator."
-            echo "- Chef is reached over HTTPS through nginx; cinc-server-ng over plain HTTP, no proxy hop."
-            echo "- SQLite is an in-process file; PostgreSQL is a separate server with a wire protocol,"
-            echo "  and OpenSearch indexes every write. cinc-server-ng searches in process."
-            echo "- Chef implements a great deal that cinc-server-ng does not."
-            echo
-            echo "This measures what each gives you on one machine - the question that matters when"
-            echo "choosing a server for a test pipeline. It is not a statement about Chef Infra"
-            echo "Server on hardware it was sized for."
+            echo "- **Durable against durable:** compare cinc-server-ng (SQLite) with Chef Infra Server. Both persist every write."
+            echo "- **Unsigned against unsigned:** compare cinc-server-ng (no auth) with chef-zero, which does not verify signatures."
+            echo "- Chef Infra Server is measured as it ships, nginx included, over HTTPS. cinc-server-ng is served over plain HTTP."
+            echo "- Chef Infra Server persists its data between repetitions, so its later runs update existing nodes where the others create them."
+            echo "- Memory is PSS summed over each server's whole process tree: for Chef Infra Server that is erchef, PostgreSQL, OpenSearch, bifrost, bookshelf, nginx and redis."
+            echo "- Chef Infra Server implements a great deal that cinc-server-ng does not. This measures what each gives you on one machine, not Chef Infra Server on hardware sized for it."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: cinc-server-ng logs
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: servers-results
+          path: /tmp/results
+          if-no-files-found: ignore
+
+  go-bench:
+    name: Go benchmarks, latest release vs this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BASE_REF: ${{ inputs.base_ref }}
+      # The fleet, search-scale, registration and store benchmarks: the ones
+      # that decide how cinc-server-ng behaves as a fleet grows.
+      BENCH: '^Benchmark(FleetCheckin|SearchScale|Bootstrap|Checkins|ListObjects|SearchScanWarm|WriteLatency|Get$|Put$)'
+      PKGS: ./server/ ./internal/api/ ./internal/store/sqlite/
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Choose the baseline
+        run: |
+          set -euo pipefail
+          base=${BASE_REF:-$(git tag --sort=-v:refname | head -1)}
+          case "$base" in
+            ''|-*|*[!A-Za-z0-9._/-]*) echo "unusable base ref: $base" >&2; exit 1;;
+          esac
+          git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "no such ref: $base" >&2; exit 1; }
+          git worktree add --detach /tmp/base "$base"
+          echo "BASE=$base" >> "$GITHUB_ENV"
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e
+
+      - name: Benchmark, interleaved
+        run: |
+          set -euo pipefail
+          read -r -a pkgs <<<"$PKGS"
+          # Alternate base and head so drift on the shared VM lands on both.
+          # Benchmarks that exist on only one side are left out by benchstat.
+          for round in 1 2; do
+            echo "::group::round $round: $BASE"
+            (cd /tmp/base && go test -run '^$' -bench "$BENCH" -benchmem -count 3 -timeout 30m "${pkgs[@]}") | tee -a /tmp/base.txt
+            echo "::endgroup::"
+            echo "::group::round $round: HEAD"
+            go test -run '^$' -bench "$BENCH" -benchmem -count 3 -timeout 30m "${pkgs[@]}" | tee -a /tmp/head.txt
+            echo "::endgroup::"
+          done
+
+      - name: Summary
         if: always()
         run: |
-          echo "--- in memory ---"; cat /tmp/cinc-server-ng-memory.log || true
-          echo "--- sqlite ---";    cat /tmp/cinc-server-ng-sqlite.log || true
+          {
+            echo "## Go benchmarks: $BASE vs $(git rev-parse --short HEAD)"
+            echo
+            echo "Host: \`$(uname -msr)\`, $(nproc) cores · Go $(go version | awk '{print $3}') · both sides run on this VM, interleaved, n=6 each."
+            echo
+            echo '```'
+            "$(go env GOPATH)/bin/benchstat" "$BASE=/tmp/base.txt" "HEAD=/tmp/head.txt" 2>&1 || echo "(benchstat failed)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-bench-results
+          path: |
+            /tmp/base.txt
+            /tmp/head.txt
+          if-no-files-found: ignore
