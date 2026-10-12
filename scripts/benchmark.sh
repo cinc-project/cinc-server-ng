@@ -33,9 +33,11 @@ PORT_AUTH=8903
 
 TMP="$(mktemp -d)"
 KEY="$TMP/pivotal.pem"
-PIDS=()
+# The servers are started inside the `{ ... } | tee` block below, which runs in
+# a subshell, so their PIDs are recorded in a file the EXIT trap can read.
+PIDFILE="$TMP/pids"
 cleanup() {
-  for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+  [ -f "$PIDFILE" ] && while read -r pid; do kill "$pid" 2>/dev/null || true; done <"$PIDFILE"
   pkill -f "chef-zero --multi-org --host 127.0.0.1 --port $PORT_CHEF" 2>/dev/null || true
   rm -rf "$TMP"
 }
@@ -48,6 +50,15 @@ VERSION="$(./cinc-server-ng --version 2>/dev/null || git describe --tags --alway
 run() { go run ./cmd/loadtest -seed "$SEED" -warm "$WARM" -dur "$DUR" -conc "$CONC" "$@"; }
 wait_up() { for _ in $(seq 1 50); do curl -sf -o /dev/null "$1" && return 0; sleep 0.1; done; return 1; }
 
+# A server left over on one of these ports would answer wait_up in place of the
+# one just started, and the run would silently measure the wrong process.
+for port in "$PORT_CHEF" "$PORT_NOAUTH" "$PORT_AUTH"; do
+  if curl -s -o /dev/null "http://127.0.0.1:$port/"; then
+    echo "port $port is already in use; stop whatever is listening there first" >&2
+    exit 1
+  fi
+done
+
 {
   echo "### cinc-server-ng benchmark — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "version: $VERSION"
@@ -59,14 +70,14 @@ wait_up() { for _ in $(seq 1 50); do curl -sf -o /dev/null "$1" && return 0; sle
 
   # cinc-server-ng, no auth (engine-only, comparable to chef-zero's non-verifying auth)
   ./cinc-server-ng --addr "127.0.0.1:$PORT_NOAUTH" --orgs acme --no-auth >"$TMP/noauth.log" 2>&1 &
-  PIDS+=($!)
+  echo $! >>"$PIDFILE"
   wait_up "http://127.0.0.1:$PORT_NOAUTH/_status"
   run -base "http://127.0.0.1:$PORT_NOAUTH/organizations/acme" -label "cinc-server-ng $VERSION (no-auth)"
   echo
 
   # cinc-server-ng, real Mixlib auth
   ./cinc-server-ng --addr "127.0.0.1:$PORT_AUTH" --orgs acme --admin pivotal --key-out "$KEY" >"$TMP/auth.log" 2>&1 &
-  PIDS+=($!)
+  echo $! >>"$PIDFILE"
   wait_up "http://127.0.0.1:$PORT_AUTH/_status"
   run -base "http://127.0.0.1:$PORT_AUTH/organizations/acme" -user pivotal -keypem "$KEY" -label "cinc-server-ng $VERSION (auth)"
   echo
@@ -74,7 +85,7 @@ wait_up() { for _ in $(seq 1 50); do curl -sf -o /dev/null "$1" && return 0; sle
   # chef-zero, if available
   if [ "$WANT_CHEF_ZERO" = "1" ] && command -v chef-zero >/dev/null 2>&1; then
     chef-zero --multi-org --host 127.0.0.1 --port "$PORT_CHEF" >"$TMP/chef-zero.log" 2>&1 &
-    PIDS+=($!)
+    echo $! >>"$PIDFILE"
     wait_up "http://127.0.0.1:$PORT_CHEF/organizations" || true
     curl -s -X POST -H 'Content-Type: application/json' \
       -d '{"name":"acme","full_name":"Acme"}' -o /dev/null \
