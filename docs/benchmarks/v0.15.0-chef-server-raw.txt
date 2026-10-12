@@ -1,0 +1,30 @@
+# GitHub Actions run 38299772681 (.github/workflows/benchmark-vs-chef-server.yml, workflow_dispatch on main @ 76840cc)
+# https://github.com/cinc-project/cinc-server-ng/actions/runs/38299772681
+# Runner: ubuntu-24.04 x86_64 (image 20261004.327.1) · Cinc Server 15.10.125 · Go go1.27.1 · seed=500 conc=10
+
+== Chef Infra Server (https://<runner-fqdn>/organizations/bench, auth=true) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node              48.820    45.995    46.092           22          209
+GET node list         13.082    48.995    49.310           20          187
+PUT node              27.604    55.000    56.006           18          180
+search *:*           710.492    34.028    40.638           29           72
+search filtered       37.305    19.947    22.934           49          114
+
+== cinc-server-ng - SQLite (http://127.0.0.1:8890/organizations/bench, auth=true) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node               0.973     0.434     0.497         2268         6885
+GET node list          1.499     0.715     0.825         1359         3319
+PUT node               1.651     0.519     0.583         1894         5905
+search *:*             6.449     4.168     4.676          238          404
+search filtered       25.356     3.567     4.500          266          498
+
+== cinc-server-ng - in memory (http://127.0.0.1:8889/organizations/bench, auth=true) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node               0.588     0.277     0.320         3538        11699
+GET node list          1.009     0.395     0.444         2469         7040
+PUT node               0.860     0.297     0.344         3293        10743
+search *:*             4.004     2.756     3.175          369          744
+search filtered       20.798     1.935     2.853          486         1008
