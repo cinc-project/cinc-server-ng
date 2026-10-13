@@ -132,6 +132,11 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 
 		raw := mustEncode(obj)
+		// Shared, from creating the actor through its membership row, so a
+		// concurrent delete of the actor cannot run in between and leave the
+		// row behind (see groupmembers.go).
+		a.membership.RLock()
+		defer a.membership.RUnlock()
 		if err := org.Create(segment, name, raw); errors.Is(err, store.ErrConflict) {
 			writeError(w, http.StatusConflict, "Object already exists")
 			return
@@ -564,6 +569,11 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
+		// A revocation: held from the group cleanup through deleting the
+		// record, so no group write or new membership row can name the actor
+		// in between (see groupmembers.go).
+		a.membership.Lock()
+		defer a.membership.Unlock()
 		if _, ok, err := org.Get(segment, name); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

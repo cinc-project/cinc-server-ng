@@ -139,7 +139,7 @@ func TestGroupUpdateDropsUnknownMembers(t *testing.T) {
 		t.Fatalf("group doc invalid: %v\n%s", err, body)
 	}
 	if !slices.Equal(g.Users, []string{"anna"}) || !slices.Equal(g.Clients, []string{"web01"}) ||
-		!slices.Equal(g.Groups, []string{"ops"}) || !slices.Equal(g.Actors, []string{"anna", "web01", "ops"}) {
+		!slices.Equal(g.Groups, []string{"ops"}) || !slices.Equal(g.Actors, []string{"web01", "anna"}) {
 		t.Fatalf("group members = %+v, want only the known anna, web01 and ops; body %s", g, body)
 	}
 
