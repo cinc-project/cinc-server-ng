@@ -262,6 +262,25 @@ If you change the listen port, override the check with `--addr` (for example
 `--health-cmd "/cinc-server-ng healthcheck --addr 127.0.0.1:9000"`). The same
 subcommand works as a Kubernetes `exec` probe.
 
+## TLS and load balancers
+
+cinc-server-ng serves HTTPS itself, so no proxy is required:
+
+```sh
+./cinc-server-ng --addr 0.0.0.0:443 --tls-cert server.crt --tls-key server.key
+```
+
+Send `SIGHUP` after renewing the certificate and it is reloaded without a
+restart (and, on the memory backend, without losing state). It also works
+behind a reverse proxy or load balancer that terminates TLS: returned URLs
+follow the `Host` and `X-Forwarded-Proto` headers, or a fixed `--external-url`
+when the proxy rewrites them. `GET /_status` is the health check, and
+`--shutdown-delay` drains the instance (health check failing, requests still
+served) before it stops. Run a single active instance, since search and
+authorization indexes live in the process.
+**[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** has nginx, Caddy, AWS and
+Docker setups and the details that matter behind a proxy.
+
 ## Compatibility with Chef Infra Server
 
 Fidelity is the point of this project, so it is tested three ways, each

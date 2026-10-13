@@ -62,3 +62,40 @@ func TestHealthcheckWildcardAddr(t *testing.T) {
 		}
 	}
 }
+
+// With --tls-cert the image serves HTTPS, so its HEALTHCHECK must probe over
+// TLS. The certificate names the public host, never the loopback address the
+// probe dials, so the probe checks liveness without verifying the name.
+func TestHealthcheckTLS(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_status" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+	addr := strings.TrimPrefix(ts.URL, "https://")
+
+	// Baseline: plain HTTP against a TLS listener is not healthy.
+	if err := run([]string{"healthcheck", "--addr", addr}, &bytes.Buffer{}); err == nil {
+		t.Fatal("plain-HTTP probe of a TLS server reported healthy")
+	}
+	if err := run([]string{"healthcheck", "--tls", "--addr", addr}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("TLS probe of a healthy TLS server: %v", err)
+	}
+}
+
+// The image's HEALTHCHECK command is fixed, but it inherits the container's
+// environment: a container configured for TLS through CINC_SERVER_NG_TLS_CERT
+// must be probed over TLS without rewriting the HEALTHCHECK.
+func TestHealthcheckTLSFromEnv(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(ts.Close)
+	addr := strings.TrimPrefix(ts.URL, "https://")
+
+	t.Setenv("CINC_SERVER_NG_TLS_CERT", "/certs/server.crt")
+	if err := run([]string{"healthcheck", "--addr", addr}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("probe with CINC_SERVER_NG_TLS_CERT set: %v", err)
+	}
+}
