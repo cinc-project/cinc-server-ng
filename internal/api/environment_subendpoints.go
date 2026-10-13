@@ -86,6 +86,13 @@ func (a *API) envCookbooks(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	// Every cookbook in an environment defaults to its newest version; one
+	// cookbook defaults to all (chef_wm_environment_cookbooks:validate_request).
+	// Validated before the environment is looked up, as erchef does.
+	limit, ok := numVersions(w, r, 1)
+	if !ok {
+		return
+	}
 	constraints, ok, err := envConstraints(org, r.PathValue("env"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -100,12 +107,16 @@ func (a *API) envCookbooks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", fcv))
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", fcv, limit))
 }
 
 func (a *API) envCookbook(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
+		return
+	}
+	limit, ok := numVersions(w, r, allVersions)
+	if !ok {
 		return
 	}
 	constraints, ok, err := envConstraints(org, r.PathValue("env"))
@@ -128,7 +139,7 @@ func (a *API) envCookbook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name)
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", map[string][]string{name: versions}))
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", map[string][]string{name: versions}, limit))
 }
 
 func (a *API) envRecipes(w http.ResponseWriter, r *http.Request) {

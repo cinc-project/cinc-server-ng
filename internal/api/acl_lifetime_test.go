@@ -61,7 +61,7 @@ func TestDeletingAnObjectDeletesItsACL(t *testing.T) {
 		},
 		{
 			what:    "cookbook",
-			setup:   [][3]string{{"PUT", "/organizations/acme/cookbooks/apache/1.0.0", `{"name":"apache","version":"1.0.0"}`}},
+			setup:   [][3]string{{"PUT", "/organizations/acme/cookbooks/apache/1.0.0", `{"name":"apache-1.0.0","cookbook_name":"apache","metadata":{"version":"1.0.0"}}`}},
 			aclType: "cookbooks", aclName: "apache",
 			aclPath: "/organizations/acme/cookbooks/apache/_acl/read",
 			delete:  [3]string{"DELETE", "/organizations/acme/cookbooks/apache/1.0.0", ""},
@@ -149,7 +149,7 @@ func TestCookbookACLSurvivesWhileAVersionRemains(t *testing.T) {
 	org := acmeOrg(t, st)
 	for _, v := range []string{"1.0.0", "2.0.0"} {
 		if resp, body := do(t, "PUT", srv.URL+"/organizations/acme/cookbooks/apache/"+v,
-			`{"name":"apache","version":"`+v+`"}`); resp.StatusCode >= 300 {
+			`{"name":"apache-`+v+`","cookbook_name":"apache","metadata":{"version":"`+v+`"}}`); resp.StatusCode >= 300 {
 			t.Fatalf("put %s = %d: %s", v, resp.StatusCode, body)
 		}
 	}

@@ -15,12 +15,22 @@ func fileStatus(t *testing.T, base, checksum string) int {
 // multiChecksumManifest builds a minimal manifest referencing several checksums,
 // used to exercise shared/orphaned checksum behavior across versions.
 func multiChecksumManifest(checksums ...string) string {
-	body := `{"recipes":[`
+	return checksumManifest(`{"recipes":[`, checksums)
+}
+
+// cookbookChecksumManifest is multiChecksumManifest for a cookbook version,
+// with the name, cookbook_name and metadata erchef requires of one.
+func cookbookChecksumManifest(name, version string, checksums ...string) string {
+	return checksumManifest(`{"name":"`+name+`-`+version+`","cookbook_name":"`+name+
+		`","metadata":{"version":"`+version+`"},"recipes":[`, checksums)
+}
+
+func checksumManifest(body string, checksums []string) string {
 	for i, c := range checksums {
 		if i > 0 {
 			body += ","
 		}
-		body += `{"name":"f` + c[:4] + `.rb","path":"recipes/f` + c[:4] + `.rb","checksum":"` + c + `"}`
+		body += `{"name":"f` + c[:4] + `.rb","path":"recipes/f` + c[:4] + `.rb","checksum":"` + c + `","specificity":"default"}`
 	}
 	return body + `]}`
 }
@@ -34,10 +44,10 @@ func TestCookbookDeleteGCsOrphanedChecksums(t *testing.T) {
 	only2 := uploadBlob(t, base, "content only in v2")
 
 	// Two versions: v1 references shared+only1, v2 references shared+only2.
-	if resp, b := do(t, "PUT", base+"/cookbooks/apache2/1.0.0", multiChecksumManifest(shared, only1)); resp.StatusCode != 201 {
+	if resp, b := do(t, "PUT", base+"/cookbooks/apache2/1.0.0", cookbookChecksumManifest("apache2", "1.0.0", shared, only1)); resp.StatusCode != 201 {
 		t.Fatalf("put v1 = %d: %s", resp.StatusCode, b)
 	}
-	if resp, b := do(t, "PUT", base+"/cookbooks/apache2/2.0.0", multiChecksumManifest(shared, only2)); resp.StatusCode != 201 {
+	if resp, b := do(t, "PUT", base+"/cookbooks/apache2/2.0.0", cookbookChecksumManifest("apache2", "2.0.0", shared, only2)); resp.StatusCode != 201 {
 		t.Fatalf("put v2 = %d: %s", resp.StatusCode, b)
 	}
 
@@ -64,7 +74,7 @@ func TestArtifactDeleteGCsButKeepsCrossReferenced(t *testing.T) {
 	artifactOnly := uploadBlob(t, base, "only in the artifact")
 
 	// A cookbook and an artifact both reference crossRef.
-	if resp, _ := do(t, "PUT", base+"/cookbooks/web/1.0.0", multiChecksumManifest(crossRef)); resp.StatusCode != 201 {
+	if resp, _ := do(t, "PUT", base+"/cookbooks/web/1.0.0", cookbookChecksumManifest("web", "1.0.0", crossRef)); resp.StatusCode != 201 {
 		t.Fatalf("put cookbook failed")
 	}
 	if resp, b := do(t, "PUT", base+"/cookbook_artifacts/web/abc123", multiChecksumManifest(crossRef, artifactOnly)); resp.StatusCode != 201 {

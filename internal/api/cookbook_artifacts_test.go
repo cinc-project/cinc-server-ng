@@ -129,6 +129,7 @@ func TestUniverse(t *testing.T) {
 	sum := uploadBlob(t, base, "package 'nginx'\n")
 	// A manifest whose metadata declares a dependency.
 	m := `{
+		"name": "nginx-1.0.0",
 		"cookbook_name": "nginx",
 		"version": "1.0.0",
 		"metadata": {"name": "nginx", "version": "1.0.0", "dependencies": {"apt": ">= 2.0.0"}},

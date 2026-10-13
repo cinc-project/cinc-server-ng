@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
+	"github.com/cinc-project/cinc-server-ng/internal/runlist"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -104,6 +105,17 @@ func loadObjects(org *store.Org, dir, collection, nameField string) (int, error)
 		obj, raw, err := readObject(path)
 		if err != nil {
 			return 0, err
+		}
+		// Stored as erchef stores an uploaded node or role: run lists
+		// normalized.
+		switch collection {
+		case "nodes":
+			raw, err = runlist.NormalizeNode(raw)
+		case "roles":
+			raw, err = runlist.NormalizeRole(raw)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("%s: %w", path, err)
 		}
 		if err := org.Put(collection, objectKey(obj, nameField, path), raw); err != nil {
 			return 0, err

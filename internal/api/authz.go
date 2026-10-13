@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -38,9 +39,7 @@ func seedAuthz(org *store.Org) error {
 			return err
 		}
 		if !ok {
-			if err := org.Put("groups", g, fmt.Appendf(nil,
-				`{"name":%q,"groupname":%q,"actors":[],"users":[],"clients":[],"groups":%s}`,
-				g, g, mustEncode(nonNilStrings(defaultGroupGroups[g])))); err != nil {
+			if err := org.Put("groups", g, groupJSON(g, "", nil, nil, defaultGroupGroups[g])); err != nil {
 				return err
 			}
 		}
@@ -98,12 +97,6 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
 		return
 	}
-	// Chef reports the organization a group belongs to.
-	var g map[string]any
-	if json.Unmarshal(doc, &g) == nil {
-		g["orgname"] = org.Name()
-		doc = mustEncode(g)
-	}
 	writeRaw(w, http.StatusOK, doc)
 }
 
@@ -129,11 +122,13 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	users, clients, groups := groupMembers(obj)
+	a.membership.Lock()
+	defer a.membership.Unlock()
 	if err := clearMembers(org, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	err := org.Create("groups", name, mustEncode(groupDoc(name, users, clients, groups)))
+	err := org.Create("groups", name, groupJSON(name, "", users, clients, groups))
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Object already exists")
 		return
@@ -146,9 +141,18 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// putGroup replaces a group's members. Chef's update body nests them under
-// "actors":{users,clients,groups}; the stored/returned doc carries them as
-// top-level arrays (plus a flattened "actors"), where clients read them back.
+// putGroup updates a group's members from Chef's update body, which nests
+// them under "actors":{users,clients,groups}.
+//
+// erchef (oc_chef_group:update_from_ejson) reads each kind with the group's
+// current members as the default, so only the kinds the body names are
+// replaced: one it leaves out keeps its members, and so does every kind when
+// "actors" is absent, null, or the flat array a GET returns. The current
+// members here are the effective membership, incremental rows included. The
+// write folds them into the document and clears the rows, so a replaced kind
+// loses both halves while a kept kind loses neither.
+//
+// erchef answers with the request body as it was sent, not the stored group.
 func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
@@ -158,29 +162,78 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	if !exists(w, r, org, "groups", name, "Cannot find groups "+name) {
 		return
 	}
-	var obj map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
+	raw, err := chefjson.Normalize(r.Body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	users, clients, groups := groupMembers(obj)
-	users, clients, groups, err := a.knownGroupMembers(org, users, clients, groups)
+	obj, err := chefjson.DecodeObject(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	// Read-modify-write: a revocation landing between the read and the write
+	// would be undone (see groupmembers.go). The group is checked again under
+	// the lock, so a concurrent delete is not undone either.
+	a.membership.Lock()
+	defer a.membership.Unlock()
+	if !exists(w, r, org, "groups", name, "Cannot find groups "+name) {
+		return
+	}
+	users, clients, groups, err := groupMembership(org, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// An explicit write replaces the group's membership, so any rows added
-	// incrementally since the last write no longer apply.
+	update := groupUpdateMembers(obj)
+	if v, ok := update[memberUsers]; ok {
+		users = v
+	}
+	if v, ok := update[memberClients]; ok {
+		clients = v
+	}
+	if v, ok := update[memberGroups]; ok {
+		groups = v
+	}
+	// erchef resolves every kind it writes, kept ones included, and drops the
+	// names it cannot find; a kept member whose actor is gone is not written
+	// back.
+	users, clients, groups, err = a.knownGroupMembers(org, users, clients, groups)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// The document now records the whole membership, so the rows it absorbed,
+	// and those of a replaced kind, go.
 	if err := clearMembers(org, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	doc := mustEncode(groupDoc(name, users, clients, groups))
-	if err := org.Put("groups", name, doc); err != nil {
+	if err := org.Put("groups", name, groupJSON(name, "", users, clients, groups)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeRaw(w, http.StatusOK, doc)
+	writeRaw(w, http.StatusOK, raw)
+}
+
+// groupUpdateMembers returns the member kinds a group update replaces, each
+// mapped to the names the body gives it. Only a kind whose value is an array
+// counts, read from the nested "actors" object as erchef reads it. When
+// "actors" is not an object, the top-level users/clients/groups of the GET
+// shape are read instead: erchef ignores those, but cinc-console saves a group
+// by sending its GET document back with edited top-level lists.
+func groupUpdateMembers(obj map[string]any) map[string][]string {
+	src := obj
+	if nested, ok := obj["actors"].(map[string]any); ok {
+		src = nested
+	}
+	out := map[string][]string{}
+	for _, kind := range []string{memberUsers, memberClients, memberGroups} {
+		if _, ok := src[kind].([]any); ok {
+			out[kind] = jsonStrings(src[kind])
+		}
+	}
+	return out
 }
 
 // deleteGroup deletes a group and every reference to it.
@@ -197,6 +250,8 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
+	a.membership.Lock()
+	defer a.membership.Unlock()
 	if _, ok, err := org.Get("groups", name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -332,23 +387,32 @@ func groupMembers(obj map[string]any) (users, clients, groups []string) {
 	return jsonStrings(src["users"]), jsonStrings(src["clients"]), jsonStrings(src["groups"])
 }
 
-// groupDoc builds Chef's canonical group representation: members in top-level
-// users/clients/groups arrays, "actors" their union, and the name in both
-// "name" and "groupname". Empty member sets encode as [] rather than null.
-func groupDoc(name string, users, clients, groups []string) map[string]any {
-	users, clients, groups = nonNilStrings(users), nonNilStrings(clients), nonNilStrings(groups)
-	actors := make([]string, 0, len(users)+len(clients)+len(groups))
-	actors = append(actors, users...)
-	actors = append(actors, clients...)
-	actors = append(actors, groups...)
-	return map[string]any{
-		"name":      name,
-		"groupname": name,
-		"actors":    actors,
-		"users":     users,
-		"clients":   clients,
-		"groups":    groups,
+// groupJSON encodes a group as erchef's oc_chef_group:assemble_group_ejson
+// does: "actors" is the clients followed by the users (nested groups are not
+// actors), then the three member arrays, the org's name, and the group's name
+// as both "name" and "groupname". The stored document omits "orgname" (pass
+// ""), which the API adds. Empty member sets encode as [] rather than null.
+func groupJSON(name, orgname string, users, clients, groups []string) []byte {
+	strs := func(s []string) []any {
+		out := make([]any, len(s))
+		for i, v := range s {
+			out[i] = v
+		}
+		return out
 	}
+	doc := &chefjson.Object{Members: []chefjson.Member{
+		{Name: "actors", Value: append(strs(clients), strs(users)...)},
+		{Name: "users", Value: strs(users)},
+		{Name: "clients", Value: strs(clients)},
+		{Name: "groups", Value: strs(groups)},
+	}}
+	if orgname != "" {
+		doc.Members = append(doc.Members, chefjson.Member{Name: "orgname", Value: orgname})
+	}
+	doc.Members = append(doc.Members,
+		chefjson.Member{Name: "name", Value: name},
+		chefjson.Member{Name: "groupname", Value: name})
+	return chefjson.Marshal(doc)
 }
 
 // jsonStrings coerces a decoded JSON array into a []string, dropping non-string
@@ -365,15 +429,6 @@ func jsonStrings(v any) []string {
 		}
 	}
 	return out
-}
-
-// nonNilStrings returns s, or an empty slice when s is nil, so it JSON-encodes
-// as [] rather than null.
-func nonNilStrings(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }
 
 func (a *API) createContainer(w http.ResponseWriter, r *http.Request) {

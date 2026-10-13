@@ -41,7 +41,7 @@ func webuiSignedAs(t *testing.T, srv *Server, userID, method, url, body string) 
 // createUser creates a global user as the admin and returns its private key.
 func createUser(t *testing.T, srv *Server, body string) string {
 	t.Helper()
-	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", srv.URL()+"/users", validUserBody(t, body)))
+	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", srv.URL()+"/users", withCreateKey(t, validUserBody(t, body))))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ func TestAuthenticateUserSuperuserOnly(t *testing.T) {
 	// As the admin, create a global user with a password and capture the
 	// generated private key so we can sign requests as that user.
 	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", srv.URL()+"/users",
-		validUserBody(t, `{"name":"bob","password":"b0b-pw"}`)))
+		withCreateKey(t, validUserBody(t, `{"name":"bob","password":"b0b-pw"}`))))
 	if err != nil {
 		t.Fatal(err)
 	}

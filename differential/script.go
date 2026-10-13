@@ -42,10 +42,14 @@ func Script(actor string) []Step {
 		{Name: "node create conflict", Method: "POST", Path: "/nodes", Body: node},
 		{Name: "node read", Method: "GET", Path: "/nodes/diff-node"},
 		{Name: "node list", Method: "GET", Path: "/nodes"},
+		// The run list is not in canonical form: erchef qualifies bare items
+		// and drops exact duplicates on save, and answers with what it stored.
+		// No role[] item, since a node's roles overlay normal.role in search.
 		{Name: "node update", Method: "PUT", Path: "/nodes/diff-node",
 			Body: `{"name":"diff-node","chef_environment":"_default","json_class":"Chef::Node",` +
 				`"chef_type":"node","normal":{"role":"backend"},"default":{},"override":{},` +
-				`"automatic":{},"run_list":[]}`},
+				`"automatic":{},"run_list":["diff-cookbook","recipe[diff-cookbook]",` +
+				`"diff-cookbook::default","diff-cookbook::default"]}`},
 		{Name: "node read after update", Method: "GET", Path: "/nodes/diff-node"},
 		{Name: "node missing", Method: "GET", Path: "/nodes/diff-absent"},
 		{Name: "node acl", Method: "GET", Path: "/nodes/diff-node/_acl"},
@@ -54,7 +58,8 @@ func Script(actor string) []Step {
 		{Name: "role create", Method: "POST", Path: "/roles",
 			Body: `{"name":"diff-role","description":"d","json_class":"Chef::Role",` +
 				`"chef_type":"role","default_attributes":{},"override_attributes":{},` +
-				`"run_list":["recipe[diff-cookbook]"],"env_run_lists":{}}`},
+				`"run_list":["diff-cookbook","recipe[diff-cookbook]"],` +
+				`"env_run_lists":{"diff-env":["diff-cookbook","diff-cookbook"]}}`},
 		{Name: "role read", Method: "GET", Path: "/roles/diff-role"},
 		{Name: "role list", Method: "GET", Path: "/roles"},
 		{Name: "role missing", Method: "GET", Path: "/roles/diff-absent"},
@@ -122,6 +127,8 @@ func Script(actor string) []Step {
 
 		// --- cookbooks and policies -------------------------------------------
 		{Name: "cookbook list", Method: "GET", Path: "/cookbooks"},
+		{Name: "cookbook list bad num_versions", Method: "GET", Path: "/cookbooks?num_versions=-1"},
+		{Name: "environment cookbooks bad num_versions", Method: "GET", Path: "/environments/_default/cookbooks?num_versions=abc"},
 		{Name: "cookbook missing", Method: "GET", Path: "/cookbooks/diff-absent"},
 		{Name: "cookbook latest", Method: "GET", Path: "/cookbooks/_latest"},
 		{Name: "cookbook recipes", Method: "GET", Path: "/cookbooks/_recipes"},
@@ -161,6 +168,20 @@ func Script(actor string) []Step {
 		{Name: "unknown route", Method: "GET", Path: "/diff-nonexistent"},
 		{Name: "method not allowed", Method: "DELETE", Path: "/search"},
 		{Name: "bad search query", Method: "GET", Path: "/search/node?q=%5Bunclosed"},
+		// Cookbook version manifests erchef refuses (every step speaks API v1,
+		// so all_files is not a key it accepts). None of them is stored.
+		{Name: "cookbook put all_files at v1", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"diff-cb-1.0.0","cookbook_name":"diff-cb","metadata":{"version":"1.0.0"},"all_files":[]}`},
+		{Name: "cookbook put missing metadata", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"diff-cb-1.0.0","cookbook_name":"diff-cb","recipes":[]}`},
+		{Name: "cookbook put metadata version", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"diff-cb-1.0.0","cookbook_name":"diff-cb","metadata":{"version":"9.9.9"}}`},
+		{Name: "cookbook put name mismatch", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"other-1.0.0","cookbook_name":"other","metadata":{"version":"1.0.0"}}`},
+		{Name: "cookbook put bad dependency", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"diff-cb-1.0.0","cookbook_name":"diff-cb","metadata":{"version":"1.0.0","dependencies":{"apt":"bogus"}}}`},
+		{Name: "cookbook put bad version", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0.0",
+			Body: `{"name":"diff-cb-1.0.0.0","cookbook_name":"diff-cb","metadata":{"version":"1.0.0.0"}}`},
 
 		// --- teardown -----------------------------------------------------------
 		{Name: "policy group delete", Method: "DELETE", Path: "/policy_groups/diff-group"},

@@ -26,6 +26,17 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// /_stats takes HTTP Basic credentials instead of a signature, as
+		// Chef Infra Server's nginx demands (see stats_auth.go).
+		if r.URL.Path == statsPath {
+			if !s.statsAuthorized(r) {
+				statsUnauthorized(w)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// The cookbook file store is exempt from Mixlib signing: in real Chef
 		// the sandbox hands back pre-signed bookshelf URLs that
 		// knife/chef-client/cinc-client PUT/GET without signing them. cinc-server-ng

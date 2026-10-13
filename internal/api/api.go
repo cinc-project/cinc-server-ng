@@ -7,6 +7,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -44,6 +45,9 @@ type API struct {
 	// now is the clock that decides whether an actor's key has expired.
 	// Defaults to time.Now.
 	now func() time.Time
+	// membership orders group-membership changes against revocations; see
+	// groupmembers.go.
+	membership sync.RWMutex
 }
 
 // Option configures an API at construction time.

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
+	"github.com/cinc-project/cinc-server-ng/internal/runlist"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -105,6 +106,20 @@ func decodeObjectBody(r *http.Request) ([]byte, error) {
 	return raw, nil
 }
 
+// normalizeRunLists puts a node's or role's run lists into the form erchef
+// stores (chef_node:normalize/1, chef_role:normalize/1), after validation as
+// erchef does it. Other collections are returned unchanged. What is stored is
+// also what a PUT answers with and what search indexes.
+func normalizeRunLists(segment string, raw []byte) ([]byte, error) {
+	switch segment {
+	case "nodes":
+		return runlist.NormalizeNode(raw)
+	case "roles":
+		return runlist.NormalizeRole(raw)
+	}
+	return raw, nil
+}
+
 func (a *API) createObject(segment string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		org := a.org(w, r)
@@ -118,6 +133,10 @@ func (a *API) createObject(segment string) http.HandlerFunc {
 		}
 		if msg := validateObjectBody(segment, "", raw); msg != "" {
 			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		if raw, err = normalizeRunLists(segment, raw); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
 		if name == "" {
@@ -178,6 +197,10 @@ func (a *API) putObject(segment string) http.HandlerFunc {
 		}
 		if msg := validateObjectBody(segment, name, raw); msg != "" {
 			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		if raw, err = normalizeRunLists(segment, raw); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
 		if err := org.Put(segment, name, raw); err != nil {

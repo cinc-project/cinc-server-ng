@@ -182,7 +182,9 @@ func (a *API) listKeys(segment string, scope scopeFunc) http.HandlerFunc {
 
 		coll := keysColl(segment, name)
 		base := keysBaseURL(r, segment, name)
-		var out []map[string]any
+		// An actor with no keys (created at API v1 without create_key) lists
+		// as [], not null.
+		out := []map[string]any{}
 		_, storedDefault, err := org.Get(coll, defaultKeyName)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

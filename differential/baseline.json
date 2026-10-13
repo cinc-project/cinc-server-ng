@@ -36,18 +36,6 @@
     "candidate": "false"
   },
   {
-    "step": "client delete",
-    "field": "create_key",
-    "reference": "<missing>",
-    "candidate": "true"
-  },
-  {
-    "step": "client delete",
-    "field": "public_key",
-    "reference": "<missing>",
-    "candidate": "<key>"
-  },
-  {
     "step": "client key missing",
     "field": "error",
     "reference": "There is no key named diff-absent associated with diff-client.",
@@ -76,18 +64,6 @@
     "field": "admin",
     "reference": "<missing>",
     "candidate": "false"
-  },
-  {
-    "step": "client read",
-    "field": "create_key",
-    "reference": "<missing>",
-    "candidate": "true"
-  },
-  {
-    "step": "client read",
-    "field": "public_key",
-    "reference": "<missing>",
-    "candidate": "<key>"
   },
   {
     "step": "cookbook artifact missing",
@@ -124,12 +100,6 @@
     "field": "(body){members}",
     "reference": "name,description,json_class,chef_type,default_attributes,override_attributes,cookbook_versions",
     "candidate": "name,description,cookbook_versions,json_class,chef_type,default_attributes,override_attributes"
-  },
-  {
-    "step": "group admins",
-    "field": "(body){members}",
-    "reference": "actors,users,clients,groups,orgname,name,groupname",
-    "candidate": "actors,clients,groupname,groups,name,orgname,users"
   },
   {
     "step": "group admins",
@@ -295,87 +265,15 @@
   },
   {
     "step": "principal client",
-    "field": "authz_id",
-    "reference": "<missing>",
+    "field": "principals[0].authz_id",
+    "reference": "<guid>",
     "candidate": "diff-client"
   },
   {
-    "step": "principal client",
-    "field": "name",
-    "reference": "<missing>",
-    "candidate": "diff-client"
-  },
-  {
-    "step": "principal client",
-    "field": "org_member",
-    "reference": "<missing>",
-    "candidate": "true"
-  },
-  {
-    "step": "principal client",
-    "field": "principals",
-    "reference": "[{\"name\":\"diff-client\",\"public_key\":\"<key>\",\"type\":\"client\",\"authz_id\":\"<guid>\",\"org_member\":true}]",
-    "candidate": "<missing>"
-  },
-  {
-    "step": "principal client",
-    "field": "public_key",
-    "reference": "<missing>",
-    "candidate": "<key>"
-  },
-  {
-    "step": "principal client",
-    "field": "type",
-    "reference": "<missing>",
-    "candidate": "client"
-  },
-  {
-    "step": "principal missing",
-    "field": "error",
-    "reference": "Cannot find principal diff-absent",
-    "candidate": "[\"Cannot find principal diff-absent\"]"
-  },
-  {
-    "step": "principal missing",
-    "field": "not_found",
-    "reference": "principal",
-    "candidate": "<missing>"
-  },
-  {
     "step": "principal user",
-    "field": "authz_id",
-    "reference": "<missing>",
+    "field": "principals[0].authz_id",
+    "reference": "<guid>",
     "candidate": "diffuser"
-  },
-  {
-    "step": "principal user",
-    "field": "name",
-    "reference": "<missing>",
-    "candidate": "diffuser"
-  },
-  {
-    "step": "principal user",
-    "field": "org_member",
-    "reference": "<missing>",
-    "candidate": "true"
-  },
-  {
-    "step": "principal user",
-    "field": "principals",
-    "reference": "[{\"name\":\"diffuser\",\"public_key\":\"<key>\",\"type\":\"user\",\"authz_id\":\"<guid>\",\"org_member\":true}]",
-    "candidate": "<missing>"
-  },
-  {
-    "step": "principal user",
-    "field": "public_key",
-    "reference": "<missing>",
-    "candidate": "<key>"
-  },
-  {
-    "step": "principal user",
-    "field": "type",
-    "reference": "<missing>",
-    "candidate": "user"
   },
   {
     "step": "required recipe",

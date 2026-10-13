@@ -85,7 +85,7 @@ func TestGroupIndexRebuildKeepsMembershipRows(t *testing.T) {
 	}
 
 	// Any write to a group document advances the generation and forces a rebuild.
-	if err := org.Put("groups", "admins", mustEncode(groupDoc("admins", []string{"alice"}, nil, nil))); err != nil {
+	if err := org.Put("groups", "admins", groupJSON("admins", "", []string{"alice"}, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
 	idx, err = c.get(org)
