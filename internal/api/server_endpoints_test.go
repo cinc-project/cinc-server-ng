@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 func TestStatsEndpoint(t *testing.T) {
@@ -84,6 +86,150 @@ func TestPrincipals(t *testing.T) {
 	resp, _ := do(t, "GET", base+"/principals/ghost", "")
 	if resp.StatusCode != 404 {
 		t.Fatalf("unknown principal = %d, want 404", resp.StatusCode)
+	}
+}
+
+// principalEntry is one principal as erchef encodes it.
+type principalEntry struct {
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+	Type      string `json:"type"`
+	AuthzID   string `json:"authz_id"`
+	OrgMember bool   `json:"org_member"`
+}
+
+// principalList decodes an API v1+ principals response.
+func principalList(t *testing.T, body string) []principalEntry {
+	t.Helper()
+	var v struct {
+		Principals *[]principalEntry `json:"principals"`
+	}
+	if err := json.Unmarshal([]byte(body), &v); err != nil || v.Principals == nil {
+		t.Fatalf("not a principals list: %s (%v)", body, err)
+	}
+	return *v.Principals
+}
+
+// plantClient stores an org client named name straight into acme, bypassing
+// the API's refusal to create a client under an existing user's name, so a
+// name that answers to both (state loaded from disk or predating the refusal)
+// can be exercised. The client's record is a freshly created client's.
+func plantClient(t *testing.T, url string, st *store.Store, name string) {
+	t.Helper()
+	if resp, body := do(t, "POST", url+"/organizations/acme/clients", `{"name":"planted-seed"}`); resp.StatusCode != 201 {
+		t.Fatalf("seed client = %d %s", resp.StatusCode, body)
+	}
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := org.Get("clients", "planted-seed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := org.Put("clients", name, raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Under API v1 and later erchef answers with {"principals":[...]}, listing
+// every actor that answers to the name: users ahead of clients (keys_by_name
+// ORDER BY type DESC), with org_member true for a client and, for a user,
+// whether the user is associated with the org.
+func TestPrincipalsV1ListsEveryMatch(t *testing.T) {
+	srv, st := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
+	resp, body := doAt(t, "1", "GET", base+"/principals/alice", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("v1 user principal = %d %s", resp.StatusCode, body)
+	}
+	got := principalList(t, body)
+	if len(got) != 1 || got[0].Name != "alice" || got[0].Type != "user" ||
+		got[0].OrgMember || !strings.Contains(got[0].PublicKey, "PUBLIC KEY") || got[0].AuthzID == "" {
+		t.Fatalf("v1 non-member user principal = %s", body)
+	}
+	if !strings.HasPrefix(body, `{"principals":[{"name":"alice","public_key":`) ||
+		!strings.Contains(body, `"type":"user","authz_id":`) {
+		t.Fatalf("v1 principal member order = %s", body)
+	}
+
+	// Associating the user makes it an org member.
+	do(t, "POST", base+"/users", `{"username":"alice"}`)
+	_, body = doAt(t, "2", "GET", base+"/principals/alice", "")
+	if got := principalList(t, body); len(got) != 1 || !got[0].OrgMember {
+		t.Fatalf("v2 member user principal = %s", body)
+	}
+
+	// A client with the same name: both are listed, the user first.
+	plantClient(t, srv.URL, st, "alice")
+	_, body = doAt(t, "1", "GET", base+"/principals/alice", "")
+	got = principalList(t, body)
+	if len(got) != 2 || got[0].Type != "user" || got[1].Type != "client" ||
+		got[1].Name != "alice" || !got[1].OrgMember {
+		t.Fatalf("v1 shared-name principals = %s", body)
+	}
+
+	// Unknown name: erchef's not_found body, not the error array.
+	resp, body = doAt(t, "1", "GET", base+"/principals/ghost", "")
+	if resp.StatusCode != 404 || strings.TrimSpace(body) != `{"not_found":"principal","error":"Cannot find principal ghost"}` {
+		t.Fatalf("v1 unknown principal = %d %s", resp.StatusCode, body)
+	}
+}
+
+// erchef reads principals from keys_by_name, one row per unexpired key, so an
+// actor with two live keys is listed twice, once per key.
+func TestPrincipalsV1OneEntryPerKey(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+
+	do(t, "POST", base+"/clients", `{"name":"web01"}`)
+	resp, body := do(t, "POST", base+"/clients/web01/keys", `{"name":"second","create_key":true,"expiration_date":"infinity"}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("add key = %d %s", resp.StatusCode, body)
+	}
+	resp, body = do(t, "POST", base+"/clients/web01/keys", `{"name":"old","create_key":true,"expiration_date":"2001-01-01T00:00:00Z"}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("add expired key = %d %s", resp.StatusCode, body)
+	}
+	_, body = doAt(t, "1", "GET", base+"/principals/web01", "")
+	got := principalList(t, body)
+	if len(got) != 2 || got[0].PublicKey == got[1].PublicKey {
+		t.Fatalf("v1 principals for a two-key client = %s", body)
+	}
+}
+
+// API v0 (and an unversioned request, which erchef treats as v0) keeps the
+// single-object form: the org client wins over a user of the same name.
+func TestPrincipalsV0SingleObject(t *testing.T) {
+	srv, st := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
+	plantClient(t, srv.URL, st, "alice")
+	for _, v := range []string{"", "0"} {
+		_, body := doAt(t, v, "GET", base+"/principals/alice", "")
+		var p principalEntry
+		if err := json.Unmarshal([]byte(body), &p); err != nil || p.Type != "client" || !p.OrgMember {
+			t.Fatalf("v%q principal = %s", v, body)
+		}
+		if !strings.HasPrefix(body, `{"name":"alice","public_key":`) {
+			t.Fatalf("v%q principal member order = %s", v, body)
+		}
+	}
+
+	// A user that is not associated with the org is not an org member.
+	do(t, "POST", srv.URL+"/users", userBody(`{"name":"bob"}`))
+	_, body := doAt(t, "0", "GET", base+"/principals/bob", "")
+	var p principalEntry
+	if err := json.Unmarshal([]byte(body), &p); err != nil || p.Type != "user" || p.OrgMember {
+		t.Fatalf("v0 non-member user principal = %s", body)
+	}
+
+	resp, body := doAt(t, "0", "GET", base+"/principals/ghost", "")
+	if resp.StatusCode != 404 || strings.TrimSpace(body) != `{"not_found":"principal","error":"Cannot find principal ghost"}` {
+		t.Fatalf("v0 unknown principal = %d %s", resp.StatusCode, body)
 	}
 }
 
