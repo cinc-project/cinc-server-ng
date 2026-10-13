@@ -25,10 +25,24 @@ type statFamily struct {
 	Count float64 `json:"count"`
 }
 
-// gatherStats reads /_stats as the admin and decodes the JSON families.
+// statsRequest is a /_stats request carrying the server's stats credentials,
+// the way a scraper or oc-chef-pedant reaches it: HTTP Basic, no signing.
+func statsRequest(t *testing.T, srv *Server) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest("GET", srv.URL()+"/_stats", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, password := srv.StatsCredentials()
+	req.SetBasicAuth(user, password)
+	return req
+}
+
+// gatherStats reads /_stats with the stats credentials and decodes the JSON
+// families.
 func gatherStats(t *testing.T, srv *Server) map[string]statFamily {
 	t.Helper()
-	resp, err := http.DefaultClient.Do(signed(t, srv, "GET", srv.URL()+"/_stats", ""))
+	resp, err := http.DefaultClient.Do(statsRequest(t, srv))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +176,7 @@ func TestStatsReportsSearchResolution(t *testing.T) {
 func TestStatsServesPrometheusTextOnRequest(t *testing.T) {
 	srv := startServer(t, Options{Orgs: []string{"acme"}})
 
-	req := signed(t, srv, "GET", srv.URL()+"/_stats", "")
+	req := statsRequest(t, srv)
 	req.Header.Set("Accept", "text/plain")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -190,11 +204,109 @@ func TestStatsServesPrometheusTextOnRequest(t *testing.T) {
 	}
 }
 
-// The endpoint reports internal state, so it stays behind authentication.
-func TestStatsRequiresAuthentication(t *testing.T) {
-	srv := startServer(t, Options{Orgs: []string{"acme"}})
+// The endpoint reports internal state, so it stays behind authentication. On
+// Chef Infra Server that is HTTP Basic, enforced by nginx: the realm below is
+// the one its nginx config uses.
+func TestStatsRequiresBasicAuth(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}, StatsPassword: "s3cret"})
+	user, _ := srv.StatsCredentials()
+
+	cases := map[string]func(*http.Request){
+		"no credentials": func(*http.Request) {},
+		"wrong password": func(r *http.Request) { r.SetBasicAuth(user, "nope") },
+		"wrong user":     func(r *http.Request) { r.SetBasicAuth("someone", "s3cret") },
+		"empty password": func(r *http.Request) { r.SetBasicAuth(user, "") },
+		"not basic":      func(r *http.Request) { r.Header.Set("Authorization", "Bearer s3cret") },
+	}
+	for name, set := range cases {
+		t.Run(name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", srv.URL()+"/_stats", nil)
+			set(req)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", resp.StatusCode)
+			}
+			if got, want := resp.Header.Get("WWW-Authenticate"), `Basic realm="Chef Server Admin Stats"`; got != want {
+				t.Errorf("WWW-Authenticate = %q, want %q", got, want)
+			}
+			var body struct {
+				Error []string `json:"error"`
+			}
+			if err := json.Unmarshal(raw, &body); err != nil || len(body.Error) == 0 {
+				t.Errorf("body = %s, want a JSON error", raw)
+			}
+		})
+	}
+
+	// Baseline: the right credentials do get in.
 	req, _ := http.NewRequest("GET", srv.URL()+"/_stats", nil)
-	if code := statusOf(t, req); code != http.StatusUnauthorized {
-		t.Fatalf("unsigned /_stats = %d, want 401", code)
+	req.SetBasicAuth(user, "s3cret")
+	if code := statusOf(t, req); code != http.StatusOK {
+		t.Fatalf("with stats credentials = %d, want 200", code)
+	}
+}
+
+// Chef Infra Server guards /_stats with Basic auth only, so a Mixlib-signed
+// request without it is turned away: a valid API key is not a stats
+// credential.
+func TestStatsRejectsSignedRequestWithoutBasicAuth(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}})
+	// Baseline: the admin signature is good on an ordinary route.
+	if code := statusOf(t, signed(t, srv, "GET", srv.URL()+"/users", "")); code != http.StatusOK {
+		t.Fatalf("signed /users = %d, want 200", code)
+	}
+	if code := statusOf(t, signed(t, srv, "GET", srv.URL()+"/_stats", "")); code != http.StatusUnauthorized {
+		t.Fatalf("signed /_stats = %d, want 401", code)
+	}
+}
+
+// The stats user defaults to Chef Infra Server's, and is configurable.
+func TestStatsUserDefaultsAndIsConfigurable(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}})
+	if user, _ := srv.StatsCredentials(); user != "statsuser" {
+		t.Errorf("default stats user = %q, want statsuser", user)
+	}
+
+	// Enforcing, as the binary does by default: there is no Chef actor on a
+	// Basic-authenticated request, and authorization must not trip over that.
+	srv = startServer(t, Options{Orgs: []string{"acme"}, EnforceACL: true, StatsUser: "prom", StatsPassword: "pw"})
+	if user, password := srv.StatsCredentials(); user != "prom" || password != "pw" {
+		t.Fatalf("credentials = %q/%q, want prom/pw", user, password)
+	}
+	req, _ := http.NewRequest("GET", srv.URL()+"/_stats", nil)
+	req.SetBasicAuth("prom", "pw")
+	if code := statusOf(t, req); code != http.StatusOK {
+		t.Fatalf("custom credentials = %d, want 200", code)
+	}
+}
+
+// With no password configured there is no safe fixed default, so each server
+// generates its own (as Chef Infra Server generates stats_password at install)
+// and exposes it for the operator to read.
+func TestStatsPasswordGeneratedWhenUnset(t *testing.T) {
+	a := startServer(t, Options{Orgs: []string{"acme"}})
+	b := startServer(t, Options{Orgs: []string{"acme"}})
+	_, pa := a.StatsCredentials()
+	_, pb := b.StatsCredentials()
+	if len(pa) < 32 {
+		t.Errorf("generated password %q is too short", pa)
+	}
+	if pa == pb {
+		t.Errorf("two servers generated the same stats password %q", pa)
+	}
+}
+
+// With authentication disabled every route is open, and /_stats with them:
+// requiring a credential there alone would protect nothing.
+func TestStatsOpenWhenAuthDisabled(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}, DisableAuth: true})
+	req, _ := http.NewRequest("GET", srv.URL()+"/_stats", nil)
+	if code := statusOf(t, req); code != http.StatusOK {
+		t.Fatalf("no-auth /_stats = %d, want 200", code)
 	}
 }
