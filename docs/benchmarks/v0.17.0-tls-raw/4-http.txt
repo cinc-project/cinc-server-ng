@@ -1,0 +1,8 @@
+== cinc-server-ng (HTTP) (http://127.0.0.1:8911/organizations/bench, auth=true) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10   errors
+GET node               0.500     0.102     0.147         8958        41053        0
+GET node list          0.674     0.175     0.230         5356        23642        0
+PUT node               0.697     0.108     0.164         8476        35437        0
+search *:*             1.660     0.562     0.780         1696         8112        0
+search filtered       10.718     0.358     0.389         2742        14389        0

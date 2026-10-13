@@ -1,0 +1,151 @@
+goos: linux
+goarch: amd64
+pkg: github.com/cinc-project/cinc-server-ng/internal/api
+cpu: AMD EPYC 9V74 80-Core Processor                
+                 │   v0.16.0   │               HEAD                │
+                 │   sec/op    │   sec/op     vs base              │
+Bootstrap500-4     317.9µ ± 1%   320.1µ ± 1%  +0.70% (p=0.002 n=6)
+Bootstrap2000-4    1.320m ± 6%   1.327m ± 7%       ~ (p=0.394 n=6)
+Bootstrap8000-4    6.053m ± 3%   6.087m ± 8%       ~ (p=0.310 n=6)
+CheckinsMemory-4   16.38µ ± 1%   16.42µ ± 3%       ~ (p=0.699 n=6)
+CheckinsSQLite-4   58.58µ ± 2%   58.56µ ± 3%       ~ (p=1.000 n=6)
+ListObjects-4      60.61µ ± 1%   60.77µ ± 2%       ~ (p=0.589 n=6)
+SearchScanWarm-4   49.98µ ± 1%   49.84µ ± 1%       ~ (p=0.240 n=6)
+geomean            184.9µ        185.4µ       +0.28%
+
+                 │   v0.16.0    │                 HEAD                 │
+                 │     B/op     │     B/op      vs base                │
+Bootstrap500-4     362.4Ki ± 0%   362.4Ki ± 0%  +0.00% (p=0.002 n=6)
+Bootstrap2000-4    1.444Mi ± 0%   1.444Mi ± 0%  +0.00% (p=0.002 n=6)
+Bootstrap8000-4    5.802Mi ± 0%   5.803Mi ± 0%  +0.00% (p=0.048 n=6)
+CheckinsMemory-4   20.43Ki ± 0%   20.43Ki ± 0%       ~ (p=0.545 n=6)
+CheckinsSQLite-4   24.11Ki ± 0%   24.11Ki ± 0%       ~ (p=0.892 n=6)
+ListObjects-4      43.20Ki ± 0%   43.23Ki ± 0%       ~ (p=0.394 n=6)
+SearchScanWarm-4   23.93Ki ± 0%   23.93Ki ± 0%       ~ (p=1.000 n=6) ¹
+geomean            148.9Ki        148.9Ki       +0.01%
+¹ all samples are equal
+
+                 │   v0.16.0   │                HEAD                 │
+                 │  allocs/op  │  allocs/op   vs base                │
+Bootstrap500-4     4.354k ± 0%   4.354k ± 0%       ~ (p=1.000 n=6) ¹
+Bootstrap2000-4    17.88k ± 0%   17.88k ± 0%       ~ (p=1.000 n=6) ¹
+Bootstrap8000-4    71.99k ± 0%   71.99k ± 0%       ~ (p=1.000 n=6)
+CheckinsMemory-4    138.0 ± 0%    138.0 ± 0%       ~ (p=1.000 n=6) ¹
+CheckinsSQLite-4    241.0 ± 0%    241.0 ± 0%       ~ (p=1.000 n=6) ¹
+ListObjects-4       30.00 ± 0%    30.00 ± 0%       ~ (p=1.000 n=6) ¹
+SearchScanWarm-4    15.00 ± 0%    15.00 ± 0%       ~ (p=1.000 n=6) ¹
+geomean             701.9         701.9       +0.00%
+¹ all samples are equal
+
+pkg: github.com/cinc-project/cinc-server-ng/internal/store/sqlite
+        │   v0.16.0   │               HEAD                │
+        │   sec/op    │   sec/op     vs base              │
+Get-4     5.776µ ± 1%   5.758µ ± 1%       ~ (p=0.240 n=6)
+Put-4     7.654µ ± 0%   7.675µ ± 1%       ~ (p=0.180 n=6)
+geomean   6.649µ        6.647µ       -0.03%
+
+                          │    v0.16.0     │                   HEAD                   │
+                          │      B/op      │      B/op        vs base                 │
+Get-4                       1.477Ki ± 0%      1.477Ki ±   0%        ~ (p=1.000 n=6) ¹
+Put-4                         456.0 ± 0%        456.0 ±   0%        ~ (p=1.000 n=6) ¹
+WriteLatency-4              665.8Ki ±  ?     2996.0Ki ± 100%        ~ (p=0.234 n=6)
+WriteLatencyGroupCommit-4     0.000 ± 0%        0.000 ±   0%        ~ (p=1.000 n=6) ¹
+geomean                                  ²                    +45.64%               ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+                          │    v0.16.0    │                  HEAD                  │
+                          │   allocs/op   │   allocs/op    vs base                 │
+Get-4                        27.00 ± 0%      27.00 ±   0%        ~ (p=1.000 n=6) ¹
+Put-4                        11.00 ± 0%      11.00 ±   0%        ~ (p=1.000 n=6) ¹
+WriteLatency-4              17.97k ±  ?     80.85k ± 100%        ~ (p=0.234 n=6)
+WriteLatencyGroupCommit-4    0.000 ± 0%      0.000 ±   0%        ~ (p=1.000 n=6) ¹
+geomean                                 ²                  +45.64%               ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+                          │    v0.16.0    │                 HEAD                  │
+                          │    max-us     │    max-us      vs base                │
+WriteLatency-4              145.7k ± 247%   518.2k ± 106%  +255.52% (p=0.026 n=6)
+WriteLatencyGroupCommit-4   30.81k ± 135%   25.32k ±  91%         ~ (p=0.589 n=6)
+geomean                     67.01k          114.5k          +70.94%
+
+                          │   v0.16.0   │               HEAD               │
+                          │   p50-us    │   p50-us    vs base              │
+WriteLatency-4              228.5 ± 17%   253.0 ± 6%       ~ (p=0.080 n=6)
+WriteLatencyGroupCommit-4   246.5 ±  2%   248.5 ± 3%       ~ (p=0.331 n=6)
+geomean                     237.3         250.7       +5.65%
+
+                          │    v0.16.0    │                  HEAD                  │
+                          │    p99-us     │     p99-us      vs base                │
+WriteLatency-4              20.45k ± 199%   119.05k ±  59%  +482.29% (p=0.009 n=6)
+WriteLatencyGroupCommit-4   1.990k ±  49%    1.161k ± 115%         ~ (p=0.394 n=6)
+geomean                     6.379k           11.76k          +84.29%
+
+                          │    v0.16.0    │                HEAD                 │
+                          │   writes/s    │   writes/s    vs base               │
+WriteLatency-4              10.010k ± 68%   3.740k ± 52%  -62.64% (p=0.004 n=6)
+WriteLatencyGroupCommit-4    31.28k ± 36%   35.62k ± 20%        ~ (p=0.699 n=6)
+geomean                      17.70k         11.54k        -34.77%
+
+pkg: github.com/cinc-project/cinc-server-ng/server
+                                            │   v0.16.0    │               HEAD                │
+                                            │    sec/op    │   sec/op     vs base              │
+FleetCheckinEnforced-4                        29.20µ ± 11%   29.01µ ± 1%       ~ (p=0.240 n=6)
+FleetCheckinGroupGranted128-4                 32.02µ ±  2%   31.93µ ± 1%       ~ (p=0.818 n=6)
+FleetCheckinGroupGranted512-4                 28.85µ ±  2%   29.12µ ± 1%       ~ (p=0.310 n=6)
+FleetCheckinGroupGranted2048-4                28.22µ ±  2%   28.34µ ± 3%       ~ (p=0.937 n=6)
+FleetCheckinAuthOnly-4                        24.93µ ±  2%   25.02µ ± 2%       ~ (p=0.818 n=6)
+FleetCheckinNoAuth-4                          7.523µ ±  8%   7.290µ ± 9%       ~ (p=0.132 n=6)
+FleetCheckinEnforcedSQLite-4                  60.64µ ±  3%   59.62µ ± 2%  -1.68% (p=0.009 n=6)
+FleetCheckinEnforcedSQLiteGroupCommit-4       74.75µ ±  2%   74.59µ ± 2%       ~ (p=0.699 n=6)
+FleetCheckinEnforcedSQLiteBusy-4              67.96µ ±  2%   67.65µ ± 1%       ~ (p=0.818 n=6)
+FleetCheckinEnforcedSQLiteBusyGroupCommit-4   71.88µ ±  2%   70.54µ ± 1%  -1.86% (p=0.026 n=6)
+SearchScaleExact512-4                         550.4µ ±  6%   533.2µ ± 2%  -3.11% (p=0.004 n=6)
+SearchScaleExact2048-4                        2.132m ±  1%   2.081m ± 1%  -2.35% (p=0.002 n=6)
+SearchScaleExact8192-4                        9.169m ±  3%   8.793m ± 2%  -4.10% (p=0.002 n=6)
+SearchScaleSelective512-4                     47.75µ ±  2%   47.08µ ± 2%       ~ (p=0.065 n=6)
+SearchScaleSelective2048-4                    48.65µ ±  1%   48.20µ ± 2%  -0.94% (p=0.009 n=6)
+SearchScaleSelective8192-4                    48.90µ ±  0%   48.48µ ± 1%  -0.86% (p=0.013 n=6)
+geomean                                       81.60µ         80.61µ       -1.21%
+
+                                            │   v0.16.0    │                HEAD                │
+                                            │     B/op     │     B/op      vs base              │
+FleetCheckinEnforced-4                        20.60Ki ± 0%   20.59Ki ± 0%       ~ (p=0.379 n=6)
+FleetCheckinGroupGranted128-4                 20.61Ki ± 0%   20.61Ki ± 0%       ~ (p=0.457 n=6)
+FleetCheckinGroupGranted512-4                 20.55Ki ± 0%   20.55Ki ± 0%       ~ (p=0.554 n=6)
+FleetCheckinGroupGranted2048-4                20.53Ki ± 0%   20.53Ki ± 0%       ~ (p=0.978 n=6)
+FleetCheckinAuthOnly-4                        16.30Ki ± 0%   16.30Ki ± 0%       ~ (p=0.788 n=6)
+FleetCheckinNoAuth-4                          9.938Ki ± 0%   9.938Ki ± 0%       ~ (p=1.000 n=6)
+FleetCheckinEnforcedSQLite-4                  26.60Ki ± 0%   26.60Ki ± 0%       ~ (p=0.411 n=6)
+FleetCheckinEnforcedSQLiteGroupCommit-4       26.92Ki ± 0%   26.92Ki ± 0%       ~ (p=0.567 n=6)
+FleetCheckinEnforcedSQLiteBusy-4              27.61Ki ± 0%   27.60Ki ± 0%  -0.01% (p=0.032 n=6)
+FleetCheckinEnforcedSQLiteBusyGroupCommit-4   27.86Ki ± 0%   27.86Ki ± 0%       ~ (p=0.576 n=6)
+SearchScaleExact512-4                         164.5Ki ± 0%   164.5Ki ± 0%       ~ (p=0.937 n=6)
+SearchScaleExact2048-4                        595.3Ki ± 0%   595.3Ki ± 0%       ~ (p=0.240 n=6)
+SearchScaleExact8192-4                        2.269Mi ± 0%   2.269Mi ± 0%       ~ (p=0.331 n=6)
+SearchScaleSelective512-4                     17.84Ki ± 0%   17.83Ki ± 0%       ~ (p=0.509 n=6)
+SearchScaleSelective2048-4                    17.82Ki ± 0%   17.82Ki ± 0%       ~ (p=0.981 n=6)
+SearchScaleSelective8192-4                    17.81Ki ± 0%   17.81Ki ± 0%       ~ (p=1.000 n=6)
+geomean                                       38.20Ki        38.20Ki       -0.00%
+
+                                            │   v0.16.0   │                HEAD                 │
+                                            │  allocs/op  │  allocs/op   vs base                │
+FleetCheckinEnforced-4                         208.0 ± 0%    208.0 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinGroupGranted128-4                  195.0 ± 0%    195.0 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinGroupGranted512-4                  194.0 ± 0%    194.0 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinGroupGranted2048-4                 194.0 ± 0%    194.0 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinAuthOnly-4                         116.0 ± 0%    116.0 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinNoAuth-4                           69.00 ± 0%    69.00 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinEnforcedSQLite-4                   368.0 ± 0%    368.0 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinEnforcedSQLiteGroupCommit-4        374.0 ± 0%    374.0 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinEnforcedSQLiteBusy-4               390.0 ± 0%    390.0 ± 0%       ~ (p=1.000 n=6) ¹
+FleetCheckinEnforcedSQLiteBusyGroupCommit-4    394.0 ± 0%    394.0 ± 0%       ~ (p=1.000 n=6) ¹
+SearchScaleExact512-4                         2.244k ± 0%   2.244k ± 0%       ~ (p=0.545 n=6)
+SearchScaleExact2048-4                        8.414k ± 0%   8.413k ± 0%       ~ (p=0.346 n=6)
+SearchScaleExact8192-4                        33.06k ± 0%   33.06k ± 0%       ~ (p=0.396 n=6)
+SearchScaleSelective512-4                      154.0 ± 0%    154.0 ± 0%       ~ (p=1.000 n=6) ¹
+SearchScaleSelective2048-4                     154.0 ± 0%    154.0 ± 0%       ~ (p=1.000 n=6) ¹
+SearchScaleSelective8192-4                     154.0 ± 0%    154.0 ± 0%       ~ (p=1.000 n=6) ¹
+geomean                                        408.0         408.0       -0.00%
+¹ all samples are equal

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -42,6 +43,12 @@ type API struct {
 	// routes are the patterns registered, so a test can require every mutating
 	// one to be authorized.
 	routes []string
+	// externalURL, when set, is the scheme://host prefix of every URL the
+	// server hands back, in place of one rebuilt from the request.
+	externalURL string
+	// draining is set once the server is shutting down; /_status then fails
+	// so a load balancer stops routing here.
+	draining atomic.Bool
 	// now is the clock that decides whether an actor's key has expired.
 	// Defaults to time.Now.
 	now func() time.Time
@@ -63,6 +70,14 @@ func WithACLEnforcement(enabled bool) Option {
 // keep the file store open (the permissive default for direct API-layer use).
 func WithFileStoreKey(key []byte) Option {
 	return func(a *API) { a.fileStoreKey = key }
+}
+
+// WithExternalURL fixes the scheme://host prefix of the absolute URLs the
+// server returns (erchef's base_resource_url), for deployments where the
+// request's Host and X-Forwarded-Proto do not carry the public address. The
+// caller validates it; an empty value keeps deriving the prefix per request.
+func WithExternalURL(base string) Option {
+	return func(a *API) { a.externalURL = base }
 }
 
 // WithClock sets the clock used to decide whether an actor's key has expired.
@@ -131,7 +146,11 @@ func (a *API) Handler() http.Handler {
 	if a.enforceACL {
 		h = a.authzMiddleware(h)
 	}
-	return withoutTrailingSlash(withAPIVersion(h))
+	h = withoutTrailingSlash(withAPIVersion(h))
+	if a.externalURL != "" {
+		h = withExternalURL(a.externalURL, h)
+	}
+	return h
 }
 
 // withoutTrailingSlash routes "/users/" as "/users", as Chef Infra Server does

@@ -1,0 +1,53 @@
+{
+  "label": "Chef Infra Server",
+  "base": "https://runnervmmprz5.tdo3uu5luxduddxkbirwjdwkdh.bx.internal.cloudapp.net/organizations/bench",
+  "auth": true,
+  "conc": 10,
+  "ops": [
+    {
+      "name": "GET node",
+      "cold_ms": 49.221,
+      "p50_ms": 46.015,
+      "p95_ms": 47.063,
+      "qps1": 21.629673809959147,
+      "qpsc": 203.36237497859403,
+      "errors": 0
+    },
+    {
+      "name": "GET node list",
+      "cold_ms": 14.466,
+      "p50_ms": 49.025,
+      "p95_ms": 50.958,
+      "qps1": 20.321136808758187,
+      "qpsc": 179.08865430541297,
+      "errors": 0
+    },
+    {
+      "name": "PUT node",
+      "cold_ms": 23.13,
+      "p50_ms": 55,
+      "p95_ms": 56.079,
+      "qps1": 18.181602455452175,
+      "qpsc": 161.5311100545926,
+      "errors": 0
+    },
+    {
+      "name": "search *:*",
+      "cold_ms": 755.602,
+      "p50_ms": 38.967,
+      "p95_ms": 52.985,
+      "qps1": 25.19282963205667,
+      "qpsc": 57.78571487243285,
+      "errors": 0
+    },
+    {
+      "name": "search filtered",
+      "cold_ms": 47.289,
+      "p50_ms": 22.661,
+      "p95_ms": 28.654,
+      "qps1": 44.04601658374377,
+      "qpsc": 103.22096073013404,
+      "errors": 0
+    }
+  ]
+}

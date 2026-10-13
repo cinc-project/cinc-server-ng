@@ -94,6 +94,18 @@ type Options struct {
 	// its stats_password at install) and is readable via StatsCredentials.
 	// Ignored, like all authentication, when DisableAuth is set.
 	StatsPassword string
+	// ExternalURL is the public scheme://host[:port] clients reach the server
+	// on, used for every absolute URL in a response (erchef's
+	// base_resource_url). Leave it empty to derive the prefix from each
+	// request's Host and X-Forwarded-Proto; set it when a load balancer
+	// rewrites Host or terminates TLS without sending X-Forwarded-Proto.
+	ExternalURL string
+	// TLSCertFile and TLSKeyFile are a PEM certificate (chain) and private key
+	// to serve HTTPS with. Set both or neither; when empty the server speaks
+	// plain HTTP and expects TLS to be terminated in front of it. The pair is
+	// read at New and again on ReloadTLS.
+	TLSCertFile string
+	TLSKeyFile  string
 	// Backend, when non-nil, is used directly and overrides Storage/DB. It lets
 	// embedding tests inject a specific store.Backend (e.g. a shared in-memory
 	// SQLite DB).
@@ -207,6 +219,7 @@ type Server struct {
 	fileStoreKey  []byte         // signs/verifies pre-signed cookbook file-store URLs
 	api           *api.API
 	url           string
+	certs         *certLoader // nil unless serving TLS
 }
 
 // upgradeOrgACLs brings every org in st to erchef's org ACL policy (see
@@ -241,6 +254,20 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.Repo != "" && opts.StatePath != "" {
 		return nil, errors.New("options Repo and StatePath are mutually exclusive; a state directory already subsumes a chef-repo")
+	}
+	if opts.ExternalURL != "" {
+		base, err := normalizeExternalURL(opts.ExternalURL)
+		if err != nil {
+			return nil, err
+		}
+		opts.ExternalURL = base
+	}
+	var certs *certLoader
+	if opts.TLSCertFile != "" || opts.TLSKeyFile != "" {
+		var err error
+		if certs, err = newCertLoader(opts.TLSCertFile, opts.TLSKeyFile); err != nil {
+			return nil, err
+		}
 	}
 	st, err := buildStore(opts)
 	if err != nil {
@@ -398,11 +425,13 @@ func New(opts Options) (*Server, error) {
 		keyCache:      auth.NewPublicKeyCache(),
 		webuiPub:      webuiPub,
 		fileStoreKey:  fileStoreKey,
+		certs:         certs,
 	}
 	apiInstance := api.New(st,
 		api.WithACLEnforcement(opts.EnforceACL),
 		api.WithFileStoreKey(fileStoreKey),
 		api.WithClock(opts.Now),
+		api.WithExternalURL(opts.ExternalURL),
 	)
 	s.api = apiInstance
 	handler := apiInstance.Handler()
@@ -459,8 +488,15 @@ func (s *Server) Start() error {
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
+	serve := s.httpSrv.Serve
+	if s.certs != nil {
+		s.url = "https://" + ln.Addr().String()
+		s.httpSrv.TLSConfig = s.certs.config()
+		// The certificate comes from TLSConfig.GetCertificate, so no files here.
+		serve = func(ln net.Listener) error { return s.httpSrv.ServeTLS(ln, "", "") }
+	}
 	go func() {
-		if err := s.httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			// Serve errors after Close are expected; nothing to do here.
 			_ = err
 		}
@@ -479,10 +515,27 @@ func (s *Server) Stop(ctx context.Context) error {
 		return s.store.Close()
 	}
 	err := s.httpSrv.Shutdown(ctx)
+	if err != nil {
+		// The deadline passed with requests still in flight: cut them off rather
+		// than leave them running against a closed store.
+		_ = s.httpSrv.Close()
+	}
 	if cerr := s.store.Close(); err == nil {
 		err = cerr
 	}
 	return err
+}
+
+// Drain starts a graceful shutdown as a load balancer sees it: /_status fails
+// with 503 so the health check removes this instance from rotation, and each
+// connection is closed after its current response so clients reconnect through
+// the load balancer, while requests keep being served. Call Stop once the load
+// balancer has had time to notice (a few health-check intervals).
+func (s *Server) Drain() {
+	s.api.Drain()
+	if s.httpSrv != nil {
+		s.httpSrv.SetKeepAlivesEnabled(false)
+	}
 }
 
 // URL is the base URL the server is listening on (valid after Start).

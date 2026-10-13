@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cinc-project/cinc-server-ng/server"
 )
@@ -48,6 +49,12 @@ type cliFlags struct {
 	initOnly       bool
 	statsUser      string
 	statsPassword  string
+
+	tlsCert         string
+	tlsKey          string
+	externalURL     string
+	shutdownDelay   time.Duration
+	shutdownTimeout time.Duration
 }
 
 // hiddenFlags are registered and functional but omitted from usage/help output
@@ -78,6 +85,11 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	// environment never appears in --help; the environment is applied after
 	// parsing instead.
 	fs.StringVar(&f.statsPassword, "stats-password", "", "HTTP Basic password for GET /_stats (or CINC_SERVER_NG_STATS_PASSWORD, which keeps it off the command line); when unset, a random one is generated and printed at startup")
+	fs.StringVar(&f.tlsCert, "tls-cert", os.Getenv("CINC_SERVER_NG_TLS_CERT"), "PEM certificate (chain) to serve HTTPS with; requires --tls-key. Send SIGHUP to reload a renewed pair")
+	fs.StringVar(&f.tlsKey, "tls-key", os.Getenv("CINC_SERVER_NG_TLS_KEY"), "PEM private key for --tls-cert")
+	fs.StringVar(&f.externalURL, "external-url", os.Getenv("CINC_SERVER_NG_EXTERNAL_URL"), "public scheme://host[:port] used in every URL the server returns (default: derived from each request's Host and X-Forwarded-Proto)")
+	fs.DurationVar(&f.shutdownDelay, "shutdown-delay", 0, "on SIGTERM/SIGINT, fail /_status with 503 and keep serving for this long before stopping, so a load balancer drains this instance first (a second signal skips the wait)")
+	fs.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight requests when stopping before cutting them off")
 	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
 
 	fs.Usage = func() {
@@ -165,6 +177,10 @@ func run(args []string, out io.Writer) error {
 		StatsPassword: f.statsPassword,
 
 		SQLiteGroupCommit: f.groupCommit,
+
+		ExternalURL: f.externalURL,
+		TLSCertFile: f.tlsCert,
+		TLSKeyFile:  f.tlsKey,
 	})
 	if err != nil {
 		return err
@@ -216,12 +232,55 @@ func run(args []string, out io.Writer) error {
 		fmt.Fprintf(out, "  webui impersonation: enabled (key: %s)\n", webuiSrc)
 	}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	if f.externalURL != "" {
+		fmt.Fprintf(out, "  external url: %s\n", f.externalURL)
+	}
+
+	sigs := make(chan os.Signal, 2)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigs)
+	return serveUntilSignal(srv, sigs, f.shutdownDelay, f.shutdownTimeout, out)
+}
+
+// serveUntilSignal runs a started server until SIGTERM or SIGINT, reloading the
+// TLS certificate on each SIGHUP. Stopping drains first: for delay, /_status
+// fails so a load balancer stops routing here while requests are still served
+// (a second stop signal cuts the wait short). Then in-flight requests get up to
+// timeout to finish before their connections are cut.
+func serveUntilSignal(srv *server.Server, sigs <-chan os.Signal, delay, timeout time.Duration, out io.Writer) error {
+	for sig := range sigs {
+		if sig != syscall.SIGHUP {
+			break
+		}
+		if err := srv.ReloadTLS(); err != nil {
+			fmt.Fprintf(out, "SIGHUP: TLS not reloaded: %v\n", err)
+			continue
+		}
+		fmt.Fprintln(out, "SIGHUP: reloaded TLS certificate")
+	}
+
+	if delay > 0 {
+		srv.Drain()
+		fmt.Fprintf(out, "draining for %s (signal again to stop now)...\n", delay)
+		timer := time.NewTimer(delay)
+	wait:
+		for {
+			select {
+			case <-timer.C:
+				break wait
+			case sig := <-sigs:
+				if sig != syscall.SIGHUP {
+					timer.Stop()
+					break wait
+				}
+			}
+		}
+	}
 
 	fmt.Fprintln(out, "shutting down...")
-	return srv.Stop(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return srv.Stop(ctx)
 }
 
 // envOr returns the value of environment variable key, or def when it is unset

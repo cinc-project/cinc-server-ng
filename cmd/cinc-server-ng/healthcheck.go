@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -17,6 +19,7 @@ func healthcheck(args []string, out io.Writer) error {
 	fs.SetOutput(out)
 	addr := fs.String("addr", "127.0.0.1:8889", "address of the server to probe (host:port)")
 	timeout := fs.Duration("timeout", 3*time.Second, "give up after this long")
+	useTLS := fs.Bool("tls", os.Getenv("CINC_SERVER_NG_TLS_CERT") != "", "probe over HTTPS (default on when CINC_SERVER_NG_TLS_CERT is set, as for a server started with --tls-cert); the certificate is not verified, since it names the public host rather than the address probed")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -32,7 +35,17 @@ func healthcheck(args []string, out io.Writer) error {
 	}
 
 	client := &http.Client{Timeout: *timeout}
-	resp, err := client.Get("http://" + net.JoinHostPort(host, port) + "/_status")
+	scheme := "http"
+	if *useTLS {
+		scheme = "https"
+		// A liveness probe sends nothing secret and trusts nothing it reads
+		// beyond the status code, so an unverified handshake is enough.
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: true, //nolint:gosec // see above
+		}}
+	}
+	resp, err := client.Get(scheme + "://" + net.JoinHostPort(host, port) + "/_status")
 	if err != nil {
 		return fmt.Errorf("healthcheck: %w", err)
 	}

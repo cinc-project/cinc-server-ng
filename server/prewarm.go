@@ -19,8 +19,9 @@ import (
 // reading the request, the middleware chain, and JSON error encoding), all of
 // which run before authentication rejects an unsigned request. Skipping the
 // signatures keeps startup cheap (no RSA work) while still warming the path that
-// matters. None of the requests mutate the store.
-func (s *Server) prewarm() {
+// matters. None of the requests mutate the store. It returns how many requests
+// completed, so a caller can tell the warm-up actually reached the handlers.
+func (s *Server) prewarm() int {
 	base := s.url + "/organizations/" + s.opts.Orgs[0]
 	reqs := []struct{ method, path, body string }{
 		{"GET", base + "/nodes", ""},                        // list path + response buffer pool
@@ -30,7 +31,11 @@ func (s *Server) prewarm() {
 	}
 
 	client := &http.Client{}
+	if s.certs != nil {
+		client.Transport = &http.Transport{TLSClientConfig: s.certs.selfClientConfig()}
+	}
 	defer client.CloseIdleConnections()
+	done := 0
 	for range 2 { // a second pass benefits from the heap the first pass grew
 		for _, rq := range reqs {
 			req, err := http.NewRequest(rq.method, rq.path, strings.NewReader(rq.body))
@@ -47,6 +52,8 @@ func (s *Server) prewarm() {
 			}
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			done++
 		}
 	}
+	return done
 }

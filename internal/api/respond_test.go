@@ -1,9 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // X-Forwarded-Proto is set by a reverse proxy, but on a direct connection it
@@ -37,5 +41,43 @@ func TestRequestBaseURLForwardedProto(t *testing.T) {
 				t.Errorf("requestBaseURL = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// Behind a load balancer that rewrites Host (or terminates TLS without saying
+// so), the request alone cannot tell the server its public address. A
+// configured external URL, erchef's base_resource_url, wins over both the Host
+// header and X-Forwarded-Proto for every URL the server hands back.
+func TestExternalURLOverridesRequestBase(t *testing.T) {
+	st := store.New()
+	if _, err := st.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(st, WithExternalURL("https://chef.example.com")).Handler())
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequest("POST", srv.URL+"/organizations/acme/nodes", strings.NewReader(`{"name":"web1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "10.0.0.5:8889"
+	req.Header.Set("X-Forwarded-Proto", "http")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct{ URI string }
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if want := "https://chef.example.com/organizations/acme/nodes/web1"; body.URI != want {
+		t.Fatalf("uri = %q, want %q", body.URI, want)
+	}
+
+	// Baseline: without the option the same request reports the Host it came in on.
+	r := httptest.NewRequest("GET", "http://10.0.0.5:8889/", nil)
+	if got := requestBaseURL(r); got != "http://10.0.0.5:8889" {
+		t.Fatalf("baseline requestBaseURL = %q", got)
 	}
 }
