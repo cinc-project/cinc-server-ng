@@ -168,33 +168,34 @@ func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
 // that is defaultACL(), which lets every org member (the "users" group) create,
 // update and delete.
 //
-// Two kinds of object must not inherit that, because holding update on them is
-// authority over the org itself rather than over one of its objects:
+// The organization, its containers and its groups instead report the ACL
+// erchef's org creation policy (oc_chef_authz_org_creator) gives them; see
+// acl_policy.go. None of them gets an ACL written when it is created here
+// (bar the clients container, for the validator), so the policy has to live in
+// the fallback, and it is what keeps authority over the org with the admins:
 //
 //   - The organization. Update on it is what invites, rescinds and removes
-//     members, and no organization ever gets an ACL written for it, so the
-//     fallback is its ACL. Chef's org policy (oc_chef_authz_org_creator) gives
-//     the users group read on the organization and nothing else.
+//     members. The users group holds read on it and nothing else; the clients
+//     group holds nothing.
 //   - Groups, and the groups container. Membership is permission: a member
-//     who could rewrite admins would hold update on the organization, and one
-//     who could rewrite any group an admin had granted something would hold
-//     that grant. Chef's org policy gives the users group read on the groups
-//     container and nothing more, and a group created in it takes its ACL from
-//     the container; the default groups give users no more than that either.
-//     So creating a group, and changing or deleting one, is the admins' (or
-//     whoever an ACL written for it names).
+//     who could rewrite admins would hold update on the organization. The
+//     users group holds read on the groups container and nothing on the
+//     default groups; a group created later takes the container's ACL.
+//   - The clients, groups and containers containers, which the clients group
+//     cannot read: a node's key is not a way to enumerate the org's actors.
 //
-// All keep defaultACL's read, which is what lets a member see the org and the
-// groups it belongs to. An ACL written for any of them through the _acl
-// endpoints still replaces this fallback, as for any object.
+// An ACL written for any of them through the _acl endpoints still replaces
+// this fallback, as for any object.
 func fallbackACL(typ, name string) map[string]any {
-	acl := defaultACL()
-	if typ == "organizations" || typ == "groups" || (typ == "containers" && name == "groups") {
-		for _, p := range []string{"create", "update", "delete"} {
-			acl[p] = map[string]any{"actors": []string{}, "groups": []string{"admins"}}
-		}
+	switch typ {
+	case "organizations":
+		return orgACL()
+	case "containers":
+		return containerACL(name)
+	case "groups":
+		return groupACL(name)
 	}
-	return acl
+	return defaultACL()
 }
 
 // The org-scoped object handlers resolve the {org} path value to its store and

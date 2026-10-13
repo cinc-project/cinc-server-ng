@@ -120,12 +120,6 @@
     "candidate": "<missing>"
   },
   {
-    "step": "group list",
-    "field": "public_key_read_access",
-    "reference": "<server>/organizations/diffs/groups/public_key_read_access",
-    "candidate": "<missing>"
-  },
-  {
     "step": "method not allowed",
     "field": "(body)",
     "reference": "<html><head><title>405 Method Not Allowed</title></head><body><h1>Method Not Allowed</h1>Method Not Allowed<p><hr><address>mochiweb+webmachine web server</address></body></html>",
@@ -226,12 +220,6 @@
     "field": "read.actors.length",
     "reference": "1",
     "candidate": "0"
-  },
-  {
-    "step": "org acl",
-    "field": "read.groups.length",
-    "reference": "2",
-    "candidate": "3"
   },
   {
     "step": "org acl",

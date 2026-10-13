@@ -207,9 +207,15 @@ func TestKnifeACLAddRemove(t *testing.T) {
 
 	// Changing an ACL takes grant, which an ordinary member does not hold:
 	// otherwise any member could hand itself anything.
+	// The group named is one bob can read: as on Chef, a member holds no read
+	// on the org's default groups, so naming one of those fails at knife's
+	// group lookup before the ACL write is ever tried.
 	bob := authzMember(t, h, "bob", false)
-	authzDenied(t, h, "member bob", bob, "acl", "add", "group", "users", "nodes", "web01", "grant")
-	authzDenied(t, h, "member bob", bob, "acl", "remove", "group", "clients", "nodes", "web01", "read")
+	authzDenied(t, h, "member bob", bob, "raw", "/groups/users")
+	h.run(t, "group", "create", "auditors")
+	h.run(t, "acl", "add", "group", "auditors", "nodes", "web01", "read")
+	authzDenied(t, h, "member bob", bob, "acl", "add", "group", "auditors", "nodes", "web01", "grant")
+	authzDenied(t, h, "member bob", bob, "acl", "remove", "group", "auditors", "nodes", "web01", "read")
 	authzAllowed(t, h, "client agent", cfg, show...)
 }
 
