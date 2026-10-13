@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // Assorted server endpoints: /_stats, per-org required_recipe and principals,
@@ -57,8 +60,27 @@ func (a *API) requiredRecipe(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, "Required recipe is not configured on this server.")
 }
 
-// principal resolves a name to its actor record. Org clients take precedence
-// over global users, matching Chef's principal lookup.
+// principalJSON is one principal in erchef's member order
+// (chef_wm_named_principal:assemble_principal_ejson).
+type principalJSON struct {
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+	Type      string `json:"type"`
+	AuthzID   string `json:"authz_id"`
+	OrgMember bool   `json:"org_member"`
+}
+
+// principal resolves a name to the actors that answer to it, as
+// chef_wm_named_principal does.
+//
+// Under API v0 (which is also what an unversioned request gets, in erchef and
+// here) the answer is a single object: the org client if there is one, else
+// the global user. Under v1 and later it is {"principals":[...]}, read from
+// erchef's keys_by_name view: one entry per unexpired key of every matching
+// actor, users ahead of clients (ORDER BY type DESC; erchef defines no order
+// among one actor's keys, and neither does this). A name with no entries
+// is a 404 either way. org_member is always true for a client and, for a user,
+// whether the user is associated with the org.
 func (a *API) principal(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
@@ -66,46 +88,104 @@ func (a *API) principal(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 
-	if raw, ok, err := org.Get("clients", name); err != nil {
+	v0 := requestAPIVersion(r) == 0
+	var (
+		found []principalJSON
+		err   error
+	)
+	if v0 {
+		found, err = a.principalV0(org, name)
+	} else {
+		found, err = a.principalsByKey(org, name)
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	} else if ok {
-		doc, err := principalDoc(name, "client", raw)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, doc)
+	}
+	if len(found) == 0 {
+		writeJSON(w, http.StatusNotFound, struct {
+			NotFound string `json:"not_found"`
+			Error    string `json:"error"`
+		}{"principal", "Cannot find principal " + name})
 		return
 	}
-	if raw, ok, err := a.store.Global().Get("users", name); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	} else if ok {
-		doc, err := principalDoc(name, "user", raw)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, doc)
+	if v0 {
+		writeJSON(w, http.StatusOK, found[0])
 		return
 	}
-	writeError(w, http.StatusNotFound, "Cannot find principal "+name)
+	writeJSON(w, http.StatusOK, map[string]any{"principals": found})
 }
 
-func principalDoc(name, typ string, actorRaw []byte) (map[string]any, error) {
-	var actor map[string]any
-	if err := json.Unmarshal(actorRaw, &actor); err != nil {
-		return nil, err
+// principalV0 is erchef's v0 lookup (chef_db:fetch_requestor): the org client
+// of that name, falling back to the global user, with the record's own key.
+func (a *API) principalV0(org *store.Org, name string) ([]principalJSON, error) {
+	for _, src := range []struct {
+		scope *store.Org
+		coll  string
+		typ   string
+	}{{org, "clients", "client"}, {a.store.Global(), "users", "user"}} {
+		raw, ok, err := src.scope.Get(src.coll, name)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		pub, _ := chefjson.String(raw, "public_key")
+		member, err := principalOrgMember(org, src.typ, name)
+		if err != nil {
+			return nil, err
+		}
+		return []principalJSON{{name, pub, src.typ, name, member}}, nil
 	}
-	pubKey, _ := actor["public_key"].(string)
-	return map[string]any{
-		"name":       name,
-		"type":       typ,
-		"public_key": pubKey,
-		"authz_id":   name,
-		"org_member": true,
-	}, nil
+	return nil, nil
+}
+
+// principalsByKey is erchef's v1+ lookup (chef_db:fetch_requestors over
+// keys_by_name): every unexpired key of the matching user, then of the
+// matching org client, one entry per key.
+func (a *API) principalsByKey(org *store.Org, name string) ([]principalJSON, error) {
+	var out []principalJSON
+	now := a.now()
+	for _, src := range []struct {
+		scope *store.Org
+		coll  string
+		typ   string
+	}{{a.store.Global(), "users", "user"}, {org, "clients", "client"}} {
+		raw, ok, err := src.scope.Get(src.coll, name)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		pub, _ := chefjson.String(raw, "public_key")
+		keys, err := SigningKeys(src.scope, src.coll, name, pub, now)
+		if err != nil {
+			return nil, err
+		}
+		if len(keys) == 0 {
+			continue
+		}
+		member, err := principalOrgMember(org, src.typ, name)
+		if err != nil {
+			return nil, err
+		}
+		for _, k := range keys {
+			out = append(out, principalJSON{name, k, src.typ, name, member})
+		}
+	}
+	return out, nil
+}
+
+// principalOrgMember is oc_chef_wm_base:is_user_in_org/4: a client is always
+// a member of its org, and a user is one when associated with it.
+func principalOrgMember(org *store.Org, typ, name string) (bool, error) {
+	if typ == "client" {
+		return true, nil
+	}
+	_, ok, err := org.Get(assocColl, name)
+	return ok, err
 }
 
 // withAPIVersion negotiates the server API version on every request. It runs
