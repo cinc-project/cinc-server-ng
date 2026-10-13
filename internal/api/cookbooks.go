@@ -324,12 +324,16 @@ func (a *API) listCookbooks(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	limit, ok := numVersions(w, r, 1)
+	if !ok {
+		return
+	}
 	cv, err := cookbookVersions(org)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", cv))
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", cv, limit))
 }
 
 // cookbookVersionsFor returns one cookbook's versions (sorted newest first)
@@ -355,6 +359,11 @@ func (a *API) getCookbook(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	// erchef validates num_versions on this route too, then ignores it: one
+	// cookbook always lists every version (chef_wm_cookbooks:to_json/3).
+	if _, ok := numVersions(w, r, 1); !ok {
+		return
+	}
 	name := r.PathValue("name")
 	vers, err := cookbookVersionsFor(org, name)
 	if err != nil {
@@ -365,20 +374,15 @@ func (a *API) getCookbook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name)
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", map[string][]string{name: vers}))
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", map[string][]string{name: vers}, allVersions))
 }
 
 // collectionListBody builds the Chef "name -> {url, versions:[...]}" structure
 // shared by cookbooks and cookbook_artifacts. label is the per-entry key that
-// names the item ("version" for cookbooks, "identifier" for artifacts). The
-// num_versions query parameter ("all" or an integer) caps each list.
-func collectionListBody(r *http.Request, org *store.Org, segment, label string, items map[string][]string) map[string]any {
-	limit := -1
-	if nv := r.URL.Query().Get("num_versions"); nv != "" && nv != "all" {
-		if n, err := strconv.Atoi(nv); err == nil {
-			limit = n
-		}
-	}
+// names the item ("version" for cookbooks, "identifier" for artifacts). limit
+// caps each list (allVersions for no cap); callers take it from numVersions
+// where erchef honours num_versions.
+func collectionListBody(r *http.Request, org *store.Org, segment, label string, items map[string][]string, limit int) map[string]any {
 	out := map[string]any{}
 	for name, vals := range items {
 		if limit >= 0 && len(vals) > limit {
@@ -397,6 +401,57 @@ func collectionListBody(r *http.Request, org *store.Org, segment, label string, 
 		}
 	}
 	return out
+}
+
+// allVersions is the numVersions result for num_versions=all.
+const allVersions = -1
+
+// invalidNumVersions is erchef's 400 for a num_versions it cannot parse
+// (chef_wm_malformed:malformed_request_message(invalid_num_versions, ...)).
+const invalidNumVersions = "You have requested an invalid number of versions (x >= 0 || 'all')"
+
+// numVersions reads the num_versions query parameter the way
+// chef_wm_util:num_versions/2 does: absent means def, "all" means every
+// version, and anything else must be a non-negative integer in
+// string:to_integer/1's syntax (one optional sign, digits, nothing after), or
+// the request is a 400. A value too large for an int caps nothing. On a 400 it
+// writes the response and returns ok=false.
+func numVersions(w http.ResponseWriter, r *http.Request, def int) (limit int, ok bool) {
+	vals := r.URL.Query()["num_versions"]
+	if len(vals) == 0 {
+		return def, true
+	}
+	if n, valid := parseNumVersions(vals[0]); valid {
+		return n, true
+	}
+	writeError(w, http.StatusBadRequest, invalidNumVersions)
+	return 0, false
+}
+
+func parseNumVersions(s string) (int, bool) {
+	if s == "all" {
+		return allVersions, true
+	}
+	digits := s
+	negative := false
+	if digits != "" && (digits[0] == '+' || digits[0] == '-') {
+		negative = digits[0] == '-'
+		digits = digits[1:]
+	}
+	if digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return 0, false
+	}
+	if strings.Trim(digits, "0") == "" {
+		return 0, true // "0", "-0", "+000"
+	}
+	if negative {
+		return 0, false
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil {
+		return allVersions, true // more versions than any cookbook can have
+	}
+	return n, true
 }
 
 // resolveVersion maps the "_latest" alias to the newest stored version.
@@ -615,6 +670,9 @@ func (a *API) cookbooksLatest(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	if _, ok := numVersions(w, r, 1); !ok { // validated, then unused, as in erchef
+		return
+	}
 	cv, err := cookbookVersions(org)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -632,6 +690,9 @@ func (a *API) cookbooksLatest(w http.ResponseWriter, r *http.Request) {
 func (a *API) cookbookRecipesEndpoint(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
+		return
+	}
+	if _, ok := numVersions(w, r, 1); !ok { // validated, then unused, as in erchef
 		return
 	}
 	cv, err := cookbookVersions(org)

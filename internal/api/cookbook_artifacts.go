@@ -55,7 +55,7 @@ func (a *API) listArtifacts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbook_artifacts", "identifier", idents))
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbook_artifacts", "identifier", idents, allVersions))
 }
 
 func (a *API) getArtifact(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,7 @@ func (a *API) getArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook artifact named "+name)
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbook_artifacts", "identifier", map[string][]string{name: idents}))
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbook_artifacts", "identifier", map[string][]string{name: idents}, allVersions))
 }
 
 func (a *API) getArtifactVersion(w http.ResponseWriter, r *http.Request) {

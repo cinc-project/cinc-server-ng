@@ -127,6 +127,8 @@ func Script(actor string) []Step {
 
 		// --- cookbooks and policies -------------------------------------------
 		{Name: "cookbook list", Method: "GET", Path: "/cookbooks"},
+		{Name: "cookbook list bad num_versions", Method: "GET", Path: "/cookbooks?num_versions=-1"},
+		{Name: "environment cookbooks bad num_versions", Method: "GET", Path: "/environments/_default/cookbooks?num_versions=abc"},
 		{Name: "cookbook missing", Method: "GET", Path: "/cookbooks/diff-absent"},
 		{Name: "cookbook latest", Method: "GET", Path: "/cookbooks/_latest"},
 		{Name: "cookbook recipes", Method: "GET", Path: "/cookbooks/_recipes"},
