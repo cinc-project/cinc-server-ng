@@ -46,6 +46,8 @@ type cliFlags struct {
 	db             string
 	groupCommit    bool
 	initOnly       bool
+	statsUser      string
+	statsPassword  string
 }
 
 // hiddenFlags are registered and functional but omitted from usage/help output
@@ -71,6 +73,11 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.StringVar(&f.storage, "storage", envOr("CINC_SERVER_NG_STORAGE", "memory"), "storage backend: memory (ephemeral) or sqlite (durable)")
 	fs.StringVar(&f.db, "db", os.Getenv("CINC_SERVER_NG_DB"), "sqlite database file path (required when --storage sqlite)")
 	fs.BoolVar(&f.groupCommit, "sqlite-group-commit", true, "batch concurrent sqlite writes into shared transactions: much higher write throughput and far better tail latency under fleet load, at a few microseconds more on a serialized single-client write; pass --sqlite-group-commit=false to opt out")
+	fs.StringVar(&f.statsUser, "stats-user", envOr("CINC_SERVER_NG_STATS_USER", server.DefaultStatsUser), "HTTP Basic user for GET /_stats")
+	// The password's flag default stays empty so a value taken from the
+	// environment never appears in --help; the environment is applied after
+	// parsing instead.
+	fs.StringVar(&f.statsPassword, "stats-password", "", "HTTP Basic password for GET /_stats (or CINC_SERVER_NG_STATS_PASSWORD, which keeps it off the command line); when unset, a random one is generated and printed at startup")
 	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
 
 	fs.Usage = func() {
@@ -98,6 +105,9 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 			f.enforceACLsSet = true
 		}
 	})
+	if f.statsPassword == "" {
+		f.statsPassword = os.Getenv("CINC_SERVER_NG_STATS_PASSWORD")
+	}
 	return &f, nil
 }
 
@@ -151,6 +161,9 @@ func run(args []string, out io.Writer) error {
 		Storage:     f.storage,
 		DB:          f.db,
 
+		StatsUser:     f.statsUser,
+		StatsPassword: f.statsPassword,
+
 		SQLiteGroupCommit: f.groupCommit,
 	})
 	if err != nil {
@@ -193,6 +206,8 @@ func run(args []string, out io.Writer) error {
 	if f.state != "" {
 		fmt.Fprintf(out, "  loaded server state from %s\n", f.state)
 	}
+	statsUser, statsPassword := srv.StatsCredentials()
+	fmt.Fprintln(out, statsBanner(statsUser, statsPassword, f.statsPassword == "", f.noAuth))
 	if !f.noAuth {
 		webuiSrc := "admin key"
 		if f.webuiKey != "" {
@@ -226,6 +241,20 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+// statsBanner describes how to reach /_stats. A generated password is printed,
+// since the banner is the only place an operator can read it; a configured one
+// is theirs already and is not echoed into logs.
+func statsBanner(user, password string, generated, noAuth bool) string {
+	switch {
+	case noAuth:
+		return "  stats: GET /_stats is open (auth disabled)"
+	case generated:
+		return fmt.Sprintf("  stats: GET /_stats with HTTP Basic user %q, password %q (generated; set --stats-password or CINC_SERVER_NG_STATS_PASSWORD to fix it)", user, password)
+	default:
+		return fmt.Sprintf("  stats: GET /_stats with HTTP Basic user %q (password configured)", user)
+	}
 }
 
 func authState(disabled bool) string {

@@ -185,16 +185,29 @@ Downgrading the binary against a newer database is not supported.
 
 ## Metrics
 
-`GET /_stats` reports what the server is doing. It requires authentication, like
-any other API route, and answers in two formats:
+`GET /_stats` reports what the server is doing. As on Chef Infra Server, it is
+protected by HTTP Basic auth rather than a signed request (a valid API key is not
+enough), and answers in two formats:
 
 ```sh
 # JSON metric families (the default)
-curl -s .../_stats
+curl -s -u "statsuser:$STATS_PASSWORD" .../_stats
 
 # Prometheus text exposition, for a scraper
-curl -s -H 'Accept: text/plain' .../_stats
+curl -s -u "statsuser:$STATS_PASSWORD" -H 'Accept: text/plain' .../_stats
 ```
+
+The user defaults to `statsuser`, Chef Infra Server's, and is set with
+`--stats-user` (or `CINC_SERVER_NG_STATS_USER`). Set the password with
+`--stats-password` or, to keep it out of the process list,
+`CINC_SERVER_NG_STATS_PASSWORD`. There is deliberately no fixed default password,
+since one published in this repository would protect nothing: when none is set,
+the server generates a random one at startup and prints it in the startup banner,
+much as Chef Infra Server generates its `stats_password` at install. Missing or
+wrong credentials get a 401 with a `WWW-Authenticate: Basic` challenge. With
+`--no-auth`, `/_stats` is open like every other route. Embedding programs set
+`Options.StatsUser`/`Options.StatsPassword` and read the effective pair with
+`srv.StatsCredentials()`.
 
 What it exposes is chosen to answer the questions that decide whether the server
 is keeping up with a fleet:

@@ -152,3 +152,99 @@ func TestGroupCommitCanBeDisabled(t *testing.T) {
 		t.Error("--sqlite-group-commit=false should turn group commit off")
 	}
 }
+
+// The stats user defaults to Chef Infra Server's statsuser; no password is set
+// unless asked for, so the server generates one.
+func TestStatsFlagsDefault(t *testing.T) {
+	t.Setenv("CINC_SERVER_NG_STATS_USER", "")
+	t.Setenv("CINC_SERVER_NG_STATS_PASSWORD", "")
+	f, err := parseFlags(nil, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if f.statsUser != "statsuser" {
+		t.Errorf("stats user = %q, want statsuser", f.statsUser)
+	}
+	if f.statsPassword != "" {
+		t.Errorf("stats password = %q, want empty (generated)", f.statsPassword)
+	}
+}
+
+func TestStatsFlagsSet(t *testing.T) {
+	f, err := parseFlags([]string{"--stats-user", "prom", "--stats-password", "pw"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if f.statsUser != "prom" || f.statsPassword != "pw" {
+		t.Errorf("stats credentials = %q/%q, want prom/pw", f.statsUser, f.statsPassword)
+	}
+}
+
+// The environment is the way to pass the password without putting it on a
+// command line other processes can read, and it must never surface in --help.
+func TestStatsPasswordFromEnvNotInUsage(t *testing.T) {
+	t.Setenv("CINC_SERVER_NG_STATS_USER", "prom")
+	t.Setenv("CINC_SERVER_NG_STATS_PASSWORD", "env-secret")
+	f, err := parseFlags(nil, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if f.statsUser != "prom" || f.statsPassword != "env-secret" {
+		t.Errorf("stats credentials = %q/%q, want prom/env-secret", f.statsUser, f.statsPassword)
+	}
+
+	var buf bytes.Buffer
+	if _, err := parseFlags([]string{"-h"}, &buf); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("parseFlags(-h) error = %v", err)
+	}
+	if strings.Contains(buf.String(), "env-secret") {
+		t.Errorf("usage leaks the stats password:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "-stats-password") {
+		t.Errorf("usage should document -stats-password:\n%s", buf.String())
+	}
+}
+
+// A flag wins over the environment, as with the other env-backed flags.
+func TestStatsPasswordFlagOverridesEnv(t *testing.T) {
+	t.Setenv("CINC_SERVER_NG_STATS_PASSWORD", "env-secret")
+	f, err := parseFlags([]string{"--stats-password", "flag-secret"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if f.statsPassword != "flag-secret" {
+		t.Errorf("stats password = %q, want flag-secret", f.statsPassword)
+	}
+}
+
+// The startup banner is the only place a generated password can be read, so it
+// is printed then; a configured one is the operator's own and is not echoed.
+func TestStatsBanner(t *testing.T) {
+	cases := []struct {
+		name              string
+		noAuth, generated bool
+		wantIn, wantNotIn []string
+	}{
+		{name: "generated", generated: true,
+			wantIn: []string{"statsuser", "gen-pw", "generated"}},
+		{name: "configured",
+			wantIn: []string{"statsuser", "configured"}, wantNotIn: []string{"gen-pw"}},
+		{name: "no auth", noAuth: true, generated: true,
+			wantIn: []string{"open"}, wantNotIn: []string{"gen-pw"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := statsBanner("statsuser", "gen-pw", tc.generated, tc.noAuth)
+			for _, w := range tc.wantIn {
+				if !strings.Contains(got, w) {
+					t.Errorf("banner %q missing %q", got, w)
+				}
+			}
+			for _, w := range tc.wantNotIn {
+				if strings.Contains(got, w) {
+					t.Errorf("banner %q should not contain %q", got, w)
+				}
+			}
+		})
+	}
+}

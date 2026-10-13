@@ -85,6 +85,15 @@ type Options struct {
 	// transactions for higher throughput, at a small single-client latency cost.
 	// Ignored unless Storage is "sqlite".
 	SQLiteGroupCommit bool
+	// StatsUser is the HTTP Basic user name that GET /_stats accepts. As on
+	// Chef Infra Server, /_stats is not protected by Mixlib signing but by Basic
+	// auth (nginx's job there). Defaults to "statsuser", Chef Infra Server's.
+	StatsUser string
+	// StatsPassword is the HTTP Basic password for StatsUser. When empty, a
+	// random password is generated at New (Chef Infra Server likewise generates
+	// its stats_password at install) and is readable via StatsCredentials.
+	// Ignored, like all authentication, when DisableAuth is set.
+	StatsPassword string
 	// Backend, when non-nil, is used directly and overrides Storage/DB. It lets
 	// embedding tests inject a specific store.Backend (e.g. a shared in-memory
 	// SQLite DB).
@@ -109,6 +118,9 @@ func (o *Options) withDefaults() {
 	}
 	if o.Now == nil {
 		o.Now = time.Now
+	}
+	if o.StatsUser == "" {
+		o.StatsUser = DefaultStatsUser
 	}
 	if o.MaxBodyBytes == 0 {
 		o.MaxBodyBytes = 1 << 30 // 1 GiB
@@ -342,6 +354,14 @@ func New(opts Options) (*Server, error) {
 		}
 	}
 
+	// No fixed default password: one shipped in the source would be public. A
+	// fresh one per process is what an unconfigured server gets instead.
+	if opts.StatsPassword == "" {
+		if opts.StatsPassword, err = generateStatsPassword(); err != nil {
+			return nil, err
+		}
+	}
+
 	s := &Server{
 		opts:          opts,
 		store:         st,
@@ -451,6 +471,12 @@ func (s *Server) AdminName() string { return s.opts.AdminName }
 // "<org>-validator" client, or nil if the org was not created at bootstrap.
 // This is the key chef-client uses to register new nodes.
 func (s *Server) ValidatorKey(org string) []byte { return s.validatorKeys[org] }
+
+// StatsCredentials returns the HTTP Basic user and password GET /_stats
+// accepts, including a password generated because none was configured.
+func (s *Server) StatsCredentials() (user, password string) {
+	return s.opts.StatsUser, s.opts.StatsPassword
+}
 
 // Store exposes the underlying store for programmatic seeding and inspection.
 func (s *Server) Store() *store.Store { return s.store }
