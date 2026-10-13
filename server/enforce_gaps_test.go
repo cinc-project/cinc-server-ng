@@ -44,7 +44,9 @@ func createActor(t *testing.T, srv *Server, url, body string) []byte {
 // body that would hand the attacker the victim's identity.
 func publicKeyOf(t *testing.T, srv *Server, url string) string {
 	t.Helper()
-	resp, err := http.DefaultClient.Do(signed(t, srv, "GET", url, ""))
+	// From API v1 an actor's key is read through its keys endpoint, not the
+	// actor document.
+	resp, err := http.DefaultClient.Do(signed(t, srv, "GET", url+"/keys/default", ""))
 	if err != nil {
 		t.Fatal(err)
 	}

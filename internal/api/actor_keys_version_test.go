@@ -291,3 +291,43 @@ func TestActorUpdateV0AcceptsPublicKey(t *testing.T) {
 		})
 	}
 }
+
+// From API v1 an actor's keys live only behind its keys endpoint, and erchef's
+// chef_client:assemble_client_ejson and chef_user:assemble_user_ejson add
+// public_key to the actor document only at v0. So a v1 read carries no key,
+// and an edit that sends the read back (knife client/user edit) is not a key
+// change the update refuses.
+func TestActorReadV1OmitsPublicKey(t *testing.T) {
+	for _, c := range actorCases() {
+		t.Run(c.segment, func(t *testing.T) {
+			srv, _ := newTestAPI(t)
+			if resp, body := doAt(t, "1", "POST", c.base(srv), c.body("shown", `"create_key":true`)); resp.StatusCode != 201 {
+				t.Fatalf("create = %d: %s", resp.StatusCode, body)
+			}
+			resp, body := doAt(t, "0", "GET", c.base(srv)+"/shown", "")
+			if resp.StatusCode != 200 || !strings.Contains(body, `"public_key"`) {
+				t.Fatalf("v0 GET = %d %s, want the public_key", resp.StatusCode, body)
+			}
+			resp, body = doAt(t, "1", "GET", c.base(srv)+"/shown", "")
+			if resp.StatusCode != 200 || strings.Contains(body, `"public_key"`) {
+				t.Fatalf("v1 GET = %d %s, want no public_key", resp.StatusCode, body)
+			}
+			// The edit round trip: the v1 read, sent back as the update.
+			resp, put := doAt(t, "1", "PUT", c.base(srv)+"/shown", body)
+			if resp.StatusCode != 200 {
+				t.Fatalf("v1 PUT of the v1 read = %d: %s", resp.StatusCode, put)
+			}
+			if strings.Contains(put, `"public_key"`) {
+				t.Fatalf("v1 PUT response carries the public_key: %s", put)
+			}
+			// The key the actor authenticates with is untouched by that edit.
+			if resp, body := doAt(t, "1", "GET", c.base(srv)+"/shown/keys/default", ""); resp.StatusCode != 200 {
+				t.Fatalf("GET keys/default after edit = %d: %s", resp.StatusCode, body)
+			}
+			resp, del := doAt(t, "1", "DELETE", c.base(srv)+"/shown", "")
+			if resp.StatusCode != 200 || strings.Contains(del, `"public_key"`) {
+				t.Fatalf("v1 DELETE = %d %s, want no public_key", resp.StatusCode, del)
+			}
+		})
+	}
+}

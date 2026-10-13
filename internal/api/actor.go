@@ -424,8 +424,28 @@ func (a *API) scopedGet(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+r.PathValue("name"))
 			return
 		}
-		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), raw))
+		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), actorView(r, raw)))
 	}
+}
+
+// actorView is an actor document as the request's API version shows it. From
+// v1 an actor's keys are read only through its keys endpoint: erchef's
+// chef_client:assemble_client_ejson and chef_user:assemble_user_ejson add
+// public_key only at v0. Leaving it out also keeps an edit that sends a read
+// back (knife client/user edit) from being refused as a key change.
+func actorView(r *http.Request, raw []byte) []byte {
+	if requestAPIVersion(r) < 1 {
+		return raw
+	}
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return raw
+	}
+	if _, ok := doc["public_key"]; !ok {
+		return raw
+	}
+	delete(doc, "public_key")
+	return mustEncode(doc)
 }
 
 func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
@@ -533,7 +553,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, obj)
 			return
 		}
-		writeRaw(w, http.StatusOK, raw)
+		writeRaw(w, http.StatusOK, actorView(r, raw))
 	}
 }
 
@@ -590,7 +610,7 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 			return
 		}
-		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), raw))
+		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), actorView(r, raw)))
 	}
 }
 
