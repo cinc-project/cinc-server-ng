@@ -117,6 +117,8 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	users, clients, groups := groupMembers(obj)
+	a.membership.Lock()
+	defer a.membership.Unlock()
 	if err := clearMembers(org, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -165,26 +167,36 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// Read-modify-write: a revocation landing between the read and the write
+	// would be undone (see groupmembers.go). The group is checked again under
+	// the lock, so a concurrent delete is not undone either.
+	a.membership.Lock()
+	defer a.membership.Unlock()
+	if !exists(w, r, org, "groups", name, "Cannot find groups "+name) {
+		return
+	}
 	users, clients, groups, err := groupMembership(org, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	update := groupUpdateMembers(obj)
-	newUsers, newClients, newGroups, err := a.knownGroupMembers(org,
-		update[memberUsers], update[memberClients], update[memberGroups])
+	if v, ok := update[memberUsers]; ok {
+		users = v
+	}
+	if v, ok := update[memberClients]; ok {
+		clients = v
+	}
+	if v, ok := update[memberGroups]; ok {
+		groups = v
+	}
+	// erchef resolves every kind it writes, kept ones included, and drops the
+	// names it cannot find; a kept member whose actor is gone is not written
+	// back.
+	users, clients, groups, err = a.knownGroupMembers(org, users, clients, groups)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	if _, ok := update[memberUsers]; ok {
-		users = newUsers
-	}
-	if _, ok := update[memberClients]; ok {
-		clients = newClients
-	}
-	if _, ok := update[memberGroups]; ok {
-		groups = newGroups
 	}
 	// The document now records the whole membership, so the rows it absorbed,
 	// and those of a replaced kind, go.
@@ -233,6 +245,8 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
+	a.membership.Lock()
+	defer a.membership.Unlock()
 	if _, ok, err := org.Get("groups", name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

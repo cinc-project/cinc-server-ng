@@ -190,6 +190,27 @@ func TestGroupGetShape(t *testing.T) {
 	}
 }
 
+// TestGroupPutDropsVanishedKeptMembers pins that erchef resolves the kinds a
+// PUT keeps as well as those it replaces: a kept member whose actor no longer
+// exists is dropped rather than written back into the document.
+func TestGroupPutDropsVanishedKeptMembers(t *testing.T) {
+	srv, org := groupPutFixture(t)
+	if err := addMember(org, "devs", memberClients, "ghost-client"); err != nil {
+		t.Fatal(err)
+	}
+	// Baseline: the stale row shows up as a member.
+	if got := getGroupView(t, srv, "devs"); !slices.Contains(got.Clients, "ghost-client") {
+		t.Fatalf("baseline clients = %v, want ghost-client present", got.Clients)
+	}
+	if resp, body := do(t, "PUT", srv.URL+"/organizations/acme/groups/devs",
+		`{"actors":{"users":["anna"]}}`); resp.StatusCode != 200 {
+		t.Fatalf("PUT = %d: %s", resp.StatusCode, body)
+	}
+	if got := getGroupView(t, srv, "devs"); !slices.Equal(got.Clients, []string{"web01", "web02"}) {
+		t.Fatalf("clients = %v, want [web01 web02] without the vanished ghost-client", got.Clients)
+	}
+}
+
 func sameMembers(a, b groupView) bool {
 	return slices.Equal(a.Users, b.Users) && slices.Equal(a.Clients, b.Clients) && slices.Equal(a.Groups, b.Groups)
 }

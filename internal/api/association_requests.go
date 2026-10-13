@@ -223,6 +223,11 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Shared, from finding the invitation through the membership row, so a
+	// concurrent delete of the user (which drops its invitations) cannot run
+	// in between and leave the row behind (see groupmembers.go).
+	a.membership.RLock()
+	defer a.membership.RUnlock()
 	org, ok, err := a.findInvite(user, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

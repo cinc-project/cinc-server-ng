@@ -24,6 +24,24 @@ import (
 // written either way — including a hand-authored state directory — behaves the
 // same.
 
+// Ordering membership changes against revocation.
+//
+// A group PUT reads the group's membership and writes back the kinds it keeps,
+// and adding a member checks the actor exists before writing its row. Either
+// would undo a revocation (deleting an actor, dropping a user from the org,
+// deleting a group) that landed between its read and its write, leaving the
+// revoked name in a group for whatever is created under it next. The store
+// cannot order these: the memory backend's Tx is not isolated against
+// concurrent writers. So API.membership does:
+//
+//   - Read-modify-write of a group, and every revocation (through to deleting
+//     the actor's record), hold it exclusively. Both are rare admin operations.
+//   - Adding one member holds it shared, from the existence check through the
+//     row write, so concurrent registrations still proceed in parallel and a
+//     fleet bootstrap stays linear.
+//
+// The helpers below take no lock themselves; their callers hold it.
+
 // groupMembersColl holds incremental membership, one key per (group, kind,
 // actor).
 const groupMembersColl = "group_members"

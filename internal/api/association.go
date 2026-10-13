@@ -84,6 +84,11 @@ func (a *API) associateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Field 'username' missing")
 		return
 	}
+	// Shared, from the existence check through the membership row, so a
+	// concurrent delete of the user cannot run in between and leave the row
+	// behind (see groupmembers.go).
+	a.membership.RLock()
+	defer a.membership.RUnlock()
 	// The user must exist globally before it can be associated.
 	if _, ok, err := a.store.Global().Get("users", username); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -150,6 +155,9 @@ func (a *API) disassociateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := r.PathValue("user")
+	// A revocation (see groupmembers.go).
+	a.membership.Lock()
+	defer a.membership.Unlock()
 	if _, ok, err := org.Get(assocColl, user); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
