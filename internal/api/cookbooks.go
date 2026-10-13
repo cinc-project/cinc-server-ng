@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -505,19 +504,30 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 	version := r.PathValue("version")
+	if msg := validateCookbookURL(name, version); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	raw, err := decodeManifestBody(r)
 	if err != nil {
 		writeManifestError(w, err)
 		return
 	}
-	m, err := chefjson.DecodeObject(raw)
+	tree, err := chefjson.Parse(raw)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if msg := validateCookbookNames(name, m); msg != "" {
+	obj, _ := tree.(*chefjson.Object) // decodeManifestBody admits only objects
+	if msg := validateCookbookManifest(obj, name, version, requestAPIVersion(r) >= 2); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	raw = chefjson.Marshal(obj) // with its defaults filled in
+	m, err := chefjson.DecodeObject(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -562,41 +572,6 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	writeRaw(w, status, a.withFileURLs(raw, r, org.Name()))
-}
-
-// cookbookNameRE is erchef's cookbook_name rule (chef_regex NAME_REGEX):
-// letters, digits, '.', '_' and '-'.
-var cookbookNameRE = regexp.MustCompile(`^[.A-Za-z0-9_-]+$`)
-
-// validateCookbookNames applies erchef's cookbook name checks to a version
-// PUT (chef_cookbook_version:validate_cookbook): the URL name, metadata.name
-// when present, and the keys of metadata.dependencies and metadata.platforms.
-// It returns erchef's error message, or "" when everything is valid.
-func validateCookbookNames(urlName string, m map[string]any) string {
-	if !cookbookNameRE.MatchString(urlName) {
-		return "Invalid cookbook name '" + urlName +
-			"' using regex: 'Malformed cookbook name. Must only contain A-Z, a-z, 0-9, _, . or -'."
-	}
-	meta, _ := m["metadata"].(map[string]any)
-	if n, ok := meta["name"]; ok {
-		if s, _ := n.(string); !cookbookNameRE.MatchString(s) {
-			return "Field 'metadata.name' invalid"
-		}
-	}
-	for _, field := range []string{"dependencies", "platforms"} {
-		constraints, _ := meta[field].(map[string]any)
-		keys := make([]string, 0, len(constraints))
-		for k := range constraints {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			if !cookbookNameRE.MatchString(k) {
-				return "Invalid key '" + k + "' for metadata." + field
-			}
-		}
-	}
-	return ""
 }
 
 func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
@@ -829,15 +804,12 @@ func decodeManifestBody(r *http.Request) ([]byte, error) {
 	if chefjson.HasRepeatedNames(raw) {
 		return nil, errRepeatedNames
 	}
-	if err := checkManifestShape(r, raw); err != nil {
-		return nil, err
-	}
 	return raw, nil
 }
 
-// writeManifestError answers a manifest decodeManifestBody refused: with
-// Chef's message for one in another API version's shape, as invalid JSON
-// otherwise.
+// writeManifestError answers a manifest decodeManifestBody or
+// checkManifestShape refused: with Chef's message for one in another API
+// version's shape, as invalid JSON otherwise.
 func writeManifestError(w http.ResponseWriter, err error) {
 	if msg, ok := err.(manifestShapeError); ok {
 		writeError(w, http.StatusBadRequest, string(msg))

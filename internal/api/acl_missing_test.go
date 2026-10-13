@@ -21,7 +21,7 @@ var aclTargets = []struct {
 	{"groups", "ops", "/organizations/acme/groups/ops/_acl", [][3]string{{"POST", "/organizations/acme/groups", `{"groupname":"ops"}`}}},
 	{"containers", "things", "/organizations/acme/containers/things/_acl", [][3]string{{"POST", "/organizations/acme/containers", `{"containername":"things"}`}}},
 	{"data", "vault", "/organizations/acme/data/vault/_acl", [][3]string{{"POST", "/organizations/acme/data", `{"name":"vault"}`}}},
-	{"cookbooks", "apache", "/organizations/acme/cookbooks/apache/_acl", [][3]string{{"PUT", "/organizations/acme/cookbooks/apache/1.0.0", `{"name":"apache","version":"1.0.0"}`}}},
+	{"cookbooks", "apache", "/organizations/acme/cookbooks/apache/_acl", [][3]string{{"PUT", "/organizations/acme/cookbooks/apache/1.0.0", `{"name":"apache-1.0.0","cookbook_name":"apache","metadata":{"version":"1.0.0"}}`}}},
 	{"cookbook_artifacts", "apache", "/organizations/acme/cookbook_artifacts/apache/_acl", [][3]string{{"PUT", "/organizations/acme/cookbook_artifacts/apache/abc123", `{"name":"apache"}`}}},
 	{"policies", "base", "/organizations/acme/policies/base/_acl", [][3]string{{"POST", "/organizations/acme/policies/base/revisions", `{"name":"base","revision_id":"r1","run_list":[],"cookbook_locks":{}}`}}},
 	{"policy_groups", "prod", "/organizations/acme/policy_groups/prod/_acl", [][3]string{{"PUT", "/organizations/acme/policy_groups/prod/policies/base", `{"name":"base","revision_id":"r1","run_list":[],"cookbook_locks":{}}`}}},
