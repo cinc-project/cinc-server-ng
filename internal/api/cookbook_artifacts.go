@@ -114,6 +114,9 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	raw, err := decodeManifestBody(r)
+	if err == nil {
+		err = checkManifestShape(r, raw)
+	}
 	if err != nil {
 		writeManifestError(w, err)
 		return

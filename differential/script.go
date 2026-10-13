@@ -161,6 +161,20 @@ func Script(actor string) []Step {
 		{Name: "unknown route", Method: "GET", Path: "/diff-nonexistent"},
 		{Name: "method not allowed", Method: "DELETE", Path: "/search"},
 		{Name: "bad search query", Method: "GET", Path: "/search/node?q=%5Bunclosed"},
+		// Cookbook version manifests erchef refuses (every step speaks API v1,
+		// so all_files is not a key it accepts). None of them is stored.
+		{Name: "cookbook put all_files at v1", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"diff-cb-1.0.0","cookbook_name":"diff-cb","metadata":{"version":"1.0.0"},"all_files":[]}`},
+		{Name: "cookbook put missing metadata", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"diff-cb-1.0.0","cookbook_name":"diff-cb","recipes":[]}`},
+		{Name: "cookbook put metadata version", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"diff-cb-1.0.0","cookbook_name":"diff-cb","metadata":{"version":"9.9.9"}}`},
+		{Name: "cookbook put name mismatch", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"other-1.0.0","cookbook_name":"other","metadata":{"version":"1.0.0"}}`},
+		{Name: "cookbook put bad dependency", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0",
+			Body: `{"name":"diff-cb-1.0.0","cookbook_name":"diff-cb","metadata":{"version":"1.0.0","dependencies":{"apt":"bogus"}}}`},
+		{Name: "cookbook put bad version", Method: "PUT", Path: "/cookbooks/diff-cb/1.0.0.0",
+			Body: `{"name":"diff-cb-1.0.0.0","cookbook_name":"diff-cb","metadata":{"version":"1.0.0.0"}}`},
 
 		// --- teardown -----------------------------------------------------------
 		{Name: "policy group delete", Method: "DELETE", Path: "/policy_groups/diff-group"},

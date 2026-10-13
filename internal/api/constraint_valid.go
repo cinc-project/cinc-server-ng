@@ -20,6 +20,13 @@ func validCookbookConstraint(c string) bool {
 			break
 		}
 	}
+	return validCookbookVersion(version)
+}
+
+// validCookbookVersion is erchef's chef_cookbook_version:is_valid_version: one
+// to three dot-separated non-negative integers no larger than a Postgres
+// bigint.
+func validCookbookVersion(version string) bool {
 	parts := strings.Split(version, ".")
 	if len(parts) > 3 {
 		return false
