@@ -256,3 +256,28 @@ func TestTLSPrewarmReachesHandlers(t *testing.T) {
 		t.Fatal("pre-warm completed no requests over TLS")
 	}
 }
+
+// HTTP/2 comes from net/http configuring ALPN when the TLS config leaves
+// NextProtos unset. Setting NextProtos (say, to restrict protocols) would
+// silently drop it, so pin that clients which offer h2 get it.
+func TestTLSNegotiatesHTTP2(t *testing.T) {
+	cert := writeTestCert(t, t.TempDir(), "a")
+	srv := startServer(t, Options{TLSCertFile: cert.certFile, TLSKeyFile: cert.keyFile})
+
+	pool := x509.NewCertPool()
+	pool.AddCert(cert.leaf)
+	client := &http.Client{Transport: &http.Transport{
+		TLSClientConfig:   &tls.Config{RootCAs: pool},
+		ForceAttemptHTTP2: true,
+	}}
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(signed(t, srv, "GET", srv.URL()+"/organizations/acme/nodes", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.ProtoMajor != 2 {
+		t.Fatalf("signed GET = %d over %s, want 200 over HTTP/2", resp.StatusCode, resp.Proto)
+	}
+}
