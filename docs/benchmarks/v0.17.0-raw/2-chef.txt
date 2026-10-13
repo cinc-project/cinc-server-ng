@@ -1,0 +1,8 @@
+== Chef Infra Server (https://runnervmmprz5.tdo3uu5luxduddxkbirwjdwkdh.bx.internal.cloudapp.net/organizations/bench, auth=true) ==
+seeded 500 nodes (0 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10   errors
+GET node               7.472    46.006    47.141           22          207        0
+GET node list         13.436    49.001    50.895           20          182        0
+PUT node              22.881    54.999    56.054           18          164        0
+search *:*           536.107    41.832    54.765           23           48        0
+search filtered       42.778    23.541    31.503           41           88        0

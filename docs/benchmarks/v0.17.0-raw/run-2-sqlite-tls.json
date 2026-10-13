@@ -1,0 +1,53 @@
+{
+  "label": "cinc-server-ng (SQLite, HTTPS)",
+  "base": "https://127.0.0.1:8893/organizations/bench",
+  "auth": true,
+  "conc": 10,
+  "ops": [
+    {
+      "name": "GET node",
+      "cold_ms": 1.735,
+      "p50_ms": 0.442,
+      "p95_ms": 0.512,
+      "qps1": 2219.1157560458587,
+      "qpsc": 6793.117577720479,
+      "errors": 0
+    },
+    {
+      "name": "GET node list",
+      "cold_ms": 3.071,
+      "p50_ms": 0.73,
+      "p95_ms": 0.945,
+      "qps1": 1324.2800955166153,
+      "qpsc": 3098.3771982954163,
+      "errors": 0
+    },
+    {
+      "name": "PUT node",
+      "cold_ms": 2.96,
+      "p50_ms": 0.541,
+      "p95_ms": 0.611,
+      "qps1": 1818.915638199774,
+      "qpsc": 5621.078580817522,
+      "errors": 0
+    },
+    {
+      "name": "search *:*",
+      "cold_ms": 9.223,
+      "p50_ms": 4.307,
+      "p95_ms": 4.997,
+      "qps1": 228.95092574666393,
+      "qpsc": 396.89830968056674,
+      "errors": 0
+    },
+    {
+      "name": "search filtered",
+      "cold_ms": 26.876,
+      "p50_ms": 3.628,
+      "p95_ms": 4.644,
+      "qps1": 259.9534144504706,
+      "qpsc": 494.25946097461707,
+      "errors": 0
+    }
+  ]
+}
