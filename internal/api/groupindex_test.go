@@ -22,7 +22,7 @@ func TestCachedGroupsMatchUncachedScan(t *testing.T) {
 
 	put := func(name string, users, clients, groups []string) {
 		t.Helper()
-		if err := org.Put("groups", name, mustEncode(groupDoc(name, users, clients, groups))); err != nil {
+		if err := org.Put("groups", name, groupJSON(name, "", users, clients, groups)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestCachedGroupsFollowNestingTransitively(t *testing.T) {
 	org, _ := st.CreateOrg("acme")
 	api := New(st)
 	put := func(name string, users, groups []string) {
-		if err := org.Put("groups", name, mustEncode(groupDoc(name, users, nil, groups))); err != nil {
+		if err := org.Put("groups", name, groupJSON(name, "", users, nil, groups)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -86,7 +86,7 @@ func TestCachedGroupsRebuildOnlyWhenGroupsChange(t *testing.T) {
 	st := store.New()
 	org, _ := st.CreateOrg("acme")
 	api := New(st)
-	if err := org.Put("groups", "users", mustEncode(groupDoc("users", []string{"alice"}, nil, nil))); err != nil {
+	if err := org.Put("groups", "users", groupJSON("users", "", []string{"alice"}, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -107,7 +107,7 @@ func TestCachedGroupsRebuildOnlyWhenGroupsChange(t *testing.T) {
 	}
 
 	// A group write must invalidate it.
-	if err := org.Put("groups", "users", mustEncode(groupDoc("users", []string{"alice", "bob"}, nil, nil))); err != nil {
+	if err := org.Put("groups", "users", groupJSON("users", "", []string{"alice", "bob"}, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
 	after, err := api.groups.get(org)
@@ -128,10 +128,10 @@ func TestCachedGroupsAreScopedPerOrg(t *testing.T) {
 	a, _ := st.CreateOrg("alpha")
 	b, _ := st.CreateOrg("beta")
 	api := New(st)
-	if err := a.Put("groups", "admins", mustEncode(groupDoc("admins", []string{"alice"}, nil, nil))); err != nil {
+	if err := a.Put("groups", "admins", groupJSON("admins", "", []string{"alice"}, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Put("groups", "admins", mustEncode(groupDoc("admins", []string{"bob"}, nil, nil))); err != nil {
+	if err := b.Put("groups", "admins", groupJSON("admins", "", []string{"bob"}, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := api.actorGroups(a, Actor{Name: "alice"}); !got["admins"] {
@@ -153,7 +153,7 @@ func BenchmarkActorGroupsCached(b *testing.B) {
 			for i := range fleet {
 				clients[i] = fmt.Sprintf("node%d", i)
 			}
-			if err := org.Put("groups", "clients", mustEncode(groupDoc("clients", nil, clients, nil))); err != nil {
+			if err := org.Put("groups", "clients", groupJSON("clients", "", nil, clients, nil)); err != nil {
 				b.Fatal(err)
 			}
 			actor := Actor{Name: "node0", IsClient: true}

@@ -153,7 +153,7 @@ func removeFromGroupDocs(org *store.Org, kind, actor string) error {
 		if !changed {
 			continue
 		}
-		if err := org.Put("groups", name, mustEncode(groupDoc(name, users, clients, groups))); err != nil {
+		if err := org.Put("groups", name, groupJSON(name, "", users, clients, groups)); err != nil {
 			return err
 		}
 	}
@@ -215,7 +215,8 @@ func groupMembership(org *store.Org, group string) (users, clients, groups []str
 	return users, clients, groups, nil
 }
 
-// groupDocWithMembers renders a group in its API shape, with the rows folded in.
+// groupDocWithMembers renders a group in its API shape, with the rows folded in
+// and the name of the org it belongs to.
 func groupDocWithMembers(org *store.Org, name string) ([]byte, bool, error) {
 	_, hasDoc, err := org.Get("groups", name)
 	if err != nil {
@@ -230,7 +231,7 @@ func groupDocWithMembers(org *store.Org, name string) ([]byte, bool, error) {
 	if !hasDoc && len(users)+len(clients)+len(groups) == 0 {
 		return nil, false, nil
 	}
-	return mustEncode(groupDoc(name, users, clients, groups)), true, nil
+	return groupJSON(name, org.Name(), users, clients, groups), true, nil
 }
 
 // GroupMembership reports a group's effective membership — its document plus

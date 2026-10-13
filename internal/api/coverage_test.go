@@ -165,7 +165,7 @@ func TestInviterAuthorized(t *testing.T) {
 	}
 
 	// Now an admins-group member: authorized.
-	if err = org.Put("groups", "admins", mustEncode(groupDoc("admins", []string{"alice"}, nil, nil))); err != nil {
+	if err = org.Put("groups", "admins", groupJSON("admins", "", []string{"alice"}, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if authorized, err = a.inviterAuthorized(org, "alice"); err != nil {

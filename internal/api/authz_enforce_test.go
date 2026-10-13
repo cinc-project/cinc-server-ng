@@ -25,7 +25,7 @@ func testOrg(t *testing.T) *store.Org {
 // putGroup writes a group document with the given members.
 func putGroup(t *testing.T, org *store.Org, name string, users, clients, groups []string) {
 	t.Helper()
-	if err := org.Put("groups", name, mustEncode(groupDoc(name, users, clients, groups))); err != nil {
+	if err := org.Put("groups", name, groupJSON(name, "", users, clients, groups)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -385,7 +385,7 @@ func TestEnforceGroupsAndContainers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := org.Put("groups", "grp1", mustEncode(groupDoc("grp1", nil, nil, nil))); err != nil {
+	if err := org.Put("groups", "grp1", groupJSON("grp1", "", nil, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err := org.Put("containers", "cont1", []byte(`{"containername":"cont1"}`)); err != nil {

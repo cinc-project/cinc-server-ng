@@ -127,12 +127,6 @@
   },
   {
     "step": "group admins",
-    "field": "(body){members}",
-    "reference": "actors,users,clients,groups,orgname,name,groupname",
-    "candidate": "actors,clients,groupname,groups,name,orgname,users"
-  },
-  {
-    "step": "group admins",
     "field": "actors.length",
     "reference": "2",
     "candidate": "1"
