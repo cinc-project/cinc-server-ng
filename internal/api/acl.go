@@ -308,6 +308,18 @@ func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, me
 		ace = inner
 	}
 
+	if members != nil {
+		removed, err := removesAdminsFromGrant(r, scope, typ, name, perm, ace)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if removed {
+			writeError(w, http.StatusForbidden, "Admin group cannot be removed from the Grant ACE")
+			return
+		}
+	}
+
 	actors, groups, err := a.unknownACEMembers(members, ace)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -336,6 +348,36 @@ func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, me
 		return
 	}
 	writeJSON(w, status, map[string]any{perm: ace})
+}
+
+// removesAdminsFromGrant reports whether a write of ace to perm would take
+// the admins group off a grant ACE that currently lists it. erchef refuses
+// such a write (oc_chef_authz_acl_constraints, run from
+// oc_chef_wm_acl_permission:validate_request) for anyone but the superuser, so
+// an org admin cannot lock the admins group out of an object. Only the grant
+// permission is constrained, and only when admins is there now: a grant ACE
+// that never had it (Chef's billing-admins group) stays freely editable.
+//
+// The check is validation rather than authorization, so it applies whether or
+// not ACLs are enforced. A request with no authenticated actor (--no-auth, the
+// chef-zero role, which has no such constraint) is exempt, as is the superuser.
+// "Currently" is the effective ACL, which for an object with none stored is
+// its fallback, as it is for every other reader of the ACL. Global user ACLs
+// hold no org groups and are not checked.
+func removesAdminsFromGrant(r *http.Request, scope *store.Org, typ, name, perm string, ace map[string]any) (bool, error) {
+	if perm != "grant" || slices.Contains(jsonStrings(ace["groups"]), "admins") {
+		return false, nil
+	}
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.IsGlobalAdmin {
+		return false, nil
+	}
+	acl, err := loadACL(scope, typ, name)
+	if err != nil {
+		return false, err
+	}
+	current, _ := acl["grant"].(map[string]any)
+	return slices.Contains(jsonStrings(current["groups"]), "admins"), nil
 }
 
 // unknownACEMembers returns the actor and group names an ACE lists that do not
