@@ -16,7 +16,13 @@ import (
 // ACL enforcement is enabled the membership recorded here actually gates
 // requests (see authz_enforce.go).
 
-var defaultGroups = []string{"admins", "billing-admins", "clients", "users"}
+var defaultGroups = []string{"admins", "billing-admins", "clients", "users", "public_key_read_access"}
+
+// defaultGroupGroups are the groups erchef's org policy nests in a default
+// group: public_key_read_access holds the users and clients groups.
+var defaultGroupGroups = map[string][]string{
+	"public_key_read_access": {"users", "clients"},
+}
 
 var defaultContainers = []string{
 	"clients", "containers", "cookbooks", "cookbook_artifacts", "data",
@@ -33,7 +39,8 @@ func seedAuthz(org *store.Org) error {
 		}
 		if !ok {
 			if err := org.Put("groups", g, fmt.Appendf(nil,
-				`{"name":%q,"groupname":%q,"actors":[],"users":[],"clients":[],"groups":[]}`, g, g)); err != nil {
+				`{"name":%q,"groupname":%q,"actors":[],"users":[],"clients":[],"groups":%s}`,
+				g, g, mustEncode(nonNilStrings(defaultGroupGroups[g])))); err != nil {
 				return err
 			}
 		}

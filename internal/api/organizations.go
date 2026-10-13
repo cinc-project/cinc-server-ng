@@ -78,18 +78,12 @@ func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.
 	validator := name + "-validator"
 	clientDoc := fmt.Sprintf(`{"name":%q,"clientname":%q,"validator":true,"public_key":%q}`,
 		validator, validator, string(pubPEM))
-	// Grant the validator create on the clients container, mirroring a real org
-	// where the validator key can register new clients/nodes. This is structural
-	// until ACL enforcement is enabled, at which point it lets a freshly
-	// bootstrapped org behave like a real one.
-	clientsACL := defaultACL()
-	clientsACL["create"] = map[string]any{"actors": []string{validator}, "groups": []string{"admins", "users"}}
-
-	// Grant the "clients" group create on the nodes container, mirroring real
-	// Chef: a registered client (which joins that group) can create its own node.
-	// Item operations on a node remain governed by its per-object ACL.
-	nodesACL := defaultACL()
-	nodesACL["create"] = map[string]any{"actors": []string{}, "groups": []string{"admins", "users", "clients"}}
+	// The clients container ACL is erchef's plus the validator on create, so
+	// the validator key can register clients/nodes (see validatorClientsACL).
+	// Every other container (nodes included, where the clients group holds
+	// create), each default group and the organization fall back to erchef's
+	// org policy (fallbackACL) and need no stored row.
+	clientsACL := validatorClientsACL(validator)
 
 	// Provision the org atomically: a failure partway through (more likely on a
 	// durable backend) must not leave a half-created organization behind.
@@ -107,10 +101,7 @@ func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.
 		if err := org.Put("clients", validator, []byte(clientDoc)); err != nil {
 			return err
 		}
-		if err := org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL)); err != nil {
-			return err
-		}
-		return org.Put("acls", aclKey("containers", "nodes"), mustEncode(nodesACL))
+		return org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL))
 	}); err != nil {
 		return nil, err
 	}

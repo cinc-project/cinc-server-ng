@@ -101,24 +101,39 @@ func TestClassifyOrgMembershipRoutes(t *testing.T) {
 // The organization, every group and the groups container must not fall back to
 // defaultACL, which grants update to every member: update on the organization
 // is what manages membership, and group membership is what carries a grant.
+// No member holds update on any of them; the users group reads only what
+// erchef's org policy lets it (the org, the groups container and a group
+// created in it, not the default groups).
 func TestFallbackACLReservesOrgAuthorityToAdmins(t *testing.T) {
-	for _, c := range []struct{ typ, name string }{
-		{"organizations", "acme"},
-		{"groups", "admins"},
-		{"groups", "users"},
-		{"groups", "clients"},
-		{"groups", "billing-admins"},
-		{"groups", "ops"},
-		{"containers", "groups"},
+	for _, c := range []struct {
+		typ, name  string
+		usersRead  bool
+		adminsHold bool
+	}{
+		{"organizations", "acme", true, true},
+		{"groups", "admins", false, true},
+		{"groups", "users", false, true},
+		{"groups", "clients", false, true},
+		{"groups", "billing-admins", false, false},
+		{"groups", "ops", true, true},
+		{"containers", "groups", true, true},
 	} {
 		acl := fallbackACL(c.typ, c.name)
 		for _, p := range []string{"create", "update", "delete", "grant"} {
-			if got := anyStrings(acl[p].(map[string]any)["groups"]); !slices.Equal(got, []string{"admins"}) {
+			got := anyStrings(acl[p].(map[string]any)["groups"])
+			if slices.Contains(got, "users") || slices.Contains(got, "clients") {
+				t.Errorf("%s/%s %s groups = %v, want no member group", c.typ, c.name, p, got)
+			}
+			if c.adminsHold && !slices.Equal(got, []string{"admins"}) {
 				t.Errorf("%s/%s %s groups = %v, want [admins]", c.typ, c.name, p, got)
 			}
 		}
-		if got := anyStrings(acl["read"].(map[string]any)["groups"]); !slices.Contains(got, "users") {
-			t.Errorf("%s/%s read groups = %v, want users to keep read", c.typ, c.name, got)
+		read := anyStrings(acl["read"].(map[string]any)["groups"])
+		if slices.Contains(read, "users") != c.usersRead {
+			t.Errorf("%s/%s read groups = %v, users read want %v", c.typ, c.name, read, c.usersRead)
+		}
+		if slices.Contains(read, "clients") {
+			t.Errorf("%s/%s read groups = %v, want no clients read", c.typ, c.name, read)
 		}
 	}
 	// Any other object keeps the permissive default.

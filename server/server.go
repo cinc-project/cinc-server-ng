@@ -197,6 +197,28 @@ type Server struct {
 	url           string
 }
 
+// upgradeOrgACLs brings every org in st to erchef's org ACL policy (see
+// api.UpgradeOrgACLs). It is idempotent and a no-op on a fresh store.
+func upgradeOrgACLs(st *store.Store) error {
+	names, err := st.ListOrgs()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		org, ok, err := st.Org(name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if err := api.UpgradeOrgACLs(org); err != nil {
+			return fmt.Errorf("upgrade org %q ACLs: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // New builds a Server: it creates the store, bootstraps the admin user and the
 // configured organizations, and wires the API behind the auth layer. It does
 // not begin listening; call Start for that.
@@ -304,6 +326,12 @@ func New(opts Options) (*Server, error) {
 		if err := storeServerKey(st, serverKeyValidator(p.name), p.priv); err != nil {
 			return nil, err
 		}
+	}
+
+	// Orgs a durable store already held may have been created by an older
+	// version, whose stored clients container ACL predates erchef's org policy.
+	if err := upgradeOrgACLs(st); err != nil {
+		return nil, err
 	}
 
 	// Load a chef-repo into the first organization, if configured.

@@ -122,9 +122,13 @@ func TestEnforceACLPlainMemberCannotRewriteDefaultGroups(t *testing.T) {
 	if code := f.as(t, "member", f.memberKey, "POST", f.acme+"/association_requests", `{"user":"outsider"}`); code != http.StatusForbidden {
 		t.Errorf("member invites after refused group rewrite = %d, want 403", code)
 	}
-	// Members can still read the groups they are governed by.
-	if code := f.as(t, "member", f.memberKey, "GET", f.acme+"/groups/users", ""); code != http.StatusOK {
-		t.Errorf("member reads users group = %d, want 200", code)
+	// Members can list the groups (read on the groups container), but erchef's
+	// org policy gives them no read on the default groups themselves.
+	if code := f.as(t, "member", f.memberKey, "GET", f.acme+"/groups", ""); code != http.StatusOK {
+		t.Errorf("member lists groups = %d, want 200", code)
+	}
+	if code := f.as(t, "member", f.memberKey, "GET", f.acme+"/groups/users", ""); code != http.StatusForbidden {
+		t.Errorf("member reads users group = %d, want 403", code)
 	}
 }
 
