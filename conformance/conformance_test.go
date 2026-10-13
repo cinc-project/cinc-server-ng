@@ -330,11 +330,12 @@ func write(t *testing.T, path, content string) {
 // the latter's key-writing behavior varies between knife versions, and a
 // conformance test should not fail on that. Reading the key out of the response
 // also asserts something worth asserting: that client creation returns the
-// generated key in the shape a client expects to find it.
+// generated key in the shape a client expects to find it. create_key asks for
+// that key: from API v1 on, a client created without it has none.
 func (h *harness) createClient(t *testing.T, name string) string {
 	t.Helper()
 	bodyPath := filepath.Join(h.dir, name+"-create.json")
-	write(t, bodyPath, `{"name":"`+name+`","admin":false,"validator":false}`)
+	write(t, bodyPath, `{"name":"`+name+`","admin":false,"validator":false,"create_key":true}`)
 	out := h.run(t, "raw", "-m", "POST", "/clients", "-i", bodyPath)
 
 	if i := strings.IndexByte(out, '{'); i > 0 {

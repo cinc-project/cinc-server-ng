@@ -90,7 +90,9 @@ func TestSelfUpdatePreservesOwnProfileFields(t *testing.T) {
 	if _, ok := got["admin"]; ok {
 		t.Errorf("a non-admin user's record grew an admin field: %s", body)
 	}
-	if got["public_key"] == nil || got["public_key"] == "" {
-		t.Errorf("self update dropped the user's public_key: %s", body)
+	// The update carried no key, so the user's own key must still
+	// authenticate it.
+	if code := statusOf(t, signedAs(t, "nina", key, "GET", srv.URL()+"/users/nina", "")); code != 200 {
+		t.Errorf("after self update, nina's own key = %d, want 200", code)
 	}
 }

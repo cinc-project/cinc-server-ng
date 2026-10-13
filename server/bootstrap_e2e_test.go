@@ -20,7 +20,7 @@ func mustStatus(t *testing.T, req *http.Request, want int) {
 func createClientAndKey(t *testing.T, srv *Server, base, name string) []byte {
 	t.Helper()
 	resp, err := http.DefaultClient.Do(
-		signedAs(t, "acme-validator", srv.ValidatorKey("acme"), "POST", base+"/clients", `{"name":"`+name+`"}`))
+		signedAs(t, "acme-validator", srv.ValidatorKey("acme"), "POST", base+"/clients", `{"name":"`+name+`","create_key":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}

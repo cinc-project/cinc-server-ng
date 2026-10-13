@@ -36,18 +36,6 @@
     "candidate": "false"
   },
   {
-    "step": "client delete",
-    "field": "create_key",
-    "reference": "<missing>",
-    "candidate": "true"
-  },
-  {
-    "step": "client delete",
-    "field": "public_key",
-    "reference": "<missing>",
-    "candidate": "<key>"
-  },
-  {
     "step": "client key missing",
     "field": "error",
     "reference": "There is no key named diff-absent associated with diff-client.",
@@ -76,18 +64,6 @@
     "field": "admin",
     "reference": "<missing>",
     "candidate": "false"
-  },
-  {
-    "step": "client read",
-    "field": "create_key",
-    "reference": "<missing>",
-    "candidate": "true"
-  },
-  {
-    "step": "client read",
-    "field": "public_key",
-    "reference": "<missing>",
-    "candidate": "<key>"
   },
   {
     "step": "cookbook artifact missing",

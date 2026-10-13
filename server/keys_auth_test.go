@@ -220,7 +220,9 @@ func TestDefaultKeyExpirationIsEnforced(t *testing.T) {
 }
 
 // A client update that carries a public_key still rotates the default key
-// after the default key has been re-created through the keys API.
+// after the default key has been re-created through the keys API. Only API v0
+// takes a key on an actor update; from v1 on it is refused (see
+// TestActorUpdateKeyFieldsByAPIVersion).
 func TestActorUpdateRotatesRecreatedDefaultKey(t *testing.T) {
 	srv := startServer(t, Options{Orgs: []string{"acme"}})
 	base := srv.URL() + "/organizations/acme"
@@ -234,8 +236,8 @@ func TestActorUpdateRotatesRecreatedDefaultKey(t *testing.T) {
 
 	rotatedPriv, rotatedPub := newKeyPair(t)
 	body, _ := json.Marshal(map[string]any{"name": "web01", "public_key": rotatedPub})
-	if code, raw := adminDo(t, srv, "PUT", base+"/clients/web01", string(body)); code != 200 {
-		t.Fatalf("PUT client = %d: %s", code, raw)
+	if code := statusOf(t, signedAt(t, srv, "0", "PUT", base+"/clients/web01", string(body))); code != 200 {
+		t.Fatalf("PUT client at v0 = %d", code)
 	}
 	wantAuth(t, "rotated key", statusOf(t, signedAs(t, "web01", rotatedPriv, "GET", probe, "")), 200)
 	wantAuth(t, "replaced key", statusOf(t, signedAs(t, "web01", reregistered, "GET", probe, "")), 401)
