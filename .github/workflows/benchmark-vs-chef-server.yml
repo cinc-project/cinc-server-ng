@@ -197,8 +197,15 @@ jobs:
       BASE_REF: ${{ inputs.base_ref }}
       # The fleet, search-scale, registration and store benchmarks: the ones
       # that decide how cinc-server-ng behaves as a fleet grows.
-      BENCH: '^Benchmark(FleetCheckin|SearchScale|Bootstrap|Checkins|ListObjects|SearchScanWarm|WriteLatency|Get$|Put$)'
+      BENCH: '^Benchmark(FleetCheckin|SearchScale|Bootstrap|Checkins|ListObjects|SearchScanWarm|Get$|Put$)'
       PKGS: ./server/ ./internal/api/ ./internal/store/sqlite/
+      # The write-latency benchmarks run one fixed workload regardless of b.N
+      # and report its distribution, so each sample must be exactly one run
+      # (-benchtime 1x). At the default benchtime the framework's ramp-up calls
+      # them a varying number of times against fresh databases, and samples
+      # from different ramp-ups are not comparable.
+      LATENCY_BENCH: '^BenchmarkWriteLatency'
+      LATENCY_PKG: ./internal/store/sqlite/
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -234,9 +241,11 @@ jobs:
           for round in 1 2; do
             echo "::group::round $round: $BASE"
             (cd /tmp/base && go test -run '^$' -bench "$BENCH" -benchmem -count 3 -timeout 30m "${pkgs[@]}") | tee -a /tmp/base.txt
+            (cd /tmp/base && go test -run '^$' -bench "$LATENCY_BENCH" -benchtime 1x -count 3 -timeout 10m "$LATENCY_PKG") | tee -a /tmp/base.txt
             echo "::endgroup::"
             echo "::group::round $round: HEAD"
             go test -run '^$' -bench "$BENCH" -benchmem -count 3 -timeout 30m "${pkgs[@]}" | tee -a /tmp/head.txt
+            go test -run '^$' -bench "$LATENCY_BENCH" -benchtime 1x -count 3 -timeout 10m "$LATENCY_PKG" | tee -a /tmp/head.txt
             echo "::endgroup::"
           done
 
