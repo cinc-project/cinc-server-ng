@@ -15,9 +15,10 @@ import (
 type scopeFunc func(w http.ResponseWriter, r *http.Request) *store.Org
 
 // registerActorRoutes wires CRUD for an "actor" collection (clients or users).
-// Actors are JSON objects carrying a public_key; on creation the server
-// generates an RSA key pair if the caller did not supply one, returning the
-// private key exactly once.
+// Actors are JSON objects carrying a public_key. On creation the server
+// generates an RSA key pair, returning the private key exactly once, when the
+// caller supplies no public key and either asks for one with create_key or
+// speaks API v0; from API v1 on, an actor created with neither has no key.
 func (a *API) registerActorRoutes(mux *recordingMux, prefix, segment string, scope scopeFunc) {
 	base := prefix + segment
 	mux.HandleFunc("GET "+base, a.scopedList(segment, scope))
@@ -62,6 +63,21 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, invalidPublicKeyMessage)
 			return
 		}
+		// From API v1 on, a new actor gets a key only when the request asks for
+		// one: create_key generates a pair, a public_key is stored as given, and
+		// with neither the actor is created with no key at all, as erchef does
+		// (oc_chef_wm_key_base:create_object({undefined, undefined}, ...)). API
+		// v0 predates create_key and always generates a key when none is given.
+		v1 := requestAPIVersion(r) >= 1
+		createKey := obj["create_key"] == true
+		if v1 {
+			if msg := createKeyFieldsError(obj, createKey); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+		}
+		// The flag is a request, never part of the actor.
+		delete(obj, "create_key")
 
 		// A client and a global user that share a name are the same principal to
 		// everything downstream, so the second one must not be created.
@@ -79,11 +95,12 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 
 		// A caller-supplied public key may arrive at the top level or nested
 		// under "chef_key" (the key-management shape knife/cinc send). Accept
-		// either; only generate a pair when no public key is provided.
+		// either; only generate a pair when no public key is provided and, from
+		// API v1 on, create_key asks for one.
 		pub := bodyPublicKey(obj)
 		if pub != "" {
 			obj["public_key"] = pub
-		} else {
+		} else if !v1 || createKey {
 			key, err := auth.GenerateKey()
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "key generation failed")
@@ -192,6 +209,44 @@ func (a *API) actorNameCollision(segment, name string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// erchef's messages for chef_key_base:validate_public_key_fields, as
+// chef_wm_malformed renders them (the trailing space is erchef's).
+const (
+	createAndPubkeyMessage       = "You must specify either create_key or public_key, but not both"
+	keyManagementMessage         = "Since Server API v1, all keys must be updated via the keys endpoint. "
+	privateKeyFieldNotSupportMsg = "Please use create_key: true instead of private_key: true"
+)
+
+// createKeyFieldsError validates the key fields of an API v1+ actor create
+// body as chef_key_base:validate_public_key_fields(opt, _, _, create) does:
+// the v0 private_key flag is refused, and so is asking for a generated key
+// while supplying one. It returns "" when the body is acceptable.
+func createKeyFieldsError(obj map[string]any, createKey bool) string {
+	if _, ok := obj["private_key"]; ok {
+		return privateKeyFieldNotSupportMsg
+	}
+	if createKey && bodyPublicKey(obj) != "" {
+		return createAndPubkeyMessage
+	}
+	return ""
+}
+
+// updateKeyFieldsError validates an API v1+ actor update body as
+// chef_key_base:validate_public_key_fields(_, _, _, update) does: from v1 on
+// an actor's keys change only through its keys endpoint, so any key field is
+// refused, whatever its value. It returns "" when the body is acceptable.
+func updateKeyFieldsError(obj map[string]any) string {
+	if _, ok := obj["private_key"]; ok {
+		return privateKeyFieldNotSupportMsg
+	}
+	for _, field := range []string{"create_key", "public_key"} {
+		if _, ok := obj[field]; ok {
+			return keyManagementMessage
+		}
+	}
+	return ""
 }
 
 // orgSegment returns the org path value, or "" for global (user) routes.
@@ -388,6 +443,17 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
+		if requestAPIVersion(r) >= 1 {
+			if msg := updateKeyFieldsError(obj); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+			// erchef reads only a top-level public_key, which is refused
+			// above; a nested one is not a key change at v1 either.
+			delete(obj, "chef_key")
+		}
+		// create_key is a request, never part of the actor.
+		delete(obj, "create_key")
 		// A user update is validated like erchef's, then merged into the stored
 		// record rather than replacing it: a field the body omits keeps its
 		// value, and only an explicit null removes one.

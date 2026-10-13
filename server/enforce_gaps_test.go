@@ -19,6 +19,7 @@ func createActor(t *testing.T, srv *Server, url, body string) []byte {
 	if strings.HasSuffix(url, "/users") {
 		body = validUserBody(t, body)
 	}
+	body = withCreateKey(t, body)
 	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", url, body))
 	if err != nil {
 		t.Fatal(err)

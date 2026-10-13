@@ -12,7 +12,7 @@ import (
 // issued.
 func createdClientKey(t *testing.T, srv *Server, base, name string) []byte {
 	t.Helper()
-	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", base+"/clients", `{"name":"`+name+`"}`))
+	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", base+"/clients", `{"name":"`+name+`","create_key":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,12 +37,6 @@
   },
   {
     "step": "client delete",
-    "field": "create_key",
-    "reference": "<missing>",
-    "candidate": "true"
-  },
-  {
-    "step": "client delete",
     "field": "public_key",
     "reference": "<missing>",
     "candidate": "<key>"
@@ -76,12 +70,6 @@
     "field": "admin",
     "reference": "<missing>",
     "candidate": "false"
-  },
-  {
-    "step": "client read",
-    "field": "create_key",
-    "reference": "<missing>",
-    "candidate": "true"
   },
   {
     "step": "client read",
