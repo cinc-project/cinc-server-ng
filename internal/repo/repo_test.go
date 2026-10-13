@@ -90,6 +90,37 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// Nodes and roles loaded from disk are stored as erchef stores them after a
+// `knife upload`: run lists normalized, as on a POST or PUT.
+func TestLoadNormalizesRunLists(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{
+		"nodes/web01.json":        `{"name":"web01","run_list":["nginx","recipe[nginx]"]}`,
+		"roles/web.json":          `{"name":"web","run_list":["a","a"],"env_run_lists":{"prod":["b"]}}`,
+		"environments/prod.json":  `{"name":"prod","run_list":["c"]}`,
+		"policy_groups/prod.json": `{"name":"prod","run_list":["d"]}`,
+	})
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	if _, err := Load(org, dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, c := range []struct{ coll, key, want string }{
+		{"nodes", "web01", `{"name":"web01","run_list":["recipe[nginx]"]}`},
+		{"roles", "web", `{"name":"web","run_list":["recipe[a]"],"env_run_lists":{"prod":["recipe[b]"]}}`},
+		{"environments", "prod", `{"name":"prod","run_list":["c"]}`},
+		{"policy_groups", "prod", `{"name":"prod","run_list":["d"]}`},
+	} {
+		raw, _, err := org.Get(c.coll, c.key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != c.want {
+			t.Errorf("%s/%s = %s, want %s", c.coll, c.key, raw, c.want)
+		}
+	}
+}
+
 // TestLoadPolicyRevisions loads several policy locks, including two revisions
 // of the same policy, and confirms each lands under its policy's revision
 // collection keyed by revision_id.

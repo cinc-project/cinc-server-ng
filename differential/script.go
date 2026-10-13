@@ -42,10 +42,14 @@ func Script(actor string) []Step {
 		{Name: "node create conflict", Method: "POST", Path: "/nodes", Body: node},
 		{Name: "node read", Method: "GET", Path: "/nodes/diff-node"},
 		{Name: "node list", Method: "GET", Path: "/nodes"},
+		// The run list is not in canonical form: erchef qualifies bare items
+		// and drops exact duplicates on save, and answers with what it stored.
+		// No role[] item, since a node's roles overlay normal.role in search.
 		{Name: "node update", Method: "PUT", Path: "/nodes/diff-node",
 			Body: `{"name":"diff-node","chef_environment":"_default","json_class":"Chef::Node",` +
 				`"chef_type":"node","normal":{"role":"backend"},"default":{},"override":{},` +
-				`"automatic":{},"run_list":[]}`},
+				`"automatic":{},"run_list":["diff-cookbook","recipe[diff-cookbook]",` +
+				`"diff-cookbook::default","diff-cookbook::default"]}`},
 		{Name: "node read after update", Method: "GET", Path: "/nodes/diff-node"},
 		{Name: "node missing", Method: "GET", Path: "/nodes/diff-absent"},
 		{Name: "node acl", Method: "GET", Path: "/nodes/diff-node/_acl"},
@@ -54,7 +58,8 @@ func Script(actor string) []Step {
 		{Name: "role create", Method: "POST", Path: "/roles",
 			Body: `{"name":"diff-role","description":"d","json_class":"Chef::Role",` +
 				`"chef_type":"role","default_attributes":{},"override_attributes":{},` +
-				`"run_list":["recipe[diff-cookbook]"],"env_run_lists":{}}`},
+				`"run_list":["diff-cookbook","recipe[diff-cookbook]"],` +
+				`"env_run_lists":{"diff-env":["diff-cookbook","diff-cookbook"]}}`},
 		{Name: "role read", Method: "GET", Path: "/roles/diff-role"},
 		{Name: "role list", Method: "GET", Path: "/roles"},
 		{Name: "role missing", Method: "GET", Path: "/roles/diff-absent"},
