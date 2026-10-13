@@ -1,0 +1,53 @@
+{
+  "label": "cinc-server-ng (HTTPS)",
+  "base": "https://127.0.0.1:8911/organizations/bench",
+  "auth": true,
+  "conc": 10,
+  "ops": [
+    {
+      "name": "GET node",
+      "cold_ms": 2.262,
+      "p50_ms": 0.124,
+      "p95_ms": 0.201,
+      "qps1": 7500.196505148435,
+      "qpsc": 36363.47374463086,
+      "errors": 0
+    },
+    {
+      "name": "GET node list",
+      "cold_ms": 7.956,
+      "p50_ms": 0.187,
+      "p95_ms": 0.287,
+      "qps1": 4944.040140068612,
+      "qpsc": 21637.553728328807,
+      "errors": 0
+    },
+    {
+      "name": "PUT node",
+      "cold_ms": 2.464,
+      "p50_ms": 0.121,
+      "p95_ms": 0.19,
+      "qps1": 7487.614904657542,
+      "qpsc": 32330.763645587722,
+      "errors": 0
+    },
+    {
+      "name": "search *:*",
+      "cold_ms": 4.22,
+      "p50_ms": 0.646,
+      "p95_ms": 0.961,
+      "qps1": 1466.230488315557,
+      "qpsc": 7002.1566852515325,
+      "errors": 0
+    },
+    {
+      "name": "search filtered",
+      "cold_ms": 32.728,
+      "p50_ms": 0.402,
+      "p95_ms": 0.45,
+      "qps1": 2428.4577146512497,
+      "qpsc": 11137.475622405062,
+      "errors": 0
+    }
+  ]
+}

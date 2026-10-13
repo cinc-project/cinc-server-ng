@@ -1,0 +1,52 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/server
+cpu: Apple M4 Pro
+BenchmarkTransportHTTPReuse-14     	   58408	     19561 ns/op	   17376 B/op	     171 allocs/op
+BenchmarkTransportHTTPReuse-14     	   61860	     19245 ns/op	   17333 B/op	     172 allocs/op
+BenchmarkTransportHTTPReuse-14     	   62671	     18485 ns/op	   17292 B/op	     171 allocs/op
+BenchmarkTransportHTTPReuse-14     	   62402	     20710 ns/op	   17274 B/op	     171 allocs/op
+BenchmarkTransportHTTPReuse-14     	   61798	     20995 ns/op	   17331 B/op	     172 allocs/op
+BenchmarkTransportHTTPReuse-14     	   61672	     19464 ns/op	   17299 B/op	     171 allocs/op
+BenchmarkTransportHTTPReuse-14     	   61490	     20616 ns/op	   17292 B/op	     171 allocs/op
+BenchmarkTransportHTTPReuse-14     	   62330	     21078 ns/op	   17302 B/op	     171 allocs/op
+BenchmarkTransportHTTPReuse-14     	   61081	     20846 ns/op	   17276 B/op	     171 allocs/op
+BenchmarkTransportHTTPReuse-14     	   62313	     20726 ns/op	   17282 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   62691	     19913 ns/op	   17303 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   61483	     19527 ns/op	   17252 B/op	     172 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   63420	     20174 ns/op	   17278 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   62839	     19730 ns/op	   17310 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   62860	     19404 ns/op	   17303 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   63192	     20483 ns/op	   17283 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   61894	     20472 ns/op	   17280 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   64434	     20898 ns/op	   17274 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   63538	     20287 ns/op	   17292 B/op	     171 allocs/op
+BenchmarkTransportHTTPSReuse-14    	   60194	     20841 ns/op	   17263 B/op	     171 allocs/op
+PASS
+ok  	github.com/cinc-project/cinc-server-ng/server	37.761s
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/server
+cpu: Apple M4 Pro
+BenchmarkTransportHTTPNewConn-14     	    3000	     65308 ns/op	   34957 B/op	     236 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     60842 ns/op	   34124 B/op	     235 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     60227 ns/op	   33480 B/op	     234 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     60812 ns/op	   33497 B/op	     234 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     59959 ns/op	   33621 B/op	     234 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     60637 ns/op	   33882 B/op	     235 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     67830 ns/op	   33613 B/op	     234 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     63436 ns/op	   33652 B/op	     234 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     61060 ns/op	   33846 B/op	     235 allocs/op
+BenchmarkTransportHTTPNewConn-14     	    3000	     59318 ns/op	   33132 B/op	     234 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    188000 ns/op	  166979 B/op	    1074 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    179024 ns/op	  166222 B/op	    1073 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    184162 ns/op	  165565 B/op	    1072 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    177185 ns/op	  165523 B/op	    1072 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    180746 ns/op	  165703 B/op	    1073 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    184596 ns/op	  165986 B/op	    1073 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    183889 ns/op	  165603 B/op	    1073 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    179694 ns/op	  165752 B/op	    1073 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    182090 ns/op	  165566 B/op	    1073 allocs/op
+BenchmarkTransportHTTPSNewConn-14    	    3000	    185187 ns/op	  166114 B/op	    1073 allocs/op
+PASS
+ok  	github.com/cinc-project/cinc-server-ng/server	10.971s

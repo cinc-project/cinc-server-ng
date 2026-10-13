@@ -1,0 +1,21 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/server
+cpu: Apple M4 Pro
+                          │    HTTP     │                 HTTPS                 │
+                          │   sec/op    │    sec/op     vs base                 │
+Transport/conn=Reuse-14     20.66µ ± 7%    20.23µ ± 3%         ~ (p=0.684 n=10)
+Transport/conn=NewConn-14   60.83µ ± 7%   182.99µ ± 2%  +200.84% (p=0.000 n=10)
+geomean                     35.45µ         60.84µ        +71.62%
+
+                          │     HTTP     │                 HTTPS                  │
+                          │     B/op     │     B/op       vs base                 │
+Transport/conn=Reuse-14     16.89Ki ± 0%    16.88Ki ± 0%         ~ (p=0.196 n=10)
+Transport/conn=NewConn-14   32.85Ki ± 1%   161.84Ki ± 0%  +392.70% (p=0.000 n=10)
+geomean                     23.55Ki         52.26Ki       +121.88%
+
+                          │    HTTP    │                HTTPS                 │
+                          │ allocs/op  │  allocs/op   vs base                 │
+Transport/conn=Reuse-14     171.0 ± 1%    171.0 ± 0%         ~ (p=1.000 n=10)
+Transport/conn=NewConn-14   234.0 ± 0%   1073.0 ± 0%  +358.55% (p=0.000 n=10)
+geomean                     200.0         428.3       +114.14%
