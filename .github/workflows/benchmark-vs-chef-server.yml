@@ -3,7 +3,8 @@ name: Benchmark vs Chef Infra Server
 # Like-for-like benchmarks, all on one runner.
 #
 # The servers job measures Chef Infra Server (the FOSS Cinc Server build),
-# chef-zero, and cinc-server-ng (SQLite, in memory, and without auth) with the
+# chef-zero, and cinc-server-ng (SQLite and in memory, each over HTTP and
+# HTTPS, and without auth) with the
 # same load generator, the same seeded data and, where a server verifies
 # signatures, the same signing identity. Only one server is up while it is
 # measured, so none competes with another for the runner's cores; each is
@@ -172,9 +173,9 @@ jobs:
             /tmp/bin/benchreport -runs '/tmp/results/run-*.json' -mem '/tmp/results/mem-*.json' 2>&1 || echo "(no results)"
             echo "### Reading these honestly"
             echo
-            echo "- **Durable against durable:** compare cinc-server-ng (SQLite) with Chef Infra Server. Both persist every write."
+            echo "- **Durable against durable:** compare cinc-server-ng (SQLite, HTTPS) with Chef Infra Server. Both persist every write and both serve TLS."
             echo "- **Unsigned against unsigned:** compare cinc-server-ng (no auth) with chef-zero, which does not verify signatures."
-            echo "- Chef Infra Server is measured as it ships, nginx included, over HTTPS. cinc-server-ng is served over plain HTTP."
+            echo "- Chef Infra Server is measured as it ships, nginx included, over HTTPS. cinc-server-ng is measured over both: the HTTPS rows serve TLS natively with a self-signed P-256 certificate; the others, chef-zero included, are plain HTTP."
             echo "- Chef Infra Server persists its data between repetitions, so its later runs update existing nodes where the others create them."
             echo "- Memory is PSS summed over each server's whole process tree: for Chef Infra Server that is erchef, PostgreSQL, OpenSearch, bifrost, bookshelf, nginx and redis."
             echo "- Chef Infra Server implements a great deal that cinc-server-ng does not. This measures what each gives you on one machine, not Chef Infra Server on hardware sized for it."

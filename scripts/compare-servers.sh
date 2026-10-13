@@ -26,6 +26,10 @@
 #   SEED CONC WARM REPS  loadtest parameters and repetitions
 #   SERVERS     optional subset, e.g. "sqlite memory noauth zero" to try the
 #               harness on a machine without Chef Infra Server
+#
+# The -tls variants serve cinc-server-ng over HTTPS (--tls-cert/--tls-key) with
+# a throwaway self-signed P-256 certificate, so it can be compared with Chef
+# Infra Server, which is always measured over HTTPS, transport for transport.
 set -euo pipefail
 
 : "${BIN:?}" "${OUT:?}" "${ORG:?}" "${BENCH_USER:?}" "${USER_KEY:?}" "${STATE_DIR:?}"
@@ -40,11 +44,20 @@ SETTLE=10 # seconds a freshly started server idles before its idle sample
 declare -A LABEL=(
   [chef]="Chef Infra Server"
   [sqlite]="cinc-server-ng (SQLite)"
+  [sqlite-tls]="cinc-server-ng (SQLite, HTTPS)"
   [memory]="cinc-server-ng (in memory)"
+  [memory-tls]="cinc-server-ng (in memory, HTTPS)"
   [noauth]="cinc-server-ng (no auth)"
   [zero]="chef-zero"
 )
-read -r -a SERVERS <<<"${SERVERS:-chef sqlite memory noauth zero}"
+read -r -a SERVERS <<<"${SERVERS:-chef sqlite sqlite-tls memory memory-tls noauth zero}"
+
+# The certificate the -tls variants serve, and loadtest trusts.
+TLS_DIR="$(mktemp -d)"
+trap 'rm -rf "$TLS_DIR"' EXIT
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+  -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" \
+  -keyout "$TLS_DIR/server.key" -out "$TLS_DIR/server.crt" 2>/dev/null
 
 wait_for() { # wait_for <seconds> <command...>
   local limit=$1; shift
@@ -83,15 +96,21 @@ run_chef() {
   sudo cinc-server-ctl stop >/dev/null
 }
 
-# run_cinc <rep> <slug> <port> <server flags...>
+# run_cinc <rep> <slug> <port> <server flags...>; a -tls slug serves HTTPS.
 run_cinc() {
   local rep=$1 slug=$2 port=$3; shift 3
-  "$BIN/cinc-server-ng" --addr "127.0.0.1:$port" --orgs "$ORG" "$@" >"$OUT/$rep-$slug.log" 2>&1 &
+  local scheme=http tls=() trust=()
+  if [[ $slug == *-tls ]]; then
+    scheme=https
+    tls=(--tls-cert "$TLS_DIR/server.crt" --tls-key "$TLS_DIR/server.key")
+    trust=(-cacert "$TLS_DIR/server.crt")
+  fi
+  "$BIN/cinc-server-ng" --addr "127.0.0.1:$port" --orgs "$ORG" "${tls[@]}" "$@" >"$OUT/$rep-$slug.log" 2>&1 &
   local pid=$!
-  wait_for 60 curl -fsS "http://127.0.0.1:$port/_status"
+  wait_for 60 curl -fsS --cacert "$TLS_DIR/server.crt" "$scheme://127.0.0.1:$port/_status"
   local auth=(-user "$BENCH_USER" -keypem "$USER_KEY")
   [ "$slug" = noauth ] && auth=()
-  measure "$rep" "$slug" "$pid" "" -base "http://127.0.0.1:$port/organizations/$ORG" "${auth[@]}"
+  measure "$rep" "$slug" "$pid" "" -base "$scheme://127.0.0.1:$port/organizations/$ORG" "${auth[@]}" "${trust[@]}"
   kill "$pid"; wait "$pid" 2>/dev/null || true
 }
 
@@ -110,7 +129,9 @@ run_server() { # run_server <rep> <slug>
   case $2 in
     chef) run_chef "$1" ;;
     sqlite) run_cinc "$1" sqlite 8890 --state "$STATE_DIR" --storage sqlite --db "$OUT/$1-sqlite.db" ;;
+    sqlite-tls) run_cinc "$1" sqlite-tls 8893 --state "$STATE_DIR" --storage sqlite --db "$OUT/$1-sqlite-tls.db" ;;
     memory) run_cinc "$1" memory 8889 --state "$STATE_DIR" ;;
+    memory-tls) run_cinc "$1" memory-tls 8894 --state "$STATE_DIR" ;;
     noauth) run_cinc "$1" noauth 8891 --no-auth ;;
     zero) run_zero "$1" ;;
   esac
