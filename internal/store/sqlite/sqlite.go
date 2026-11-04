@@ -120,6 +120,9 @@ func Open(path string, opts ...Option) (*Backend, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	if err := securePath(path); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", dsnWithPragmas(path))
 	if err != nil {
 		return nil, err
