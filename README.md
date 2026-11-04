@@ -173,14 +173,26 @@ and the bootstrap admin/validator keys are persisted so the key written by
 starts fresh.)
 
 **Backups** are delegated to the backend; cinc-server-ng ships no backup subsystem.
-For SQLite, take a consistent online copy while the server runs:
+For SQLite, any of these gives a consistent copy:
 
-```sh
-sqlite3 cinc.db "VACUUM INTO 'backup.db'"
-```
+- **Online, with the `sqlite3` CLI** on a machine that can open the database
+  file:
 
-or simply copy the `.db` file while the server is stopped. (A future Postgres/RDS
-backend would use `pg_dump` or managed snapshots.)
+  ```sh
+  sqlite3 cinc.db "VACUUM INTO 'backup.db'"
+  ```
+
+  The container image has no shell and no `sqlite3`, so in Docker or
+  Kubernetes run this from the host against the volume's files, or from a
+  sidecar or job that mounts the same volume.
+- **A filesystem or volume snapshot** (ZFS, LVM, EBS, a CSI `VolumeSnapshot`)
+  taken while the server runs. A snapshot is crash-consistent, and SQLite
+  recovers from it on the next open, the same as after a power loss. It must
+  capture the `.db`, `-wal` and `-shm` files together, in one snapshot.
+- **A file copy with the server stopped.** Copying the `.db` file of a running
+  server is not safe: recent writes may only be in its `-wal` file.
+
+(A future Postgres/RDS backend would use `pg_dump` or managed snapshots.)
 
 **Upgrades** are forward-only: the SQLite schema carries a `schema_migrations`
 version and any pending migrations are applied automatically at startup, so
