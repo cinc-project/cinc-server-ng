@@ -154,6 +154,14 @@ the pure-Go [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) driver
 so the static binary and `scratch`/`distroless` images keep working with
 `CGO_ENABLED=0`.
 
+**File permissions.** The database holds user passwords, actor keys and data
+bags, so it is owner-only: a new database and its `-wal` and `-shm` files are
+created with mode `0600`, whatever the umask. On open, group and other
+permissions are removed from an existing database and its sidecar files, so a
+database created by an earlier version is tightened on upgrade. If the server
+cannot do that (it does not own the file), it refuses to start rather than run
+with a readable database; `chown` the file to the server's user.
+
 **High write throughput.** Concurrently-pending writes are batched into shared
 transactions (group commit), amortizing SQLite's per-commit cost. Under
 concurrent fleet load this is worth roughly 2.5x write throughput and about an
