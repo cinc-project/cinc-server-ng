@@ -10,9 +10,9 @@ import (
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
-// A global user loaded with a "password" field has it stashed out-of-band (so
-// authenticate_user can validate it) and stripped from the stored record (so it
-// is never returned) — matching POST /users.
+// A global user loaded with a "password" field has it stashed out-of-band as a
+// hash (so authenticate_user can validate it) and stripped from the stored
+// record (so it is never returned) — matching POST /users.
 func TestLoadStashesUserPassword(t *testing.T) {
 	dir := t.TempDir()
 	usersDir := filepath.Join(dir, "users")
@@ -33,8 +33,8 @@ func TestLoadStashesUserPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || string(pw) != "d4na" {
-		t.Fatalf("password not stashed: ok=%v pw=%q", ok, pw)
+	if !ok || !api.IsPasswordHash(pw) || !api.VerifyPassword(pw, "d4na") {
+		t.Fatalf("password not stashed as a verifying hash: ok=%v pw=%q", ok, pw)
 	}
 
 	raw, ok, err := st.Global().Get("users", "dana")
