@@ -244,6 +244,32 @@ func upgradeOrgACLs(st *store.Store) error {
 	return nil
 }
 
+// upgradePasswords hashes any plain-text password a durable store holds from
+// an older version, in the global scope (users) and every org. On a store
+// with none it reads each passwords collection once and writes nothing.
+func upgradePasswords(st *store.Store) error {
+	if _, err := api.UpgradePasswords(st.Global()); err != nil {
+		return fmt.Errorf("upgrade user passwords: %w", err)
+	}
+	names, err := st.ListOrgs()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		org, ok, err := st.Org(name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if _, err := api.UpgradePasswords(org); err != nil {
+			return fmt.Errorf("upgrade org %q passwords: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // New builds a Server: it creates the store, bootstraps the admin user and the
 // configured organizations, and wires the API behind the auth layer. It does
 // not begin listening; call Start for that.
@@ -370,6 +396,11 @@ func New(opts Options) (*Server, error) {
 	// Orgs a durable store already held may have been created by an older
 	// version, whose stored clients container ACL predates erchef's org policy.
 	if err := upgradeOrgACLs(st); err != nil {
+		return nil, err
+	}
+
+	// Versions before password hashing stored passwords as plain text.
+	if err := upgradePasswords(st); err != nil {
 		return nil, err
 	}
 

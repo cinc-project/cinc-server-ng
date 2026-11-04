@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 
@@ -10,21 +9,24 @@ import (
 
 // authenticate_user validates a user's password. Passwords are stored
 // out-of-band (never in the user object or its API responses) in the
-// "passwords" collection of the actor's scope, keyed by name. This is a test
-// server, so the password is kept as-is in memory; it is only ever compared,
-// never returned.
+// "passwords" collection of the actor's scope, keyed by name, as salted PBKDF2
+// hashes (password.go). They are only ever verified, never returned.
 
-// PasswordsCollection is the store collection holding actor passwords,
-// out-of-band from the actor record (real Chef stores these hashed and never
-// returns them; cinc-server-ng keeps them in memory). authenticate_user reads it.
+// PasswordsCollection is the store collection holding actor password hashes,
+// out-of-band from the actor record, as a real Chef Infra Server keeps them.
+// authenticate_user reads it.
 const PasswordsCollection = "passwords"
 
 // StashPassword moves a "password" field out of an actor object into the
-// out-of-band password store, so it is neither persisted in nor returned with
-// the actor record. It reports whether a password was present.
+// out-of-band password store as a hash, so it is neither persisted in nor
+// returned with the actor record. It reports whether a password was present.
 func StashPassword(org *store.Org, name string, obj map[string]any) (bool, error) {
 	if pw, ok := obj["password"].(string); ok {
-		if err := org.Put(PasswordsCollection, name, []byte(pw)); err != nil {
+		h, err := HashPassword(pw)
+		if err != nil {
+			return false, err
+		}
+		if err := org.Put(PasswordsCollection, name, h); err != nil {
 			return false, err
 		}
 		delete(obj, "password")
@@ -78,7 +80,7 @@ func (a *API) authenticateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if !ok || subtle.ConstantTimeCompare(stored, []byte(body.Password)) != 1 {
+	if !ok || !VerifyPassword(stored, body.Password) {
 		writeError(w, http.StatusUnauthorized, "Failed to authenticate. Username and password incorrect.")
 		return
 	}

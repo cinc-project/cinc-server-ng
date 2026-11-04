@@ -208,6 +208,13 @@ upgrading the binary against an existing database just works. Because object
 bodies are stored as opaque JSON, the schema is tiny and rarely changes.
 Downgrading the binary against a newer database is not supported.
 
+**Passwords** (the ones `authenticate_user` checks) are stored as salted
+PBKDF2-HMAC-SHA256 hashes, never in plain text. Databases written by earlier
+versions held them in plain text; the first start on such a database hashes
+them in place. SQLite can keep the old values in free pages and the WAL until
+they are reused, so after that first start, stop the server and run
+`sqlite3 cinc.db VACUUM` to clear them.
+
 ## Metrics
 
 `GET /_stats` reports what the server is doing. As on Chef Infra Server, it is
