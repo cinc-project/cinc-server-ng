@@ -199,6 +199,61 @@ chef.example.com {
   NLB terminates there instead, which behaves like the ALB case but without
   `X-Forwarded-Proto`, so set `--external-url`.
 
+## Running cinc-console against it
+
+[cinc-console](https://github.com/cinc-project/cinc-console) signs every
+request with a **webui key** and names the logged-in user
+(`X-Ops-Request-Source: web`). The server checks the signature against its
+webui public key, then applies that user's ACLs. Whoever holds the webui
+private key can act as any user, the superuser included.
+
+### Give the console its own key
+
+By default the webui key **is** the bootstrap admin key. That's convenient in
+development ([DEVELOPMENT.md](DEVELOPMENT.md#connecting-cinc-console)), but it
+hands `pivotal`'s private key to the console. In production, generate a
+dedicated pair and give the server only the public half:
+
+```sh
+openssl genrsa -traditional -out webui_priv.pem 2048
+openssl rsa -in webui_priv.pem -pubout -out webui_pub.pem
+
+cinc-server-ng --storage sqlite --db /data/cinc.db \
+  --webui-key /data/webui_pub.pem
+```
+
+- `--webui-key` accepts a public key (`PUBLIC KEY` or `RSA PUBLIC KEY`) as
+  well as a private key, so `webui_priv.pem` never has to be on the server.
+  The startup banner names the key in use
+  (`webui impersonation: enabled (key: ...)`).
+- Give `webui_priv.pem` to the console (`CINC_WEBUI_KEY_FILE`) and to nothing
+  else.
+- The admin key and the webui key rotate independently. To rotate the webui
+  key, generate a new pair, replace both files, and restart both processes.
+
+### Create a user to log in as
+
+The console logs users in with a password, which it checks with
+`POST /authenticate_user`. A fresh server has only `pivotal`, which has a key
+but no password. So first create a user, as `pivotal`, with
+[cinc-cli](https://github.com/cinc-project/cinc-cli) (or the equivalent `knife`
+commands):
+
+```sh
+cinc user create alice --email alice@example.com \
+  --first-name Alice --last-name Smith --password '...' --key-file alice.pem
+cinc org member add alice            # joins the org's "users" group: read access
+cinc group member add admins alice   # optional: full control of the org
+```
+
+`--key-file` saves the user's own API key, so the same account also works from
+the command line. Users change their password with `cinc user password <name>`.
+
+Point the console at the server root, without `/organizations/<org>`
+(`CINC_SERVER_URL=https://chef.example.com`). If the console goes through the
+same proxy as other clients, the notes above about `Host` and
+`X-Forwarded-Proto` apply unchanged.
+
 ## Docker
 
 ```sh
