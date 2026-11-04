@@ -262,6 +262,10 @@ If you change the listen port, override the check with `--addr` (for example
 `--health-cmd "/cinc-server-ng healthcheck --addr 127.0.0.1:9000"`). The same
 subcommand works as a Kubernetes `exec` probe.
 
+The container runs with a read-only root filesystem and no capabilities. A
+hardened Docker Compose example is in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#docker-compose-hardened).
+
 ## TLS and load balancers
 
 cinc-server-ng serves HTTPS itself, so no proxy is required:

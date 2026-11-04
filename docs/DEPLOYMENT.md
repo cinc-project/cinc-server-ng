@@ -219,6 +219,54 @@ verify the certificate: it dials loopback, which the certificate does not name,
 and it sends nothing and trusts nothing beyond the status code. Send `SIGHUP`
 after renewing with `docker kill --signal HUP <container>`.
 
+### Docker Compose, hardened
+
+The binary writes only to the SQLite database (and `--key-out`, if set), so
+the container runs with a read-only root filesystem, no capabilities and no
+privilege escalation. The volume is its only writable path.
+
+```yaml
+services:
+  cinc-server-ng:
+    # Pin a release, ideally by digest: ghcr.io/cinc-project/cinc-server-ng:<version>@sha256:<digest>
+    image: ghcr.io/cinc-project/cinc-server-ng:<version>
+    restart: unless-stopped
+    user: "65532:65532"        # the image's nonroot user, set explicitly
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command:
+      - --addr=0.0.0.0:8889
+      - --storage=sqlite
+      - --db=/data/cinc.db
+      - --orgs=acme
+      - --key-out=/data/pivotal.pem
+      - --shutdown-delay=5s
+    environment:
+      # Set in .env next to this file (or your secret store), not inline.
+      CINC_SERVER_NG_STATS_PASSWORD: ${CINC_STATS_PASSWORD:?set CINC_STATS_PASSWORD}
+    ports:
+      - "127.0.0.1:8889:8889"  # loopback: a TLS proxy on the host fronts it
+    volumes:
+      - cinc-data:/data
+
+volumes:
+  cinc-data:
+```
+
+- **The volume must be writable by UID 65532.** A new named volume takes its
+  ownership from the image's `/data`, so it works as is. For a bind mount,
+  create the directory first and `chown 65532:65532` it; mode `0700` keeps
+  other host users out of the database and keys.
+- **Bind to loopback, or to an internal network,** when a proxy terminates TLS
+  in front of the server, for the reasons given under "Behind a reverse proxy
+  or load balancer". To serve TLS from the container itself, add the
+  `CINC_SERVER_NG_TLS_*` settings shown above and publish the port on the
+  public interface instead.
+- **One replica.** Don't scale this service (see "Run one active instance").
+- The image's `HEALTHCHECK` applies unchanged, and `docker compose ps` shows
+  `healthy` once `/_status` answers.
+
 ## What TLS costs
 
 See [`benchmarks/v0.17.0-tls.md`](benchmarks/v0.17.0-tls.md). In short: on a
