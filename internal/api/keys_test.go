@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 
@@ -555,5 +556,41 @@ func TestPutKeyRejectsInvalidFields(t *testing.T) {
 	}
 	if _, after := do(t, "GET", base+"/keys/key2", ""); after != before {
 		t.Errorf("a refused PUT changed key2:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+// erchef's single-key body (chef_key:ejson_from_key) has only name, public_key
+// and expiration_date; "expired" belongs to the key list. The default key made
+// with the actor has no stored row, so it is synthesized, and it must read the
+// same as a stored one, for GET and for the DELETE that returns it.
+func TestSingleDefaultKeyHasErchefFields(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	org := srv.URL + "/organizations/acme"
+	if resp, body := do(t, "POST", org+"/clients", `{"name":"web01"}`); resp.StatusCode != 201 {
+		t.Fatalf("create client = %d: %s", resp.StatusCode, body)
+	}
+	if resp, body := do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`)); resp.StatusCode != 201 {
+		t.Fatalf("create user = %d: %s", resp.StatusCode, body)
+	}
+	want := []string{"expiration_date", "name", "public_key"}
+	for _, url := range []string{org + "/clients/web01/keys/default", srv.URL + "/users/alice/keys/default"} {
+		for _, method := range []string{"GET", "DELETE"} {
+			resp, body := do(t, method, url, "")
+			if resp.StatusCode != 200 {
+				t.Fatalf("%s %s = %d: %s", method, url, resp.StatusCode, body)
+			}
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(body), &doc); err != nil {
+				t.Fatalf("%s %s: %v: %s", method, url, err, body)
+			}
+			var got []string
+			for k := range doc {
+				got = append(got, k)
+			}
+			sort.Strings(got)
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Errorf("%s %s fields = %v, want %v: %s", method, url, got, want, body)
+			}
+		}
 	}
 }

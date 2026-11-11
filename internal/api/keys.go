@@ -254,12 +254,13 @@ func (a *API) getKey(segment string, scope scopeFunc) http.HandlerFunc {
 	}
 }
 
+// keyObject is erchef's single-key body (chef_key:ejson_from_key): name,
+// public_key and expiration_date. "expired" belongs only to the key list.
 func keyObject(name, publicKey string) map[string]any {
 	return map[string]any{
 		"name":            name,
 		"public_key":      publicKey,
 		"expiration_date": "infinity",
-		"expired":         false,
 	}
 }
 

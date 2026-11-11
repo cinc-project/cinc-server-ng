@@ -18,12 +18,6 @@
     "candidate": "expiration_date,name,public_key"
   },
   {
-    "step": "client default key",
-    "field": "expired",
-    "reference": "<missing>",
-    "candidate": "false"
-  },
-  {
     "step": "client delete",
     "field": "(body){members}",
     "reference": "name,clientname,validator,orgname,json_class,chef_type",
@@ -346,12 +340,6 @@
     "field": "(body){members}",
     "reference": "name,public_key,expiration_date",
     "candidate": "expiration_date,name,public_key"
-  },
-  {
-    "step": "user default key",
-    "field": "expired",
-    "reference": "<missing>",
-    "candidate": "false"
   },
   {
     "step": "user keys list",
