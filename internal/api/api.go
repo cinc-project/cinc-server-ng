@@ -138,6 +138,7 @@ func (a *API) Handler() http.Handler {
 	a.registerPolicyRoutes(mux)
 	a.registerOrganizationRoutes(mux)
 	a.registerAuthzRoutes(mux)
+	a.registerServerAdminRoutes(mux)
 	a.registerServerEndpoints(mux)
 
 	a.routes = mux.patterns

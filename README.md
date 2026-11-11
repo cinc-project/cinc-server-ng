@@ -106,7 +106,17 @@ erchef's path), and the global actor endpoints: the
 `/users` collection is superuser-only (a user may still read or update its own
 record), and `/users/<name>/_acl` is governed by the grant permission on that
 user. The bootstrap admin is a superuser and bypasses ACLs, mirroring Chef's
-`pivotal`. `EnforceACL` requires authentication and cannot be combined with
+`pivotal`.
+
+Members of the global `server-admins` group hold what Chef Infra Server grants
+it: they may list and create users, and read, update and delete any user that
+is not a superuser, including its keys. They get nothing more: no user `_acl`
+access, no organization access, and no way to set a user's superuser flag.
+Chef manages membership with `chef-server-ctl grant-server-admin-permissions`;
+here the superuser uses `/_cinc/server_admins`, a cinc-server-ng route with no
+Chef equivalent (for example `knife raw -m PUT /_cinc/server_admins/alice`).
+`GET` lists the members (superusers included), `PUT /<user>` adds one and
+`DELETE /<user>` removes one. Deleting a user also removes it from the group. `EnforceACL` requires authentication and cannot be combined with
 `DisableAuth`. Whether or not ACLs are enforced, an authenticated actor other
 than the superuser cannot take the `admins` group off a grant ACE that lists
 it: the write is refused with `403`, as erchef refuses it.
