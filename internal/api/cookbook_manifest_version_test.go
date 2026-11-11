@@ -187,11 +187,22 @@ func TestToSegmentsIsLinear(t *testing.T) {
 		}
 		return &chefjson.Object{Members: []chefjson.Member{{Name: "all_files", Value: files}}}
 	}
+	// The fastest of several runs: a single run under -race on a shared CI
+	// runner can absorb a GC cycle or a descheduling that has nothing to do
+	// with toSegments, and one such stall in the large run alone was enough
+	// to fail the ratio (737ms vs 27ms). A quadratic toSegments is slow on
+	// every run, so the minimum still catches it.
 	timeIt := func(n int) time.Duration {
-		obj := build(n)
-		start := time.Now()
-		toSegments(obj)
-		return time.Since(start)
+		best := time.Duration(-1)
+		for range 5 {
+			obj := build(n)
+			start := time.Now()
+			toSegments(obj)
+			if d := time.Since(start); best < 0 || d < best {
+				best = d
+			}
+		}
+		return best
 	}
 	timeIt(1000) // warm up
 	small, large := timeIt(20000), timeIt(160000)
