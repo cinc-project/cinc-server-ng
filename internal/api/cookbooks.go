@@ -524,6 +524,23 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
+
+	prev, existed, err := org.Get("cookbooks", cookbookKey(name, version))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// A frozen version is overwritten only with ?force, and stays frozen: erchef
+	// (chef_wm_cookbook_version is_conflict/from_json) never clears "frozen?".
+	if existed && storedFrozen(prev) {
+		if !isForced(r) {
+			writeError(w, http.StatusConflict, "The cookbook "+name+" at version "+version+
+				" is frozen. Use the 'force' option to override.")
+			return
+		}
+		obj.Set("frozen?", true)
+	}
+
 	raw = chefjson.Marshal(obj) // with its defaults filled in
 	m, err := chefjson.DecodeObject(raw)
 	if err != nil {
@@ -544,11 +561,6 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	prev, existed, err := org.Get("cookbooks", cookbookKey(name, version))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	if err := org.Put("cookbooks", cookbookKey(name, version), raw); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -572,6 +584,21 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	writeRaw(w, status, a.withFileURLs(raw, r, org.Name()))
+}
+
+// storedFrozen reports whether a stored cookbook version has "frozen?" set.
+func storedFrozen(doc []byte) bool {
+	var v struct {
+		Frozen bool `json:"frozen?"`
+	}
+	return json.Unmarshal(doc, &v) == nil && v.Frozen
+}
+
+// isForced mirrors erchef's is_forced: a "force" query parameter with any value
+// other than "false" (an empty one included) is a force.
+func isForced(r *http.Request) bool {
+	q := r.URL.Query()
+	return q.Has("force") && q.Get("force") != "false"
 }
 
 func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
