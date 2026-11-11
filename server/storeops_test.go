@@ -72,7 +72,7 @@ func TestCheckinStoreOpCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := org.Put("acls", "nodes/node0", []byte(
-		`{"read":{"actors":["node0"],"groups":[]},"update":{"actors":["node0"],"groups":[]}}`)); err != nil {
+		`{"read":{"users":[],"clients":["node0"],"groups":[]},"update":{"users":[],"clients":["node0"],"groups":[]}}`)); err != nil {
 		t.Fatal(err)
 	}
 	url := srv.URL() + "/organizations/acme/nodes/node0"

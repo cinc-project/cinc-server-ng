@@ -34,6 +34,11 @@ func (a *API) orgViewAllowed(w http.ResponseWriter, r *http.Request, org *store.
 	if !ok || actor.IsGlobalAdmin {
 		return true
 	}
+	// Membership is a user's: a client of the same name as a member is not one.
+	if actor.IsClient {
+		writeError(w, http.StatusForbidden, "You are not a member of this organization.")
+		return false
+	}
 	_, ok, err := org.Get(assocColl, actor.Name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

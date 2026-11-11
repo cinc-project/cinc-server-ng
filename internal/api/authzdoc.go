@@ -39,15 +39,21 @@ func decodeMembers(raw []byte) (memberDoc, bool) {
 // aceDoc is a single access-control entry: the actors and groups a permission
 // is granted to.
 type aceDoc struct {
-	Actors []string `json:"actors"`
-	Groups []string `json:"groups"`
+	Users   []string `json:"users"`
+	Clients []string `json:"clients"`
+	Groups  []string `json:"groups"`
 }
 
-// allows reports whether the entry grants an actor with the given group
-// memberships. It mirrors aceAllows, over the typed decode.
-func (e aceDoc) allows(name string, member map[string]bool) bool {
-	for _, a := range e.Actors {
-		if a == name {
+// allows reports whether the entry grants actor, given its group memberships.
+// It mirrors aceAllows, over the typed decode: a name matches only in the list
+// of the actor's own type.
+func (e aceDoc) allows(actor Actor, member map[string]bool) bool {
+	names := e.Users
+	if actor.IsClient {
+		names = e.Clients
+	}
+	for _, a := range names {
+		if a == actor.Name {
 			return true
 		}
 	}

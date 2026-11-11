@@ -120,6 +120,14 @@ Chef equivalent (for example `knife raw -m PUT /_cinc/server_admins/alice`).
 `DisableAuth`. Whether or not ACLs are enforced, an authenticated actor other
 than the superuser cannot take the `admins` group off a grant ACE that lists
 it: the write is refused with `403`, as erchef refuses it.
+As in erchef, `GET .../_acl?detail=granular` reports each permission's actors
+split into `users` and `clients`, and `PUT .../_acl/<perm>` accepts that split
+form (with `actors` set to `[]`). An org client and a user may share a name,
+as on Chef Infra Server (a node's hostname often matches a username). They are
+separate actors: a request authenticates as whichever one's key verifies, a
+grant to one never applies to the other, and a merged-form `PUT` naming a client
+that is also a member user is refused with `422` until the split form says which.
+ACLs stored by older versions are converted to this typed form at startup.
 
 ## Use as a binary
 

@@ -99,7 +99,7 @@ func TestActorGroupsCycleTerminates(t *testing.T) {
 func TestActorAllowedDirectActor(t *testing.T) {
 	org := testOrg(t)
 	if err := org.Put("acls", aclKey("nodes", "web01"), mustEncode(map[string]any{
-		"read": map[string]any{"actors": []string{"alice"}, "groups": []string{}},
+		"read": map[string]any{"users": []string{"alice"}, "groups": []string{}},
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestEnforceGroupsAndContainers(t *testing.T) {
 
 	// A normal user granted update on the group's ACL may PUT it.
 	if err := org.Put("acls", aclKey("groups", "grp1"), mustEncode(map[string]any{
-		"update": map[string]any{"actors": []string{"editor"}, "groups": []string{}},
+		"update": map[string]any{"users": []string{"editor"}, "groups": []string{}},
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestEnforceUserACL(t *testing.T) {
 
 	// Grant "granter" the grant permission on bob's user object (global space).
 	if err := st.Global().Put("acls", aclKey("users", "bob"), mustEncode(map[string]any{
-		"grant": map[string]any{"actors": []string{"granter"}, "groups": []string{}},
+		"grant": map[string]any{"users": []string{"granter"}, "groups": []string{}},
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +525,7 @@ func TestEnforceOrgACL(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := org.Put("acls", aclKey("organizations", "acme"), mustEncode(map[string]any{
-		"grant": map[string]any{"actors": []string{"granter"}, "groups": []string{}},
+		"grant": map[string]any{"users": []string{"granter"}, "groups": []string{}},
 	})); err != nil {
 		t.Fatal(err)
 	}

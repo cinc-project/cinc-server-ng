@@ -75,15 +75,18 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				unauthorized(w, "Invalid webui signature for request source 'web'")
 				return
 			}
-			_, actor, ok, err := s.resolveAuth(r.URL.Path, parsed.UserID)
+			candidates, err := s.resolveAuth(r.URL.Path, parsed.UserID)
 			if err != nil {
 				serverError(w, err)
 				return
 			}
-			if !ok {
+			if len(candidates) == 0 {
 				unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"' via the web UI. Ensure the user exists.")
 				return
 			}
+			// erchef's select_user_or_webui_key: web requests are user based,
+			// so of a same-named user and client the user is the actor.
+			actor := candidates[0].actor
 			actor.ViaWebUI = true
 			if err := s.checkSkew(parsed.Timestamp); err != nil {
 				unauthorized(w, err.Error())
@@ -94,19 +97,29 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// One lookup resolves both the actor identity and every key it may sign
-		// with: its unexpired keys, as the keys API lists them.
-		pubs, actor, ok, err := s.resolveAuth(r.URL.Path, parsed.UserID)
+		// Every actor answering to the name, with every key it may sign with
+		// (its unexpired keys, as the keys API lists them). The actor is the
+		// one whose key verifies the signature, as in erchef's
+		// verify_request_signature: a user and a client may share a name, and
+		// the key, not the name, says which of them signed.
+		candidates, err := s.resolveAuth(r.URL.Path, parsed.UserID)
 		if err != nil {
 			serverError(w, err)
 			return
 		}
-		if !ok {
+		if len(candidates) == 0 {
 			unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"'. Ensure that your node_name and client key are correct.")
 			return
 		}
-
-		if !verifiesWithAny(r, body, parsed, pubs) {
+		var actor api.Actor
+		verified := false
+		for _, c := range candidates {
+			if verifiesWithAny(r, body, parsed, c.pubs) {
+				actor, verified = c.actor, true
+				break
+			}
+		}
+		if !verified {
 			unauthorized(w, "Invalid signature for user or client '"+parsed.UserID+"'")
 			return
 		}
@@ -150,35 +163,55 @@ func verifiesWithAny(r *http.Request, body []byte, parsed *auth.Parsed, pubs []*
 	return false
 }
 
-// resolveAuth resolves an actor's signing keys and identity. It checks org
-// clients first (when the request targets an org), then global users,
-// mirroring Chef's resolution order. The actor records whether it is an org
-// client (vs. a global user) and whether a global user is an admin (Chef's
-// pivotal superuser, which bypasses ACLs).
-func (s *Server) resolveAuth(path, name string) ([]*rsa.PublicKey, api.Actor, bool, error) {
+// authCandidate is an actor a request may be signed by, with its keys.
+type authCandidate struct {
+	pubs  []*rsa.PublicKey
+	actor api.Actor
+}
+
+// resolveAuth returns every actor answering to name on this path, each with
+// the keys it may sign with: the global user, then (when the request targets
+// an org) the org's client of that name. That is erchef's order
+// (chef_sql:fetch_actors_by_name sorts users before clients), and it matters
+// when one key verifies for both: a client registered with a user's public
+// key, which anyone may read, must not capture that user's requests. The actor
+// records whether it is an org client and whether a global user is an admin
+// (Chef's pivotal superuser, which bypasses ACLs).
+//
+// A client is looked up first so that the common case, a node signing as its
+// client with no user of its name, reads one record as it always has: the
+// user is skipped only when s.users says no user has the name.
+func (s *Server) resolveAuth(path, name string) ([]authCandidate, error) {
+	var client *authCandidate
 	if org := orgFromPath(path); org != "" {
-		o, ok, err := s.store.Org(org)
+		o, found, err := s.store.Org(org)
 		if err != nil {
-			return nil, api.Actor{}, false, err
+			return nil, err
 		}
-		if ok {
+		if found {
 			pubs, _, ok, err := s.parseActorRecord(o, "clients", name)
 			if err != nil {
-				return nil, api.Actor{}, false, err
+				return nil, err
 			}
 			if ok {
-				return pubs, api.Actor{Name: name, IsClient: true}, true, nil
+				client = &authCandidate{pubs, api.Actor{Name: name, IsClient: true}}
 			}
 		}
 	}
-	pubs, admin, ok, err := s.parseActorRecord(s.store.Global(), "users", name)
-	if err != nil {
-		return nil, api.Actor{}, false, err
+	var out []authCandidate
+	if client == nil || s.users.has(name) {
+		pubs, admin, ok, err := s.parseActorRecord(s.store.Global(), "users", name)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, authCandidate{pubs, api.Actor{Name: name, IsGlobalAdmin: admin}})
+		}
 	}
-	if ok {
-		return pubs, api.Actor{Name: name, IsGlobalAdmin: admin}, true, nil
+	if client != nil {
+		out = append(out, *client)
 	}
-	return nil, api.Actor{}, false, nil
+	return out, nil
 }
 
 // parseWebUIKey accepts a PEM-encoded RSA public or private key and returns the
