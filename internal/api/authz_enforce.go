@@ -66,7 +66,7 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	}
 	// A user may always act on its own global record (self-service); the global
 	// admin already returned above, so anyone else hits the superuser gate.
-	if check.allowSelf != "" && actor.Name == check.allowSelf {
+	if check.allowSelf != "" && !actor.IsClient && actor.Name == check.allowSelf {
 		return r, true
 	}
 	if check.superuserOnly {
@@ -520,8 +520,10 @@ func allowedWith(org *store.Org, actor Actor, aclType, aclName, perm string,
 	if ace == nil {
 		return false, nil
 	}
-	// A direct actor grant settles it without resolving groups.
-	if slices.Contains(anyStrings(ace["actors"]), actor.Name) {
+	// A direct grant to this actor, as the user or client it is, settles it
+	// without resolving groups. An untyped "actors" list (a store from before
+	// typed entries that UpgradeACLActors has not converted) grants nothing.
+	if slices.Contains(aceNamesFor(ace, actor), actor.Name) {
 		return true, nil
 	}
 	if len(anyStrings(ace["groups"])) == 0 {
@@ -543,7 +545,7 @@ func aceAllows(entry any, actor Actor, member map[string]bool) bool {
 	if ace == nil {
 		return false
 	}
-	if slices.Contains(anyStrings(ace["actors"]), actor.Name) {
+	if slices.Contains(aceNamesFor(ace, actor), actor.Name) {
 		return true
 	}
 	for _, g := range anyStrings(ace["groups"]) {

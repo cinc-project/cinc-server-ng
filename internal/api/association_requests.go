@@ -108,14 +108,16 @@ func (a *API) createInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Record who issued the invite so acceptance can verify they still have the
-	// authority to do so.
-	inviter := ""
+	// authority to do so. A client of the same name as a user is another
+	// actor, so a client inviter is recorded as one.
+	inv := map[string]any{"id": id, "username": user, "orgname": org.Name(), "inviter": ""}
 	if actor, ok := actorFromContext(r.Context()); ok {
-		inviter = actor.Name
+		inv["inviter"] = actor.Name
+		if actor.IsClient {
+			inv["inviter_client"] = true
+		}
 	}
-	if err := org.Put(assocReqColl, id, mustEncode(map[string]any{
-		"id": id, "username": user, "orgname": org.Name(), "inviter": inviter,
-	})); err != nil {
+	if err := org.Put(assocReqColl, id, mustEncode(inv)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -150,7 +152,7 @@ func (a *API) rescindInvite(w http.ResponseWriter, r *http.Request) {
 // permissive default the rest of the package uses.
 func (a *API) invitationSelfAllowed(w http.ResponseWriter, r *http.Request, user string) bool {
 	actor, ok := actorFromContext(r.Context())
-	if !ok || actor.IsGlobalAdmin || actor.Name == user {
+	if !ok || actor.IsGlobalAdmin || (!actor.IsClient && actor.Name == user) {
 		return true
 	}
 	writeStringError(w, http.StatusForbidden, "You are not allowed to take this action.")
@@ -218,7 +220,7 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 	// their behalf (knife org user add does exactly that); any other third
 	// party, an org admin included, is forbidden. With no actor the endpoint
 	// stays open.
-	if actor, ok := actorFromContext(r.Context()); ok && actor.Name != user && !actor.IsGlobalAdmin {
+	if actor, ok := actorFromContext(r.Context()); ok && (actor.IsClient || actor.Name != user) && !actor.IsGlobalAdmin {
 		writeStringError(w, http.StatusForbidden, "You are not allowed to take this action.")
 		return
 	}
@@ -251,7 +253,8 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 
 	if body.Response == "accept" {
 		var inv struct {
-			Inviter string `json:"inviter"`
+			Inviter       string `json:"inviter"`
+			InviterClient bool   `json:"inviter_client"`
 		}
 		if raw, ok, err := org.Get(assocReqColl, id); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -262,7 +265,7 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		authorized, err := a.inviterAuthorized(org, inv.Inviter)
+		authorized, err := a.inviterAuthorized(org, inv.Inviter, inv.InviterClient)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -296,10 +299,21 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 // invitations for the org: a global superuser always may; otherwise they must
 // still exist, still be associated with the org, and still belong to its
 // "admins" group. An empty inviter (created without an authenticated actor) is
-// treated as authorized.
-func (a *API) inviterAuthorized(org *store.Org, inviter string) (bool, error) {
+// treated as authorized. A client inviter must still be a client of the org in
+// the admins group's clients; it never stands in for a user of its name.
+func (a *API) inviterAuthorized(org *store.Org, inviter string, client bool) (bool, error) {
 	if inviter == "" {
 		return true, nil
+	}
+	if client {
+		if _, ok, err := org.Get("clients", inviter); err != nil || !ok {
+			return false, err
+		}
+		_, clients, _, err := groupMembership(org, "admins")
+		if err != nil {
+			return false, err
+		}
+		return slices.Contains(clients, inviter), nil
 	}
 	uraw, ok, err := a.store.Global().Get("users", inviter)
 	if err != nil {

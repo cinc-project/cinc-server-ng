@@ -184,14 +184,16 @@ func TestLegacyClientsContainerACLUpgradedOnStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := org.Put("acls", "containers/clients", []byte(legacyClientsContainerACL)); err != nil {
-		t.Fatal(err)
-	}
 	if err := srv1.Start(); err != nil {
 		t.Fatal(err)
 	}
 	base := srv1.URL() + "/organizations/acme"
 	key := createClientAndKey(t, srv1, base, "robot1")
+	// The legacy ACL goes in after registration: its validator entry is an
+	// untyped actor, which only the startup upgrade gives back its grant.
+	if err := org.Put("acls", "containers/clients", []byte(legacyClientsContainerACL)); err != nil {
+		t.Fatal(err)
+	}
 	// Baseline: under the legacy ACL the plain client can list clients.
 	mustStatus(t, signedAs(t, "robot1", key, "GET", base+"/clients", ""), http.StatusOK)
 	stopServer(t, srv1)
@@ -212,7 +214,8 @@ func TestLegacyClientsContainerACLUpgradedOnStart(t *testing.T) {
 }
 
 // TestCustomizedClientsContainerACLKeptOnStart checks the upgrade only
-// rewrites the exact legacy form: an ACL an operator changed is theirs.
+// rewrites the exact legacy form: an ACL an operator changed is theirs. Its
+// untyped actors are typed (UpgradeACLActors), granting exactly what they did.
 func TestCustomizedClientsContainerACLKeptOnStart(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "custom.db")
 	opts := Options{Orgs: []string{"acme"}, Storage: "sqlite", DB: db, EnforceACL: true}
@@ -252,7 +255,10 @@ func TestCustomizedClientsContainerACLKeptOnStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != custom {
-		t.Errorf("customized clients container ACL rewritten:\n got %s\nwant %s", raw, custom)
+	const want = `{"create":{"clients":["acme-validator"],"groups":["admins"],"users":[]},` +
+		`"delete":{"clients":[],"groups":["admins"],"users":[]},"grant":{"clients":[],"groups":["admins"],"users":[]},` +
+		`"read":{"clients":[],"groups":["admins","clients"],"users":[]},"update":{"clients":[],"groups":["admins"],"users":[]}}`
+	if string(raw) != want {
+		t.Errorf("customized clients container ACL rewritten:\n got %s\nwant %s", raw, want)
 	}
 }

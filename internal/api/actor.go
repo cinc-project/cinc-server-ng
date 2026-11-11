@@ -79,16 +79,6 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// The flag is a request, never part of the actor.
 		delete(obj, "create_key")
 
-		// A client and a global user that share a name are the same principal to
-		// everything downstream, so the second one must not be created.
-		if msg, err := a.actorNameCollision(segment, name); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		} else if msg != "" {
-			writeError(w, http.StatusConflict, msg)
-			return
-		}
-
 		resp := map[string]any{
 			"uri": objectURL(r, orgSegment(r), segment, name),
 		}
@@ -161,59 +151,6 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusCreated, resp)
 	}
-}
-
-// actorNameCollision reports why an actor may not be created under this name,
-// or "" when the name is free.
-//
-// Nothing downstream distinguishes a client from a user by anything but its
-// name. ACL entries name actors as bare strings, so `{"actors":["pivotal"]}`
-// grants whichever principal answers to "pivotal"; and resolveAuth resolves an
-// org client before a global user on any org-scoped path, so the client wins.
-// A client created under a user's name therefore inherits every grant that user
-// holds in the org *and* displaces them from it, since their requests are then
-// checked against the client's key and fail. Registering a client only needs
-// create on the clients container, which is what an org validator key — the key
-// distributed to every node — is seeded with.
-//
-// Real Chef avoids this by keying authorization on immutable authz ids rather
-// than names. Short of that change, the collision is refused at creation, which
-// is the only point where it can still be prevented cheaply.
-func (a *API) actorNameCollision(segment, name string) (string, error) {
-	switch segment {
-	case "clients":
-		_, ok, err := a.store.Global().Get("users", name)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return "A user named " + name + " already exists; a client cannot share its name", nil
-		}
-	case "users":
-		// Clients are org-scoped, so the same client name in two orgs is fine —
-		// they never resolve on the same path. A user is global and would
-		// collide with all of them.
-		orgs, err := a.store.ListOrgs()
-		if err != nil {
-			return "", err
-		}
-		for _, orgName := range orgs {
-			org, ok, err := a.store.Org(orgName)
-			if err != nil {
-				return "", err
-			}
-			if !ok {
-				continue
-			}
-			if _, ok, err := org.Get("clients", name); err != nil {
-				return "", err
-			} else if ok {
-				return "A client named " + name + " already exists in organization " + orgName +
-					"; a user cannot share its name", nil
-			}
-		}
-	}
-	return "", nil
 }
 
 // erchef's messages for chef_key_base:validate_public_key_fields, as
@@ -596,10 +533,10 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			cleanup = append(cleanup, func() error { return a.removeUserFromOrgs(name) })
 		case "clients":
 			// Registration put it in the org's "clients" group, and ACLs may
-			// name it. A client and a user sharing a name are one principal to
-			// authorization, so dropping the name fails closed.
+			// name it. Only its client entries go: a user of the same name is
+			// another actor and keeps its grants.
 			cleanup = append(cleanup,
-				func() error { return removeFromACLs(org, "actors", name) },
+				func() error { return removeFromACLs(org, "clients", name) },
 				func() error { return removeActorFromAllGroups(org, memberClients, name) })
 		}
 		cleanup = append(cleanup,
@@ -632,7 +569,7 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 // exists, and is the same actor if it is invited back.)
 func (a *API) removeUserFromOrgs(user string) error {
 	// Users' own ACLs live in the global scope and can name other users.
-	if err := removeFromACLs(a.store.Global(), "actors", user); err != nil {
+	if err := removeFromACLs(a.store.Global(), "users", user); err != nil {
 		return err
 	}
 	orgs, err := a.store.ListOrgs()
@@ -656,7 +593,7 @@ func (a *API) removeUserFromOrgs(user string) error {
 		if err := removeActorFromAllGroups(org, memberUsers, user); err != nil {
 			return err
 		}
-		if err := removeFromACLs(org, "actors", user); err != nil {
+		if err := removeFromACLs(org, "users", user); err != nil {
 			return err
 		}
 	}

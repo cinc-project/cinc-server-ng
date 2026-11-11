@@ -91,8 +91,9 @@ func TestACLPutSplitForm(t *testing.T) {
 	_, body = do(t, "GET", base+"/nodes/web01/_acl", "")
 	var acl map[string]aclPerm
 	json.Unmarshal([]byte(body), &acl)
-	if got := acl["read"].Actors; !slices.Equal(got, []string{"alice", "web-client"}) {
-		t.Fatalf("split-form PUT stored actors %v, want [alice web-client]: %s", got, body)
+	// The merged view lists clients, then users, as erchef's does.
+	if got := acl["read"].Actors; !slices.Equal(got, []string{"web-client", "alice"}) {
+		t.Fatalf("split-form PUT stored actors %v, want [web-client alice]: %s", got, body)
 	}
 	if r := granularACLOf(t, base+"/nodes/web01/_acl")["read"]; !slices.Equal(r.Users, []string{"alice"}) ||
 		!slices.Equal(r.Clients, []string{"web-client"}) {
@@ -132,5 +133,48 @@ func TestACLPutSplitForm(t *testing.T) {
 	if want := `{"error":["Clients can not be added to global ACL entries."]}`; resp.StatusCode != http.StatusBadRequest ||
 		strings.TrimSpace(body) != want {
 		t.Errorf("global split PUT with a client = %d %s, want 400 %s", resp.StatusCode, body, want)
+	}
+}
+
+// A name that is both a client and a member user is ambiguous in the merged
+// form: erchef answers 422 (oc_chef_wm_acl_permission ambiguous_actor), and
+// the split form names one of them.
+func TestACLPutAmbiguousActor(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	url := base + "/nodes/web01/_acl/read"
+	do(t, "POST", base+"/nodes", `{"name":"web01"}`)
+	for _, c := range []struct{ url, body string }{
+		{srv.URL + "/users", userBody(`{"name":"dual"}`)},
+		{base + "/clients", `{"name":"dual"}`},
+	} {
+		if resp, body := do(t, "POST", c.url, c.body); resp.StatusCode != http.StatusCreated {
+			t.Fatalf("POST %s = %d: %s", c.url, resp.StatusCode, body)
+		}
+	}
+
+	// Baseline: the user is no member yet, so "dual" names only the client.
+	if resp, body := do(t, "PUT", url, `{"read":{"actors":["dual"],"groups":[]}}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT before membership = %d: %s", resp.StatusCode, body)
+	}
+	if r := granularACLOf(t, base+"/nodes/web01/_acl")["read"]; !slices.Equal(r.Clients, []string{"dual"}) || len(r.Users) != 0 {
+		t.Fatalf("read = %+v, want the client only", r)
+	}
+
+	if resp, body := do(t, "POST", base+"/users", `{"username":"dual"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("associate dual = %d: %s", resp.StatusCode, body)
+	}
+	resp, body := do(t, "PUT", url, `{"read":{"actors":["dual"],"groups":[]}}`)
+	const want = `{"error":["The following actor(s) exist as both clients and users within this organization: dual. ` +
+		`To perform this update, supply separate 'clients' and 'users' fields in your request, and use an empty array for the value of 'actors'."]}`
+	if resp.StatusCode != http.StatusUnprocessableEntity || strings.TrimSpace(body) != want {
+		t.Fatalf("ambiguous actor PUT = %d %s, want 422 %s", resp.StatusCode, body, want)
+	}
+
+	if resp, body := do(t, "PUT", url, `{"read":{"actors":[],"users":["dual"],"clients":[],"groups":[]}}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("split-form PUT naming the user = %d: %s", resp.StatusCode, body)
+	}
+	if r := granularACLOf(t, base+"/nodes/web01/_acl")["read"]; !slices.Equal(r.Users, []string{"dual"}) || len(r.Clients) != 0 {
+		t.Errorf("read = %+v, want the user only", r)
 	}
 }
