@@ -18,11 +18,11 @@ func TestClassifyActorKeyRoutes(t *testing.T) {
 	}{
 		// A user's keys are its credential: superuser-only, but a user may
 		// rotate its own.
-		{"GET", "/users/bob/keys", authzCheck{superuserOnly: true, perm: "read", allowSelf: "bob"}},
-		{"POST", "/users/bob/keys", authzCheck{superuserOnly: true, perm: "create", allowSelf: "bob"}},
-		{"GET", "/users/bob/keys/default", authzCheck{superuserOnly: true, perm: "read", allowSelf: "bob"}},
-		{"PUT", "/users/bob/keys/default", authzCheck{superuserOnly: true, perm: "update", allowSelf: "bob"}},
-		{"DELETE", "/users/bob/keys/default", authzCheck{superuserOnly: true, perm: "delete", allowSelf: "bob"}},
+		{"GET", "/users/bob/keys", authzCheck{superuserOnly: true, perm: "read", allowSelf: "bob", serverAdmins: true, serverAdminTarget: "bob"}},
+		{"POST", "/users/bob/keys", authzCheck{superuserOnly: true, perm: "create", allowSelf: "bob", serverAdmins: true, serverAdminTarget: "bob"}},
+		{"GET", "/users/bob/keys/default", authzCheck{superuserOnly: true, perm: "read", allowSelf: "bob", serverAdmins: true, serverAdminTarget: "bob"}},
+		{"PUT", "/users/bob/keys/default", authzCheck{superuserOnly: true, perm: "update", allowSelf: "bob", serverAdmins: true, serverAdminTarget: "bob"}},
+		{"DELETE", "/users/bob/keys/default", authzCheck{superuserOnly: true, perm: "delete", allowSelf: "bob", serverAdmins: true, serverAdminTarget: "bob"}},
 		// A client's keys are governed by the client object's own ACL.
 		{"GET", "/organizations/acme/clients/node1/keys", authzCheck{aclType: "clients", aclName: "node1", perm: "read"}},
 		{"POST", "/organizations/acme/clients/node1/keys", authzCheck{aclType: "clients", aclName: "node1", perm: "update"}},

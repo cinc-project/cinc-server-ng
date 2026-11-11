@@ -151,4 +151,7 @@ Document `tim`'s access level in the dev docs:
 - An on-disk `acls/` format for `--state` (custom ACLs per object). This design
   seeds *default* ACLs programmatically; a future change can let the state
   format carry explicit ACLs.
-- Global `server-admins` modeling.
+- Global `server-admins` modeling. (Since added, outside this design: see
+  `internal/api/server_admins.go`. The group's grants are applied by
+  `classifyUsers`, not seeded into ACLs, because the user routes are not
+  ACL-gated.)

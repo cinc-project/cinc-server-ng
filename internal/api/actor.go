@@ -54,6 +54,7 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 				return
 			}
 			lowerEmail(obj)
+			dropRequestedPrivilege(r, obj)
 		}
 		if segment == "clients" && !clientNameRE.MatchString(name) {
 			writeError(w, http.StatusBadRequest, invalidClientNameMessage(name))
@@ -591,9 +592,11 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 		var cleanup []func() error
 		switch segment {
 		case "users":
-			// Its org memberships, group memberships, pending invitations, and
-			// every ACL entry naming it.
-			cleanup = append(cleanup, func() error { return a.removeUserFromOrgs(name) })
+			// Its org memberships, group memberships, pending invitations,
+			// every ACL entry naming it, and its server-admins membership.
+			cleanup = append(cleanup,
+				func() error { return a.removeUserFromOrgs(name) },
+				func() error { return dropServerAdmin(a.store.Global(), name) })
 		case "clients":
 			// Registration put it in the org's "clients" group, and ACLs may
 			// name it. A client and a user sharing a name are one principal to

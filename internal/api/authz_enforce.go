@@ -69,6 +69,12 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	if check.allowSelf != "" && actor.Name == check.allowSelf {
 		return r, true
 	}
+	if ok, err := a.serverAdminAllowed(actor, check); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return r, false
+	} else if ok {
+		return r, true
+	}
 	if check.superuserOnly {
 		writeError(w, http.StatusForbidden, "missing "+check.perm+" permission")
 		return r, false
@@ -143,6 +149,12 @@ type authzCheck struct {
 	// allowSelf names the user permitted to act on its own global record; when
 	// it matches the actor the request is allowed before the superuser gate.
 	allowSelf string
+	// serverAdmins extends the check to members of the global server-admins
+	// group (see server_admins.go), unless serverAdminTarget names a
+	// superuser: erchef grants the group the users container, not the
+	// superuser's own ACL.
+	serverAdmins      bool
+	serverAdminTarget string
 	// aclEndpoint marks a request for the _acl of the aclType/aclName object,
 	// which must exist before its ACL is authorized (a 404, not a 403). The
 	// object's storage varies by type, so aclObjectExists checks it rather than
@@ -173,6 +185,16 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) >= 1 && parts[0] == "users" {
 		return classifyUsers(method, parts[1:])
+	}
+	// cinc-server-ng's own server administration (/_cinc/...), which has no
+	// Chef route to mirror, is the superuser's alone, reads included: the
+	// server-admins list names who can manage every account.
+	if len(parts) >= 1 && parts[0] == "_cinc" {
+		perm, ok := itemPerm(method)
+		if !ok {
+			perm = "update"
+		}
+		return &authzCheck{superuserOnly: true, perm: perm}, true
 	}
 	// Provisioning an organization is a server-level operation, so it is
 	// superuser-only. Listing them stays open: it exposes only names, which a
@@ -281,9 +303,9 @@ func classifyUsers(method string, rest []string) (*authzCheck, bool) {
 	case 0: // /users
 		switch method {
 		case http.MethodGet, http.MethodHead:
-			return &authzCheck{superuserOnly: true, perm: "read"}, true
+			return &authzCheck{superuserOnly: true, perm: "read", serverAdmins: true}, true
 		case http.MethodPost:
-			return &authzCheck{superuserOnly: true, perm: "create"}, true
+			return &authzCheck{superuserOnly: true, perm: "create", serverAdmins: true}, true
 		}
 		return nil, false
 	case 1: // /users/{name}
@@ -291,7 +313,8 @@ func classifyUsers(method string, rest []string) (*authzCheck, bool) {
 		switch method {
 		case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete:
 			perm := map[string]string{http.MethodGet: "read", http.MethodHead: "read", http.MethodPut: "update", http.MethodDelete: "delete"}[method]
-			return &authzCheck{superuserOnly: true, perm: perm, allowSelf: name}, true
+			return &authzCheck{superuserOnly: true, perm: perm, allowSelf: name,
+				serverAdmins: true, serverAdminTarget: name}, true
 		}
 		return nil, false
 	}
@@ -308,7 +331,8 @@ func classifyUsers(method string, rest []string) (*authzCheck, bool) {
 		if !ok {
 			return nil, false
 		}
-		return &authzCheck{superuserOnly: true, perm: perm, allowSelf: rest[0]}, true
+		return &authzCheck{superuserOnly: true, perm: perm, allowSelf: rest[0],
+			serverAdmins: true, serverAdminTarget: rest[0]}, true
 	}
 	return nil, false
 }
