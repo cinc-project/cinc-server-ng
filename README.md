@@ -110,6 +110,9 @@ user. The bootstrap admin is a superuser and bypasses ACLs, mirroring Chef's
 `DisableAuth`. Whether or not ACLs are enforced, an authenticated actor other
 than the superuser cannot take the `admins` group off a grant ACE that lists
 it: the write is refused with `403`, as erchef refuses it.
+As in erchef, `GET .../_acl?detail=granular` reports each permission's actors
+split into `users` and `clients`, and `PUT .../_acl/<perm>` accepts that split
+form (with `actors` set to `[]`).
 
 ## Use as a binary
 

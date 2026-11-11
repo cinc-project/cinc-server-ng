@@ -205,7 +205,7 @@ func fallbackACL(typ, name string) map[string]any {
 func (a *API) getACL(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if org := a.org(w, r); org != nil {
-			writeACLDoc(w, org, typ, r.PathValue("name"))
+			a.writeACLDoc(w, r, org, org, typ, r.PathValue("name"))
 		}
 	}
 }
@@ -228,7 +228,7 @@ func (a *API) putACLPerm(typ string) http.HandlerFunc {
 
 func (a *API) getOrgACL(w http.ResponseWriter, r *http.Request) {
 	if org := a.org(w, r); org != nil {
-		writeACLDoc(w, org, "organizations", r.PathValue("org"))
+		a.writeACLDoc(w, r, org, org, "organizations", r.PathValue("org"))
 	}
 }
 
@@ -245,7 +245,7 @@ func (a *API) putOrgACLPerm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getUserACL(w http.ResponseWriter, r *http.Request) {
-	writeACLDoc(w, a.store.Global(), "users", r.PathValue("name"))
+	a.writeACLDoc(w, r, a.store.Global(), nil, "users", r.PathValue("name"))
 }
 
 func (a *API) getUserACLPerm(w http.ResponseWriter, r *http.Request) {
@@ -256,15 +256,24 @@ func (a *API) putUserACLPerm(w http.ResponseWriter, r *http.Request) {
 	a.updateACLPermDoc(w, r, a.store.Global(), nil, "users", r.PathValue("name"), r.PathValue("perm"), http.StatusOK)
 }
 
-// writeACLDoc writes the full five-permission ACL for an object.
-func writeACLDoc(w http.ResponseWriter, org *store.Org, typ, name string) {
-	if !aclObjectFound(w, org, typ, name) {
+// writeACLDoc writes the full five-permission ACL for an object, in erchef's
+// users/clients split form when the request asks for detail=granular. scope
+// holds the ACL; members is the org its actors resolve in, or nil for a global
+// user's ACL (see unknownACEMembers).
+func (a *API) writeACLDoc(w http.ResponseWriter, r *http.Request, scope, members *store.Org, typ, name string) {
+	if !aclObjectFound(w, scope, typ, name) {
 		return
 	}
-	acl, err := loadACL(org, typ, name)
+	acl, err := loadACL(scope, typ, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if wantsGranular(r) {
+		if acl, err = a.granularACL(members, acl); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, acl)
 }
@@ -308,6 +317,10 @@ func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, me
 	if inner, ok := body[perm].(map[string]any); ok {
 		ace = inner
 	}
+	if msg := splitACEShapeError(ace); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	if members != nil {
 		removed, err := removesAdminsFromGrant(r, scope, typ, name, perm, ace)
@@ -319,6 +332,19 @@ func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, me
 			writeError(w, http.StatusForbidden, "Admin group cannot be removed from the Grant ACE")
 			return
 		}
+	}
+
+	if isSplitACE(ace) {
+		merged, msg, err := a.mergeSplitACE(members, ace)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		ace = merged
 	}
 
 	actors, groups, err := a.unknownACEMembers(members, ace)
