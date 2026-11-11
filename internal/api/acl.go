@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
-	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -57,7 +56,7 @@ func aclKey(typ, name string) string { return typ + "/" + name }
 // defaultACL returns the permissive default ACL granted to a fresh object.
 func defaultACL() map[string]any {
 	perm := func(groups ...string) map[string]any {
-		return map[string]any{"actors": []string{}, "groups": groups}
+		return typedACE(nil, nil, groups)
 	}
 	return map[string]any{
 		"create": perm("admins", "users"),
@@ -72,12 +71,17 @@ func defaultACL() map[string]any {
 // default plus the creating actor, granting the creator full control of what it
 // created (mirroring Chef, where the creator owns the object — e.g. a chef-client
 // can update the node it just registered). It is written only under ACL
-// enforcement, so the permissive default stores no extra ACLs.
-func writeCreatorACL(org *store.Org, typ, name, creator string) error {
+// enforcement, so the permissive default stores no extra ACLs. The creator is
+// granted as the user or the client it is, never as both.
+func writeCreatorACL(org *store.Org, typ, name string, creator Actor) error {
+	kind := "users"
+	if creator.IsClient {
+		kind = "clients"
+	}
 	acl := defaultACL()
 	for _, p := range aclPerms {
 		ace := acl[p].(map[string]any)
-		ace["actors"] = append(ace["actors"].([]string), creator)
+		ace[kind] = append(ace[kind].([]string), creator.Name)
 	}
 	return org.Put("acls", aclKey(typ, name), mustEncode(acl))
 }
@@ -93,7 +97,7 @@ func (a *API) grantCreator(r *http.Request, org *store.Org, typ, name string) er
 	if !ok {
 		return nil
 	}
-	return writeCreatorACL(org, typ, name, actor.Name)
+	return writeCreatorACL(org, typ, name, actor)
 }
 
 // deleteACL removes an object's per-object ACL.
@@ -205,7 +209,7 @@ func fallbackACL(typ, name string) map[string]any {
 func (a *API) getACL(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if org := a.org(w, r); org != nil {
-			a.writeACLDoc(w, r, org, org, typ, r.PathValue("name"))
+			writeACLDoc(w, r, org, typ, r.PathValue("name"))
 		}
 	}
 }
@@ -228,7 +232,7 @@ func (a *API) putACLPerm(typ string) http.HandlerFunc {
 
 func (a *API) getOrgACL(w http.ResponseWriter, r *http.Request) {
 	if org := a.org(w, r); org != nil {
-		a.writeACLDoc(w, r, org, org, "organizations", r.PathValue("org"))
+		writeACLDoc(w, r, org, "organizations", r.PathValue("org"))
 	}
 }
 
@@ -245,7 +249,7 @@ func (a *API) putOrgACLPerm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getUserACL(w http.ResponseWriter, r *http.Request) {
-	a.writeACLDoc(w, r, a.store.Global(), nil, "users", r.PathValue("name"))
+	writeACLDoc(w, r, a.store.Global(), "users", r.PathValue("name"))
 }
 
 func (a *API) getUserACLPerm(w http.ResponseWriter, r *http.Request) {
@@ -257,10 +261,9 @@ func (a *API) putUserACLPerm(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeACLDoc writes the full five-permission ACL for an object, in erchef's
-// users/clients split form when the request asks for detail=granular. scope
-// holds the ACL; members is the org its actors resolve in, or nil for a global
-// user's ACL (see unknownACEMembers).
-func (a *API) writeACLDoc(w http.ResponseWriter, r *http.Request, scope, members *store.Org, typ, name string) {
+// users/clients split form when the request asks for detail=granular (see
+// acl_granular.go).
+func writeACLDoc(w http.ResponseWriter, r *http.Request, scope *store.Org, typ, name string) {
 	if !aclObjectFound(w, scope, typ, name) {
 		return
 	}
@@ -269,13 +272,11 @@ func (a *API) writeACLDoc(w http.ResponseWriter, r *http.Request, scope, members
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	view := mergedACE
 	if wantsGranular(r) {
-		if acl, err = a.granularACL(members, acl); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		view = granularACE
 	}
-	writeJSON(w, http.StatusOK, acl)
+	writeJSON(w, http.StatusOK, aclView(acl, view))
 }
 
 // writeACLPermDoc writes a single permission's ACE, 404ing on an unknown perm.
@@ -292,13 +293,14 @@ func writeACLPermDoc(w http.ResponseWriter, org *store.Org, typ, name, perm stri
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{perm: acl[perm]})
+	ace, _ := acl[perm].(map[string]any)
+	writeJSON(w, http.StatusOK, map[string]any{perm: mergedACE(ace)})
 }
 
 // updateACLPermDoc replaces a single permission's ACE and writes it back with
 // the given success status (200 for most object types, 201 for policy_groups).
 // scope holds the ACL; members is the org the ACE's members resolve in, or nil
-// for a global user's ACL (see unknownACEMembers).
+// for a global user's ACL (see resolveACE).
 func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, members *store.Org, typ, name, perm string, status int) {
 	if !slices.Contains(aclPerms, perm) {
 		writeError(w, http.StatusNotFound, "Cannot find ACL permission "+perm)
@@ -334,33 +336,16 @@ func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, me
 		}
 	}
 
-	if isSplitACE(ace) {
-		merged, msg, err := a.mergeSplitACE(members, ace)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if msg != "" {
-			writeError(w, http.StatusBadRequest, msg)
-			return
-		}
-		ace = merged
-	}
-
-	actors, groups, err := a.unknownACEMembers(members, ace)
+	// erchef resolves every member before writing an ACL and refuses the write
+	// when one is missing; an ACL here stores names, so keeping an unresolved
+	// one would be a latent grant to whatever is later created under it.
+	stored, refusal, err := a.resolveACE(members, ace)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if len(actors) > 0 || len(groups) > 0 {
-		var msgs []string
-		if len(actors) > 0 {
-			msgs = append(msgs, "The actor(s) "+strings.Join(actors, ", ")+" do not exist.")
-		}
-		if len(groups) > 0 {
-			msgs = append(msgs, "The group(s) "+strings.Join(groups, ", ")+" do not exist in this organization.")
-		}
-		writeError(w, http.StatusBadRequest, msgs...)
+	if refusal != nil {
+		writeError(w, refusal.status, refusal.msgs...)
 		return
 	}
 
@@ -369,12 +354,12 @@ func (a *API) updateACLPermDoc(w http.ResponseWriter, r *http.Request, scope, me
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	acl[perm] = ace
+	acl[perm] = stored
 	if err := scope.Put("acls", aclKey(typ, name), mustEncode(acl)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, status, map[string]any{perm: ace})
+	writeJSON(w, status, map[string]any{perm: mergedACE(stored)})
 }
 
 // removesAdminsFromGrant reports whether a write of ace to perm would take
@@ -405,44 +390,4 @@ func removesAdminsFromGrant(r *http.Request, scope *store.Org, typ, name, perm s
 	}
 	current, _ := acl["grant"].(map[string]any)
 	return slices.Contains(jsonStrings(current["groups"]), "admins"), nil
-}
-
-// unknownACEMembers returns the actor and group names an ACE lists that do not
-// exist. erchef resolves every member to an authz id before writing an ACL and
-// refuses the write when one is missing; an ACL here stores names, so keeping
-// an unresolved one would be a latent grant to whatever is later created under
-// it.
-//
-// Actors resolve as global users (the bootstrap superuser, which default ACLs
-// name, belongs to no org) or as clients of org. Groups resolve as groups of
-// org. For a global user's ACL org is nil: actors resolve as users only, and
-// groups are not checked, since the global space has none to resolve against.
-func (a *API) unknownACEMembers(org *store.Org, ace map[string]any) (actors, groups []string, err error) {
-	for _, name := range jsonStrings(ace["actors"]) {
-		_, ok, err := a.store.Global().Get("users", name)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !ok && org != nil {
-			if _, ok, err = org.Get("clients", name); err != nil {
-				return nil, nil, err
-			}
-		}
-		if !ok {
-			actors = append(actors, name)
-		}
-	}
-	if org == nil {
-		return actors, nil, nil
-	}
-	for _, name := range jsonStrings(ace["groups"]) {
-		_, ok, err := org.Get("groups", name)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !ok {
-			groups = append(groups, name)
-		}
-	}
-	return actors, groups, nil
 }

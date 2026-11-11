@@ -73,7 +73,7 @@ func policyACL(grants ...grant) map[string]any {
 				groups = append(groups, g.group)
 			}
 		}
-		acl[p] = map[string]any{"actors": []string{}, "groups": groups}
+		acl[p] = typedACE(nil, nil, groups)
 	}
 	return acl
 }
@@ -125,17 +125,27 @@ func orgACL() map[string]any {
 // create clients through a special case in the clients handler instead.)
 func validatorClientsACL(validator string) map[string]any {
 	acl := containerACL("clients")
-	acl["create"].(map[string]any)["actors"] = []string{validator}
+	acl["create"].(map[string]any)["clients"] = []string{validator}
 	return acl
 }
 
 // legacyClientsACL is the clients container ACL versions before this table
 // stored at org creation: the permissive object default, which gives the
 // clients group read on the clients container, with the validator on create.
+//
+// It is spelled out in the untyped form those versions wrote, which is what
+// UpgradeOrgACLs compares bytes against; it must not follow defaultACL.
 func legacyClientsACL(validator string) map[string]any {
-	acl := defaultACL()
-	acl["create"] = map[string]any{"actors": []string{validator}, "groups": []string{"admins", "users"}}
-	return acl
+	perm := func(actors []string, groups ...string) map[string]any {
+		return map[string]any{"actors": actors, "groups": groups}
+	}
+	return map[string]any{
+		"create": perm([]string{validator}, "admins", "users"),
+		"read":   perm([]string{}, "admins", "users", "clients"),
+		"update": perm([]string{}, "admins", "users"),
+		"delete": perm([]string{}, "admins", "users"),
+		"grant":  perm([]string{}, "admins"),
+	}
 }
 
 // UpgradeOrgACLs brings the stored ACLs of an org created by an older version

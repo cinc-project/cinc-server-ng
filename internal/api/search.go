@@ -358,7 +358,7 @@ func (a *API) searchReadFilter(r *http.Request, org *store.Org, idx searchIndex)
 		// which a collection-wide scan would otherwise pay for every row on
 		// every request. An unexpected shape falls back to the tolerant decode.
 		if ace, ok := decodeReadACE(raw); ok {
-			stored[name] = ace.allows(actor.Name, member)
+			stored[name] = ace.allows(actor, member)
 			return true
 		}
 		var acl map[string]any

@@ -104,11 +104,11 @@ func seedFleet(b *testing.B, srv *Server, n int) {
 			b.Fatal(err)
 		}
 		// The node's own client owns it, as it would after a real bootstrap.
-		acl := fmt.Appendf(nil, `{"create":{"actors":[%q],"groups":["admins"]},`+
-			`"read":{"actors":[%q],"groups":["admins"]},`+
-			`"update":{"actors":[%q],"groups":["admins"]},`+
-			`"delete":{"actors":[%q],"groups":["admins"]},`+
-			`"grant":{"actors":[%q],"groups":["admins"]}}`, name, name, name, name, name)
+		acl := fmt.Appendf(nil, `{"create":{"users":[],"clients":[%q],"groups":["admins"]},`+
+			`"read":{"users":[],"clients":[%q],"groups":["admins"]},`+
+			`"update":{"users":[],"clients":[%q],"groups":["admins"]},`+
+			`"delete":{"users":[],"clients":[%q],"groups":["admins"]},`+
+			`"grant":{"users":[],"clients":[%q],"groups":["admins"]}}`, name, name, name, name, name)
 		if err := org.Put("acls", "nodes/"+name, acl); err != nil {
 			b.Fatal(err)
 		}
@@ -329,7 +329,7 @@ func TestFleetBenchSeedIsUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := org.Put("acls", "nodes/node0", []byte(
-		`{"read":{"actors":["node0"],"groups":[]},"update":{"actors":["node0"],"groups":[]}}`)); err != nil {
+		`{"read":{"users":[],"clients":["node0"],"groups":[]},"update":{"users":[],"clients":["node0"],"groups":[]}}`)); err != nil {
 		t.Fatal(err)
 	}
 	if code := statusOf(t, signedAs(t, "node0", []byte(benchPrivPEM()), "GET",
@@ -341,7 +341,7 @@ func TestFleetBenchSeedIsUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := org.Put("acls", "nodes/other", []byte(
-		`{"read":{"actors":["someone-else"],"groups":[]}}`)); err != nil {
+		`{"read":{"users":[],"clients":["someone-else"],"groups":[]}}`)); err != nil {
 		t.Fatal(err)
 	}
 	if code := statusOf(t, signedAs(t, "node0", []byte(benchPrivPEM()), "GET",

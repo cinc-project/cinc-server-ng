@@ -120,7 +120,7 @@ func TestInviterAuthorized(t *testing.T) {
 	seedAuthz(org)
 	a := New(st)
 
-	authorized, err := a.inviterAuthorized(org, "")
+	authorized, err := a.inviterAuthorized(org, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestInviterAuthorized(t *testing.T) {
 		t.Error("empty inviter (no authenticated actor) should be authorized")
 	}
 
-	if authorized, err = a.inviterAuthorized(org, "ghost"); err != nil {
+	if authorized, err = a.inviterAuthorized(org, "ghost", false); err != nil {
 		t.Fatal(err)
 	} else if authorized {
 		t.Error("unknown inviter should not be authorized")
@@ -138,7 +138,7 @@ func TestInviterAuthorized(t *testing.T) {
 	if err = st.Global().Put("users", "root", []byte(`{"username":"root","admin":true}`)); err != nil {
 		t.Fatal(err)
 	}
-	if authorized, err = a.inviterAuthorized(org, "root"); err != nil {
+	if authorized, err = a.inviterAuthorized(org, "root", false); err != nil {
 		t.Fatal(err)
 	} else if !authorized {
 		t.Error("global-admin inviter should be authorized")
@@ -148,7 +148,7 @@ func TestInviterAuthorized(t *testing.T) {
 	if err = st.Global().Put("users", "alice", []byte(`{"username":"alice"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if authorized, err = a.inviterAuthorized(org, "alice"); err != nil {
+	if authorized, err = a.inviterAuthorized(org, "alice", false); err != nil {
 		t.Fatal(err)
 	} else if authorized {
 		t.Error("non-member inviter should not be authorized")
@@ -158,7 +158,7 @@ func TestInviterAuthorized(t *testing.T) {
 	if err = org.Put(assocColl, "alice", []byte(`{"username":"alice"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if authorized, err = a.inviterAuthorized(org, "alice"); err != nil {
+	if authorized, err = a.inviterAuthorized(org, "alice", false); err != nil {
 		t.Fatal(err)
 	} else if authorized {
 		t.Error("inviter outside the admins group should not be authorized")
@@ -168,9 +168,38 @@ func TestInviterAuthorized(t *testing.T) {
 	if err = org.Put("groups", "admins", groupJSON("admins", "", []string{"alice"}, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
-	if authorized, err = a.inviterAuthorized(org, "alice"); err != nil {
+	if authorized, err = a.inviterAuthorized(org, "alice", false); err != nil {
 		t.Fatal(err)
 	} else if !authorized {
 		t.Error("admins-group member inviter should be authorized")
+	}
+}
+
+// A client inviter is checked as the client it is: in the org and in the
+// admins group's clients. A user of its name in the admins group does not
+// stand in for it.
+func TestInviterAuthorizedClient(t *testing.T) {
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	seedAuthz(org)
+	a := New(st)
+	st.Global().Put("users", "dual", []byte(`{"name":"dual"}`))
+	org.Put(assocColl, "dual", []byte(`{}`))
+	org.Put("clients", "dual", []byte(`{"name":"dual"}`))
+	if err := addUserToOrgGroup(org, "admins", "dual"); err != nil {
+		t.Fatal(err)
+	}
+	// Baseline: the user dual is an authorized inviter.
+	if ok, err := a.inviterAuthorized(org, "dual", false); err != nil || !ok {
+		t.Fatalf("user inviter = %v, %v; want authorized", ok, err)
+	}
+	if ok, _ := a.inviterAuthorized(org, "dual", true); ok {
+		t.Error("client dual authorized by the user dual's admins membership")
+	}
+	if err := addClientToOrgGroup(org, "admins", "dual"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := a.inviterAuthorized(org, "dual", true); err != nil || !ok {
+		t.Errorf("client inviter in admins = %v, %v; want authorized", ok, err)
 	}
 }
