@@ -47,7 +47,7 @@ func TestGroupCommitDurableAndVisible(t *testing.T) {
 			defer wg.Done()
 			key := fmt.Sprintf("node%d", i)
 			body := []byte(fmt.Sprintf(`{"i":%d}`, i))
-			if err := b.Put("acme", "nodes", key, body); err != nil {
+			if err := b.Put("acme", "nodes", key, body, store.Stamp{}); err != nil {
 				t.Errorf("put %s: %v", key, err)
 				return
 			}

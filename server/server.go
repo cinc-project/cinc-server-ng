@@ -326,6 +326,10 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	if opts.Now != nil {
+		// Writes are stamped on the server's clock (store.Meta), the one tests pin.
+		st.SetClock(opts.Now)
+	}
 
 	// Bootstrap (or, against a durable backend that already holds state, reload)
 	// the admin user and each organization. The private keys for the admin and the

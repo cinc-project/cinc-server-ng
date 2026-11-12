@@ -192,6 +192,12 @@ The storage layer is pluggable behind a small `store.Backend` interface
 (`(org, collection, key) → bytes` plus a blob store), so PostgreSQL/RDS can be
 added later as a driver swap rather than a rewrite.
 
+**Object times.** As Chef Infra Server does, every object records when it was
+created and last changed, and which user or client changed it last. These are
+kept beside the object, not in it, so the documents clients read and write back
+are unchanged. The API does not return them yet. Objects stored before an upgrade
+to this version have no recorded creation time.
+
 **Restarts.** A SQLite-backed server is safe to stop and restart on the same
 database: it reloads existing organizations and data instead of recreating them,
 and the bootstrap admin/validator keys are persisted so the key written by

@@ -15,6 +15,7 @@ package store
 import (
 	"errors"
 	"sync/atomic"
+	"time"
 )
 
 var (
@@ -51,6 +52,8 @@ type Store struct {
 	// check-in path costs several reads per write — so it is worth being able
 	// to see it in production rather than only in a benchmark.
 	counts *Counts
+	// now is the clock writes are stamped with (see Meta).
+	now func() time.Time
 }
 
 // Counts tallies store operations since start.
@@ -75,8 +78,18 @@ func NewWithBackend(b Backend) *Store {
 	w := &watchers{}
 	return &Store{
 		backend: b, groupsGen: new(atomic.Uint64),
-		watch: w, events: w, counts: &Counts{},
+		watch: w, events: w, counts: &Counts{}, now: time.Now,
 	}
+}
+
+// SetClock sets the clock every write is stamped with (see Meta). The server
+// passes its own clock, so tests can pin it. It must be called before the store
+// is shared.
+func (s *Store) SetClock(now func() time.Time) { s.now = now }
+
+// org returns a handle on the named org (or the global space for "").
+func (s *Store) org(name string) *Org {
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events, counts: s.counts, now: s.now}
 }
 
 // Backend returns the underlying Backend, for callers (e.g. the server) that need
@@ -89,7 +102,7 @@ func (s *Store) Close() error { return s.backend.Close() }
 // Global returns the server-global object space, used for collections such as
 // "users" and "organizations" that are not scoped to an organization.
 func (s *Store) Global() *Org {
-	return &Org{backend: s.backend, name: "", groupsGen: s.groupsGen, events: s.events, counts: s.counts}
+	return s.org("")
 }
 
 // CreateOrg creates a new, empty organization. It returns ErrConflict if an
@@ -98,7 +111,7 @@ func (s *Store) CreateOrg(name string) (*Org, error) {
 	if err := s.backend.CreateOrg(name); err != nil {
 		return nil, err
 	}
-	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events, counts: s.counts}, nil
+	return s.org(name), nil
 }
 
 // Org returns the named organization and whether it exists.
@@ -110,7 +123,7 @@ func (s *Store) Org(name string) (*Org, bool, error) {
 	if !ok {
 		return nil, false, nil
 	}
-	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events, counts: s.counts}, true, nil
+	return s.org(name), true, nil
 }
 
 // DeleteOrg removes an organization, reporting whether it existed.
@@ -143,7 +156,7 @@ func (s *Store) Tx(fn func(tx *Store) error) error {
 	// sees a write that was rolled back.
 	buf := &txBuffer{}
 	err := s.backend.Tx(func(b Backend) error {
-		return fn(&Store{backend: b, groupsGen: s.groupsGen, watch: s.watch, events: buf, counts: s.counts})
+		return fn(&Store{backend: b, groupsGen: s.groupsGen, watch: s.watch, events: buf, counts: s.counts, now: s.now})
 	})
 	if err == nil {
 		buf.flushTo(s.events)
@@ -161,6 +174,45 @@ type Org struct {
 	// observers directly, or a transaction buffer that releases them on commit.
 	events emitter
 	counts *Counts
+	// now and by stamp this handle's writes (see Meta): the store's clock, and
+	// the actor set with As.
+	now func() time.Time
+	by  string
+}
+
+// As returns a handle on the same org whose writes record actor (such as
+// "users/alice" or "clients/web01") as the one who made them.
+func (o *Org) As(actor string) *Org {
+	cp := *o
+	cp.by = actor
+	return &cp
+}
+
+func (o *Org) stamp() Stamp {
+	at := time.Now
+	if o.now != nil {
+		at = o.now
+	}
+	return Stamp{At: at().UTC(), By: o.by}
+}
+
+// Meta returns when the object at coll/key was created and last changed, and by
+// whom (see Meta). ok is false if there is no such object.
+func (o *Org) Meta(coll, key string) (Meta, bool, error) {
+	if o.counts != nil {
+		o.counts.Reads.Add(1)
+	}
+	return o.backend.Meta(o.name, coll, key)
+}
+
+// SetMeta replaces the metadata of the object at coll/key, for importers that
+// carry times from another server. It returns ErrNotFound if there is no such
+// object.
+func (o *Org) SetMeta(coll, key string, m Meta) error {
+	if o.counts != nil {
+		o.counts.Writes.Add(1)
+	}
+	return o.backend.SetMeta(o.name, coll, key, m)
 }
 
 // note records a committed write: it advances the groups generation when the
@@ -203,7 +255,7 @@ func (o *Org) Create(coll, key string, val []byte) error {
 	if o.counts != nil {
 		o.counts.Writes.Add(1)
 	}
-	err := o.backend.Create(o.name, coll, key, val)
+	err := o.backend.Create(o.name, coll, key, val, o.stamp())
 	if err == nil {
 		o.note(coll, key, val, false)
 	}
@@ -215,7 +267,7 @@ func (o *Org) Put(coll, key string, val []byte) error {
 	if o.counts != nil {
 		o.counts.Writes.Add(1)
 	}
-	err := o.backend.Put(o.name, coll, key, val)
+	err := o.backend.Put(o.name, coll, key, val, o.stamp())
 	if err == nil {
 		o.note(coll, key, val, false)
 	}

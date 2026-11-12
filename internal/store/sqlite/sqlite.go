@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 	_ "modernc.org/sqlite"
@@ -43,6 +44,20 @@ CREATE TABLE blobs (
   org TEXT NOT NULL, checksum TEXT NOT NULL, content BLOB NOT NULL,
   PRIMARY KEY (org, checksum));
 CREATE TABLE orgs (name TEXT PRIMARY KEY);`)
+			return err
+		},
+	},
+	{
+		version: 2,
+		name:    "object times and last actor",
+		up: func(q querier) error {
+			// Nullable: rows from before this migration have no known times, and
+			// get none invented (store.Meta reads NULL as unknown). Times are UTC
+			// Unix nanoseconds.
+			_, err := q.Exec(`
+ALTER TABLE objects ADD COLUMN created_at INTEGER;
+ALTER TABLE objects ADD COLUMN updated_at INTEGER;
+ALTER TABLE objects ADD COLUMN updated_by TEXT;`)
 			return err
 		},
 	},
@@ -313,10 +328,13 @@ func (c *coalescer) close() {
 // SQL for the objects-table hot path, shared by the prepared statements and the
 // raw fallback used inside a transaction.
 const (
-	sqlObjGet    = `SELECT body FROM objects WHERE org=? AND collection=? AND key=?`
-	sqlObjPut    = `INSERT INTO objects(org,collection,key,body) VALUES(?,?,?,?) ON CONFLICT(org,collection,key) DO UPDATE SET body=excluded.body`
-	sqlObjCreate = `INSERT INTO objects(org,collection,key,body) VALUES(?,?,?,?) ON CONFLICT(org,collection,key) DO NOTHING`
-	sqlObjDelete = `DELETE FROM objects WHERE org=? AND collection=? AND key=?`
+	sqlObjGet = `SELECT body FROM objects WHERE org=? AND collection=? AND key=?`
+	// An update keeps created_at: only a new row takes the stamp as its creation.
+	sqlObjPut     = `INSERT INTO objects(org,collection,key,body,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?) ON CONFLICT(org,collection,key) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at, updated_by=excluded.updated_by`
+	sqlObjCreate  = `INSERT INTO objects(org,collection,key,body,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?) ON CONFLICT(org,collection,key) DO NOTHING`
+	sqlObjMeta    = `SELECT created_at, updated_at, updated_by FROM objects WHERE org=? AND collection=? AND key=?`
+	sqlObjSetMeta = `UPDATE objects SET created_at=?, updated_at=?, updated_by=? WHERE org=? AND collection=? AND key=?`
+	sqlObjDelete  = `DELETE FROM objects WHERE org=? AND collection=? AND key=?`
 
 	sqlHasOrg     = `SELECT 1 FROM orgs WHERE name=?`
 	sqlBlobGet    = `SELECT content FROM blobs WHERE org=? AND checksum=?`
@@ -490,16 +508,18 @@ func (b *Backend) Get(org, coll, key string) ([]byte, bool, error) {
 	return body, true, nil
 }
 
-func (b *Backend) Put(org, coll, key string, val []byte) error {
+func (b *Backend) Put(org, coll, key string, val []byte, st store.Stamp) error {
+	at, by := nanos(st.At), text(st.By)
 	return b.coalesce(func(tb *Backend) error {
-		_, err := tb.exec(tb.stObjPut, sqlObjPut, org, coll, key, val)
+		_, err := tb.exec(tb.stObjPut, sqlObjPut, org, coll, key, val, at, at, by)
 		return err
 	})
 }
 
-func (b *Backend) Create(org, coll, key string, val []byte) error {
+func (b *Backend) Create(org, coll, key string, val []byte, st store.Stamp) error {
+	at, by := nanos(st.At), text(st.By)
 	return b.coalesce(func(tb *Backend) error {
-		res, err := tb.exec(tb.stObjCreate, sqlObjCreate, org, coll, key, val)
+		res, err := tb.exec(tb.stObjCreate, sqlObjCreate, org, coll, key, val, at, at, by)
 		if err != nil {
 			return err
 		}
@@ -512,6 +532,59 @@ func (b *Backend) Create(org, coll, key string, val []byte) error {
 		}
 		return nil
 	})
+}
+
+func (b *Backend) Meta(org, coll, key string) (store.Meta, bool, error) {
+	var created, updated sql.NullInt64
+	var by sql.NullString
+	err := b.rq.QueryRow(sqlObjMeta, org, coll, key).Scan(&created, &updated, &by)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.Meta{}, false, nil
+	}
+	if err != nil {
+		return store.Meta{}, false, err
+	}
+	return store.Meta{CreatedAt: fromNanos(created), UpdatedAt: fromNanos(updated), UpdatedBy: by.String}, true, nil
+}
+
+func (b *Backend) SetMeta(org, coll, key string, m store.Meta) error {
+	return b.coalesce(func(tb *Backend) error {
+		res, err := tb.exec(nil, sqlObjSetMeta, nanos(m.CreatedAt), nanos(m.UpdatedAt), text(m.UpdatedBy), org, coll, key)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// nanos stores t as UTC Unix nanoseconds, and the zero time (unknown) as NULL.
+func nanos(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t.UnixNano()
+}
+
+func fromNanos(n sql.NullInt64) time.Time {
+	if !n.Valid {
+		return time.Time{}
+	}
+	return time.Unix(0, n.Int64).UTC()
+}
+
+// text stores an empty actor as NULL.
+func text(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func (b *Backend) Delete(org, coll, key string) ([]byte, bool, error) {

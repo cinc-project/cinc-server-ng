@@ -239,6 +239,7 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 		writeStringError(w, http.StatusNotFound, "Cannot find association request: "+id)
 		return
 	}
+	org = org.As(actorID(r))
 	var body struct {
 		Response string `json:"response"`
 	}

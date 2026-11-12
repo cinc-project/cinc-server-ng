@@ -29,7 +29,7 @@ func TestPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`)); err != nil {
+	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`), store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Close(); err != nil {
@@ -60,10 +60,10 @@ func TestErrorPropagatesAfterClose(t *testing.T) {
 	if _, _, err := b.Get("acme", "nodes", "web"); err == nil {
 		t.Error("Get after Close: want error, got nil")
 	}
-	if err := b.Put("acme", "nodes", "web", []byte(`{}`)); err == nil {
+	if err := b.Put("acme", "nodes", "web", []byte(`{}`), store.Stamp{}); err == nil {
 		t.Error("Put after Close: want error, got nil")
 	}
-	if err := b.Create("acme", "nodes", "web", []byte(`{}`)); err == nil {
+	if err := b.Create("acme", "nodes", "web", []byte(`{}`), store.Stamp{}); err == nil {
 		t.Error("Create after Close: want error, got nil")
 	}
 	if _, err := b.Keys("acme", "nodes"); err == nil {
@@ -99,7 +99,9 @@ func TestMigrateIdempotent(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&rows, &version); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 1 || version != 1 {
-		t.Fatalf("schema_migrations: rows=%d version=%d, want 1/1", rows, version)
+	// Reopening applies nothing again: one row per migration, the last of
+	// which is the current version.
+	if rows < 1 || rows != version {
+		t.Fatalf("schema_migrations: rows=%d version=%d, want one row per migration", rows, version)
 	}
 }

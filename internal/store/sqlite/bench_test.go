@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 	"github.com/cinc-project/cinc-server-ng/internal/store/sqlite"
 )
 
@@ -33,7 +34,7 @@ func benchBackend(b *testing.B) *sqlite.Backend {
 // handling, not I/O, since the row is already cached.
 func BenchmarkGet(b *testing.B) {
 	be := benchBackend(b)
-	if err := be.Put("acme", "nodes", "node0", nodeBody("node0")); err != nil {
+	if err := be.Put("acme", "nodes", "node0", nodeBody("node0"), store.Stamp{}); err != nil {
 		b.Fatal(err)
 	}
 	b.ResetTimer()
@@ -51,7 +52,7 @@ func BenchmarkPut(b *testing.B) {
 	body := nodeBody("node0")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := be.Put("acme", "nodes", "node0", body); err != nil {
+		if err := be.Put("acme", "nodes", "node0", body, store.Stamp{}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -69,7 +70,7 @@ func openBench(b *testing.B, opts ...sqlite.Option) *sqlite.Backend {
 func seedNodes(b *testing.B, be *sqlite.Backend, nodes int) {
 	for i := 0; i < nodes; i++ {
 		n := fmt.Sprintf("node%d", i)
-		if err := be.Put("acme", "nodes", n, nodeBody(n)); err != nil {
+		if err := be.Put("acme", "nodes", n, nodeBody(n), store.Stamp{}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -88,7 +89,7 @@ func benchCheckin(b *testing.B, be *sqlite.Backend) {
 			if _, _, err := be.Get("acme", "nodes", n); err != nil {
 				b.Fatal(err)
 			}
-			if err := be.Put("acme", "nodes", n, nodeBody(n)); err != nil {
+			if err := be.Put("acme", "nodes", n, nodeBody(n), store.Stamp{}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -110,7 +111,7 @@ func benchSerialPut(b *testing.B, be *sqlite.Backend) {
 	body := nodeBody("node0")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := be.Put("acme", "nodes", "node0", body); err != nil {
+		if err := be.Put("acme", "nodes", "node0", body, store.Stamp{}); err != nil {
 			b.Fatal(err)
 		}
 	}

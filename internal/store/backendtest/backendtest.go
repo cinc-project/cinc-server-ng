@@ -10,6 +10,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -37,11 +38,17 @@ func Run(t *testing.T, newBackend func(t *testing.T) store.Backend) {
 	t.Run("TxCommit", func(t *testing.T) { testTxCommit(t, newBackend(t)) })
 	t.Run("TxRollback", func(t *testing.T) { testTxRollback(t, newBackend(t)) })
 	t.Run("TxReadsOwnWrites", func(t *testing.T) { testTxReadsOwnWrites(t, newBackend(t)) })
+	t.Run("MetaCreateStamps", func(t *testing.T) { testMetaCreateStamps(t, newBackend(t)) })
+	t.Run("MetaPutKeepsCreated", func(t *testing.T) { testMetaPutKeepsCreated(t, newBackend(t)) })
+	t.Run("MetaDeleteForgets", func(t *testing.T) { testMetaDeleteForgets(t, newBackend(t)) })
+	t.Run("MetaSet", func(t *testing.T) { testMetaSet(t, newBackend(t)) })
+	t.Run("MetaTxRollback", func(t *testing.T) { testMetaTxRollback(t, newBackend(t)) })
+	t.Run("MetaDeleteOrg", func(t *testing.T) { testMetaDeleteOrg(t, newBackend(t)) })
 }
 
 func mustPut(t *testing.T, b store.Backend, org, coll, key, val string) {
 	t.Helper()
-	if err := b.Put(org, coll, key, []byte(val)); err != nil {
+	if err := b.Put(org, coll, key, []byte(val), store.Stamp{}); err != nil {
 		t.Fatalf("Put(%q,%q,%q): %v", org, coll, key, err)
 	}
 }
@@ -68,10 +75,10 @@ func testCopyIndependence(t *testing.T, b store.Backend) {
 }
 
 func testCreateConflict(t *testing.T, b store.Backend) {
-	if err := b.Create("acme", "roles", "base", []byte(`{}`)); err != nil {
+	if err := b.Create("acme", "roles", "base", []byte(`{}`), store.Stamp{}); err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
-	if err := b.Create("acme", "roles", "base", []byte(`{}`)); err != store.ErrConflict {
+	if err := b.Create("acme", "roles", "base", []byte(`{}`), store.Stamp{}); err != store.ErrConflict {
 		t.Fatalf("second Create: want ErrConflict, got %v", err)
 	}
 }
@@ -227,10 +234,10 @@ func testDeleteOrgDropsData(t *testing.T, b store.Backend) {
 // testCreatePreservesOriginal asserts a conflicting Create does not overwrite the
 // existing value (Create is not an upsert).
 func testCreatePreservesOriginal(t *testing.T, b store.Backend) {
-	if err := b.Create("acme", "roles", "base", []byte(`{"v":1}`)); err != nil {
+	if err := b.Create("acme", "roles", "base", []byte(`{"v":1}`), store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Create("acme", "roles", "base", []byte(`{"v":2}`)); err != store.ErrConflict {
+	if err := b.Create("acme", "roles", "base", []byte(`{"v":2}`), store.Stamp{}); err != store.ErrConflict {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
 	got, _, _ := b.Get("acme", "roles", "base")
@@ -315,7 +322,7 @@ func testSortOrderFidelity(t *testing.T, b store.Backend) {
 // and blobs.
 func testOpaqueBodies(t *testing.T, b store.Backend) {
 	body := []byte{'{', 0x00, 0xff, 0xfe, 'a', '}'}
-	if err := b.Put("acme", "nodes", "bin", body); err != nil {
+	if err := b.Put("acme", "nodes", "bin", body, store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := b.Get("acme", "nodes", "bin")
@@ -341,7 +348,7 @@ func testConcurrency(t *testing.T, b store.Backend) {
 		wg.Go(func() {
 			for i := range ops {
 				key := fmt.Sprintf("w%d-k%d", w, i)
-				if err := b.Put("acme", "nodes", key, []byte(`{}`)); err != nil {
+				if err := b.Put("acme", "nodes", key, []byte(`{}`), store.Stamp{}); err != nil {
 					t.Errorf("concurrent Put: %v", err)
 					return
 				}
@@ -379,7 +386,7 @@ func testTxCommit(t *testing.T, b store.Backend) {
 		if err := tx.CreateOrg("acme"); err != nil {
 			return err
 		}
-		return tx.Put("acme", "nodes", "web", []byte(`{"v":1}`))
+		return tx.Put("acme", "nodes", "web", []byte(`{"v":1}`), store.Stamp{})
 	})
 	if err != nil {
 		t.Fatalf("Tx commit: %v", err)
@@ -399,10 +406,10 @@ func testTxRollback(t *testing.T, b store.Backend) {
 	mustPut(t, b, "acme", "nodes", "web", `{"v":1}`)
 	sentinel := errors.New("boom")
 	err := b.Tx(func(tx store.Backend) error {
-		if err := tx.Put("acme", "nodes", "web", []byte(`{"v":2}`)); err != nil {
+		if err := tx.Put("acme", "nodes", "web", []byte(`{"v":2}`), store.Stamp{}); err != nil {
 			return err
 		}
-		if err := tx.Put("acme", "roles", "base", []byte(`{}`)); err != nil {
+		if err := tx.Put("acme", "roles", "base", []byte(`{}`), store.Stamp{}); err != nil {
 			return err
 		}
 		return sentinel
@@ -422,7 +429,7 @@ func testTxRollback(t *testing.T, b store.Backend) {
 // testTxReadsOwnWrites asserts reads inside a Tx observe that Tx's prior writes.
 func testTxReadsOwnWrites(t *testing.T, b store.Backend) {
 	err := b.Tx(func(tx store.Backend) error {
-		if err := tx.Put("acme", "nodes", "web", []byte(`{"v":1}`)); err != nil {
+		if err := tx.Put("acme", "nodes", "web", []byte(`{"v":1}`), store.Stamp{}); err != nil {
 			return err
 		}
 		got, ok, err := tx.Get("acme", "nodes", "web")
@@ -436,5 +443,134 @@ func testTxReadsOwnWrites(t *testing.T, b store.Backend) {
 	})
 	if err != nil {
 		t.Fatalf("Tx: %v", err)
+	}
+}
+
+var (
+	t1 = time.Date(2024, 3, 1, 17, 22, 9, 123456789, time.UTC)
+	t2 = time.Date(2026, 11, 12, 2, 7, 41, 0, time.UTC)
+)
+
+func mustMeta(t *testing.T, b store.Backend, org, coll, key string) store.Meta {
+	t.Helper()
+	m, ok, err := b.Meta(org, coll, key)
+	if err != nil || !ok {
+		t.Fatalf("Meta(%q,%q,%q): ok=%v err=%v", org, coll, key, ok, err)
+	}
+	return m
+}
+
+func wantMeta(t *testing.T, got store.Meta, created, updated time.Time, by string) {
+	t.Helper()
+	if !got.CreatedAt.Equal(created) || !got.UpdatedAt.Equal(updated) || got.UpdatedBy != by {
+		t.Fatalf("meta = {created %v, updated %v, by %q}, want {created %v, updated %v, by %q}",
+			got.CreatedAt, got.UpdatedAt, got.UpdatedBy, created, updated, by)
+	}
+}
+
+// testMetaCreateStamps asserts Create records the stamp as both the creation and
+// the last update, and that an object never written has no metadata.
+func testMetaCreateStamps(t *testing.T, b store.Backend) {
+	if _, ok, err := b.Meta("acme", "nodes", "web"); err != nil || ok {
+		t.Fatalf("Meta of a missing object: ok=%v err=%v", ok, err)
+	}
+	if err := b.Create("acme", "nodes", "web", []byte(`{}`), store.Stamp{At: t1, By: "users/alice"}); err != nil {
+		t.Fatal(err)
+	}
+	wantMeta(t, mustMeta(t, b, "acme", "nodes", "web"), t1, t1, "users/alice")
+	// A conflicting Create changes nothing, metadata included.
+	if err := b.Create("acme", "nodes", "web", []byte(`{}`), store.Stamp{At: t2, By: "users/bob"}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("second Create: %v", err)
+	}
+	wantMeta(t, mustMeta(t, b, "acme", "nodes", "web"), t1, t1, "users/alice")
+}
+
+// testMetaPutKeepsCreated asserts Put of a new object stamps both times, and Put
+// over an existing one moves only the update time and actor.
+func testMetaPutKeepsCreated(t *testing.T, b store.Backend) {
+	if err := b.Put("acme", "roles", "base", []byte(`{"v":1}`), store.Stamp{At: t1, By: "users/alice"}); err != nil {
+		t.Fatal(err)
+	}
+	wantMeta(t, mustMeta(t, b, "acme", "roles", "base"), t1, t1, "users/alice")
+	if err := b.Put("acme", "roles", "base", []byte(`{"v":2}`), store.Stamp{At: t2, By: "clients/web01"}); err != nil {
+		t.Fatal(err)
+	}
+	wantMeta(t, mustMeta(t, b, "acme", "roles", "base"), t1, t2, "clients/web01")
+}
+
+// testMetaDeleteForgets asserts deleting an object drops its metadata, so a
+// recreated object starts afresh.
+func testMetaDeleteForgets(t *testing.T, b store.Backend) {
+	if err := b.Put("acme", "nodes", "web", []byte(`{}`), store.Stamp{At: t1, By: "users/alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := b.Delete("acme", "nodes", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := b.Meta("acme", "nodes", "web"); err != nil || ok {
+		t.Fatalf("Meta after Delete: ok=%v err=%v", ok, err)
+	}
+	if err := b.Create("acme", "nodes", "web", []byte(`{}`), store.Stamp{At: t2, By: "users/bob"}); err != nil {
+		t.Fatal(err)
+	}
+	wantMeta(t, mustMeta(t, b, "acme", "nodes", "web"), t2, t2, "users/bob")
+}
+
+// testMetaSet asserts SetMeta replaces an object's metadata without touching its
+// body (an import carrying times from another server), and refuses a missing
+// object.
+func testMetaSet(t *testing.T, b store.Backend) {
+	if err := b.SetMeta("acme", "nodes", "web", store.Meta{CreatedAt: t1}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("SetMeta of a missing object: %v, want ErrNotFound", err)
+	}
+	if err := b.Put("acme", "nodes", "web", []byte(`{"v":1}`), store.Stamp{At: t2, By: "users/pivotal"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetMeta("acme", "nodes", "web", store.Meta{CreatedAt: t1, UpdatedAt: t1, UpdatedBy: "users/alice"}); err != nil {
+		t.Fatal(err)
+	}
+	wantMeta(t, mustMeta(t, b, "acme", "nodes", "web"), t1, t1, "users/alice")
+	if got, _, _ := b.Get("acme", "nodes", "web"); string(got) != `{"v":1}` {
+		t.Fatalf("SetMeta changed the body: %q", got)
+	}
+	// Unknown times are kept as unknown.
+	if err := b.SetMeta("acme", "nodes", "web", store.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	wantMeta(t, mustMeta(t, b, "acme", "nodes", "web"), time.Time{}, time.Time{}, "")
+}
+
+// testMetaTxRollback asserts a rolled-back transaction discards metadata changes
+// along with the body.
+func testMetaTxRollback(t *testing.T, b store.Backend) {
+	if err := b.Put("acme", "nodes", "web", []byte(`{"v":1}`), store.Stamp{At: t1, By: "users/alice"}); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := errors.New("boom")
+	err := b.Tx(func(tx store.Backend) error {
+		if err := tx.Put("acme", "nodes", "web", []byte(`{"v":2}`), store.Stamp{At: t2, By: "users/bob"}); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Tx: %v", err)
+	}
+	wantMeta(t, mustMeta(t, b, "acme", "nodes", "web"), t1, t1, "users/alice")
+}
+
+// testMetaDeleteOrg asserts dropping an org drops its objects' metadata.
+func testMetaDeleteOrg(t *testing.T, b store.Backend) {
+	if err := b.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Put("acme", "nodes", "web", []byte(`{}`), store.Stamp{At: t1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.DeleteOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := b.Meta("acme", "nodes", "web"); err != nil || ok {
+		t.Fatalf("Meta after DeleteOrg: ok=%v err=%v", ok, err)
 	}
 }

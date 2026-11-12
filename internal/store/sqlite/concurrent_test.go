@@ -22,7 +22,7 @@ func TestReadsNotBlockedByOpenWriteTx(t *testing.T) {
 	}
 	t.Cleanup(func() { b.Close() })
 
-	if err := b.Put("acme", "nodes", "seed", []byte(`{"v":1}`)); err != nil {
+	if err := b.Put("acme", "nodes", "seed", []byte(`{"v":1}`), store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -32,7 +32,7 @@ func TestReadsNotBlockedByOpenWriteTx(t *testing.T) {
 	go func() {
 		txDone <- b.Tx(func(tx store.Backend) error {
 			// Acquire the write side and then hold the connection open.
-			if err := tx.Put("acme", "nodes", "writer", []byte(`{"v":2}`)); err != nil {
+			if err := tx.Put("acme", "nodes", "writer", []byte(`{"v":2}`), store.Stamp{}); err != nil {
 				return err
 			}
 			close(writerHoldsConn)
