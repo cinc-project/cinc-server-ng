@@ -253,14 +253,34 @@ func loadGroup(org *store.Org, name string) (policyGroup, bool, error) {
 	if !ok {
 		return policyGroup{}, false, nil
 	}
+	return decodeGroup(raw), true, nil
+}
+
+// decodeGroup reads a stored group document. Only "policies" is kept: a group
+// loaded from a chef-repo file may also carry "name" and "uri", which erchef
+// never stores.
+func decodeGroup(raw []byte) policyGroup {
 	var g policyGroup
-	if err := json.Unmarshal(raw, &g); err != nil {
-		return policyGroup{}, false, nil
-	}
+	_ = json.Unmarshal(raw, &g)
 	if g.Policies == nil {
 		g.Policies = map[string]groupPolicy{}
 	}
-	return g, true, nil
+	return g
+}
+
+// policyGroupBody is erchef's policy group body
+// (oc_chef_wm_named_policy_group:build_policy_revisions_json): "uri" is set
+// with ej:set_p onto {"policies": ...}, which appends it, so it comes second.
+type policyGroupBody struct {
+	Policies map[string]groupPolicy `json:"policies"`
+	URI      string                 `json:"uri"`
+}
+
+func groupBody(r *http.Request, org, name string, g policyGroup) policyGroupBody {
+	return policyGroupBody{
+		Policies: g.Policies,
+		URI:      requestBaseURL(r) + "/organizations/" + org + "/policy_groups/" + name,
+	}
 }
 
 func saveGroup(org *store.Org, name string, g policyGroup) error {
@@ -284,10 +304,7 @@ func (a *API) listPolicyGroups(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		out[name] = map[string]any{
-			"uri":      requestBaseURL(r) + "/organizations/" + org.Name() + "/policy_groups/" + name,
-			"policies": g.Policies,
-		}
+		out[name] = groupBody(r, org.Name(), name, g)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -297,16 +314,17 @@ func (a *API) getPolicyGroup(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, ok, err := org.Get(policyGroupsColl, r.PathValue("group"))
+	group := r.PathValue("group")
+	g, ok, err := loadGroup(org, group)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find policy group "+r.PathValue("group"))
+		writeError(w, http.StatusNotFound, "Cannot find policy group "+group)
 		return
 	}
-	writeRaw(w, http.StatusOK, raw)
+	writeRaw(w, http.StatusOK, mustEncode(groupBody(r, org.Name(), group, g)))
 }
 
 func (a *API) deletePolicyGroup(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +346,7 @@ func (a *API) deletePolicyGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeRaw(w, http.StatusOK, raw)
+	writeRaw(w, http.StatusOK, mustEncode(groupBody(r, org.Name(), group, decodeGroup(raw))))
 }
 
 func (a *API) getGroupPolicy(w http.ResponseWriter, r *http.Request) {

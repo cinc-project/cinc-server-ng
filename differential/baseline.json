@@ -234,18 +234,6 @@
     "candidate": "diffs"
   },
   {
-    "step": "policy group delete",
-    "field": "uri",
-    "reference": "<server>/organizations/diffs/policy_groups/diff-group",
-    "candidate": "<missing>"
-  },
-  {
-    "step": "policy group read",
-    "field": "uri",
-    "reference": "<server>/organizations/diffs/policy_groups/diff-group",
-    "candidate": "<missing>"
-  },
-  {
     "step": "policy revision push",
     "field": "status",
     "reference": "201",
