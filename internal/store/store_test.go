@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestCreateOrgAndLookup(t *testing.T) {
@@ -263,5 +264,55 @@ func mustPut(t *testing.T, org *Org, coll, key, val string) {
 	t.Helper()
 	if err := org.Put(coll, key, []byte(val)); err != nil {
 		t.Fatalf("Put(%q,%q): %v", coll, key, err)
+	}
+}
+
+// TestOrgStampsWritesWithClockAndActor: an Org handle stamps every write with the
+// store's clock and the actor it was opened As, the update keeps the creation
+// time, and a transaction's handles stamp the same way.
+func TestOrgStampsWritesWithClockAndActor(t *testing.T) {
+	s := New()
+	now := time.Date(2024, 3, 1, 17, 22, 9, 0, time.UTC)
+	s.SetClock(func() time.Time { return now })
+	org, err := s.CreateOrg("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := org.As("users/alice").Create("nodes", "web", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	created := now
+	now = now.Add(time.Hour)
+	if err := org.As("clients/web").Put("nodes", "web", []byte(`{"v":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	m, ok, err := org.Meta("nodes", "web")
+	if err != nil || !ok {
+		t.Fatalf("Meta: ok=%v err=%v", ok, err)
+	}
+	if !m.CreatedAt.Equal(created) || !m.UpdatedAt.Equal(now) || m.UpdatedBy != "clients/web" {
+		t.Fatalf("meta = %+v; want created %v, updated %v by clients/web", m, created, now)
+	}
+
+	// A handle with no actor stamps the time and no actor; so does the global space.
+	if err := s.Global().Put("users", "bob", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if m, _, _ := s.Global().Meta("users", "bob"); !m.CreatedAt.Equal(now) || m.UpdatedBy != "" {
+		t.Fatalf("global meta = %+v", m)
+	}
+
+	err = s.Tx(func(tx *Store) error {
+		o, ok, err := tx.Org("acme")
+		if err != nil || !ok {
+			return fmt.Errorf("tx org: ok=%v err=%v", ok, err)
+		}
+		return o.As("users/carol").Put("roles", "base", []byte(`{}`))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, _, _ := org.Meta("roles", "base"); !m.CreatedAt.Equal(now) || m.UpdatedBy != "users/carol" {
+		t.Fatalf("meta of a write in a transaction = %+v", m)
 	}
 }

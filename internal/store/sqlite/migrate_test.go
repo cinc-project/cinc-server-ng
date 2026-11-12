@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 func rawDB(t *testing.T) *sql.DB {
@@ -169,5 +172,47 @@ INSERT INTO schema_migrations(version) VALUES(1);`); err != nil {
 	}
 	if v := currentVersion(t, db); v != latest() {
 		t.Fatalf("version = %d, want %d", v, latest())
+	}
+}
+
+// TestObjectsWrittenBeforeTimesHaveNone: a row written before objects carried
+// times reads back with unknown (zero) times, not invented ones; its next write
+// records the update, and its creation time stays unknown.
+func TestObjectsWrittenBeforeTimesHaveNone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE objects (org TEXT NOT NULL, collection TEXT NOT NULL, key TEXT NOT NULL, body BLOB NOT NULL, PRIMARY KEY (org,collection,key));
+CREATE TABLE blobs (org TEXT NOT NULL, checksum TEXT NOT NULL, content BLOB NOT NULL, PRIMARY KEY (org,checksum));
+CREATE TABLE orgs (name TEXT PRIMARY KEY);
+CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);
+INSERT INTO schema_migrations(version) VALUES(1);
+INSERT INTO objects(org,collection,key,body) VALUES('acme','nodes','web','{}');`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	b, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	m, ok, err := b.Meta("acme", "nodes", "web")
+	if err != nil || !ok {
+		t.Fatalf("Meta: ok=%v err=%v", ok, err)
+	}
+	if !m.CreatedAt.IsZero() || !m.UpdatedAt.IsZero() || m.UpdatedBy != "" {
+		t.Fatalf("meta of a pre-existing row = %+v, want unknown", m)
+	}
+	at := time.Date(2026, 11, 12, 2, 7, 41, 0, time.UTC)
+	if err := b.Put("acme", "nodes", "web", []byte(`{"v":2}`), store.Stamp{At: at, By: "users/alice"}); err != nil {
+		t.Fatal(err)
+	}
+	m, _, _ = b.Meta("acme", "nodes", "web")
+	if !m.CreatedAt.IsZero() || !m.UpdatedAt.Equal(at) || m.UpdatedBy != "users/alice" {
+		t.Fatalf("meta after an update = %+v, want unknown creation, updated %v by users/alice", m, at)
 	}
 }

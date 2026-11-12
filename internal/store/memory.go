@@ -14,6 +14,7 @@ type memoryBackend struct {
 	mu    sync.RWMutex
 	orgs  map[string]bool                         // named orgs (for ListOrgs/HasOrg)
 	data  map[string]map[string]map[string][]byte // org -> coll -> key -> body
+	meta  map[string]map[string]map[string]Meta   // org -> coll -> key -> times and actor
 	blobs map[string]map[string][]byte            // org -> checksum -> content
 }
 
@@ -22,6 +23,7 @@ func NewMemoryBackend() Backend {
 	return &memoryBackend{
 		orgs:  map[string]bool{},
 		data:  map[string]map[string]map[string][]byte{},
+		meta:  map[string]map[string]map[string]Meta{},
 		blobs: map[string]map[string][]byte{},
 	}
 }
@@ -42,31 +44,67 @@ func (m *memoryBackend) Get(org, coll, key string) ([]byte, bool, error) {
 	return clone(v), true, nil
 }
 
-// set stores a defensive copy of val. Caller holds the write lock.
-func (m *memoryBackend) set(org, coll, key string, val []byte) {
+// set stores a defensive copy of val and stamps its metadata: an existing key
+// keeps its creation time. Caller holds the write lock.
+func (m *memoryBackend) set(org, coll, key string, val []byte, st Stamp) {
 	if m.data[org] == nil {
 		m.data[org] = map[string]map[string][]byte{}
 	}
 	if m.data[org][coll] == nil {
 		m.data[org][coll] = map[string][]byte{}
 	}
+	md := Meta{CreatedAt: st.At, UpdatedAt: st.At, UpdatedBy: st.By}
+	if _, existed := m.data[org][coll][key]; existed {
+		md.CreatedAt = m.meta[org][coll][key].CreatedAt
+	}
 	m.data[org][coll][key] = clone(val)
+	m.putMeta(org, coll, key, md)
 }
 
-func (m *memoryBackend) Put(org, coll, key string, val []byte) error {
+// putMeta records md for coll/key. Caller holds the write lock.
+func (m *memoryBackend) putMeta(org, coll, key string, md Meta) {
+	if m.meta[org] == nil {
+		m.meta[org] = map[string]map[string]Meta{}
+	}
+	if m.meta[org][coll] == nil {
+		m.meta[org][coll] = map[string]Meta{}
+	}
+	m.meta[org][coll][key] = md
+}
+
+func (m *memoryBackend) Put(org, coll, key string, val []byte, st Stamp) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.set(org, coll, key, val)
+	m.set(org, coll, key, val, st)
 	return nil
 }
 
-func (m *memoryBackend) Create(org, coll, key string, val []byte) error {
+func (m *memoryBackend) Create(org, coll, key string, val []byte, st Stamp) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.data[org][coll][key]; ok {
 		return ErrConflict
 	}
-	m.set(org, coll, key, val)
+	m.set(org, coll, key, val, st)
+	return nil
+}
+
+func (m *memoryBackend) Meta(org, coll, key string) (Meta, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.data[org][coll][key]; !ok {
+		return Meta{}, false, nil
+	}
+	return m.meta[org][coll][key], true, nil
+}
+
+func (m *memoryBackend) SetMeta(org, coll, key string, md Meta) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.data[org][coll][key]; !ok {
+		return ErrNotFound
+	}
+	m.putMeta(org, coll, key, md)
 	return nil
 }
 
@@ -78,6 +116,7 @@ func (m *memoryBackend) Delete(org, coll, key string) ([]byte, bool, error) {
 		return nil, false, nil
 	}
 	delete(m.data[org][coll], key)
+	delete(m.meta[org][coll], key)
 	return clone(v), true, nil
 }
 
@@ -168,6 +207,7 @@ func (m *memoryBackend) DeleteOrg(name string) (bool, error) {
 	}
 	delete(m.orgs, name)
 	delete(m.data, name)
+	delete(m.meta, name)
 	delete(m.blobs, name)
 	return true, nil
 }
@@ -198,23 +238,24 @@ func (m *memoryBackend) HasOrg(name string) (bool, error) {
 func (m *memoryBackend) Tx(fn func(tx Backend) error) error {
 	m.mu.Lock()
 	snapData := cloneOrgData(m.data)
+	snapMeta := cloneOrgData(m.meta)
 	snapBlobs := cloneBlobData(m.blobs)
 	snapOrgs := maps.Clone(m.orgs)
 	m.mu.Unlock()
 
 	if err := fn(m); err != nil {
 		m.mu.Lock()
-		m.data, m.blobs, m.orgs = snapData, snapBlobs, snapOrgs
+		m.data, m.meta, m.blobs, m.orgs = snapData, snapMeta, snapBlobs, snapOrgs
 		m.mu.Unlock()
 		return err
 	}
 	return nil
 }
 
-func cloneOrgData(src map[string]map[string]map[string][]byte) map[string]map[string]map[string][]byte {
-	dst := make(map[string]map[string]map[string][]byte, len(src))
+func cloneOrgData[V any](src map[string]map[string]map[string]V) map[string]map[string]map[string]V {
+	dst := make(map[string]map[string]map[string]V, len(src))
 	for org, colls := range src {
-		dc := make(map[string]map[string][]byte, len(colls))
+		dc := make(map[string]map[string]V, len(colls))
 		for coll, keys := range colls {
 			dc[coll] = maps.Clone(keys) // value slices are immutable; safe to share
 		}

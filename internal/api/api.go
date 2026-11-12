@@ -122,7 +122,7 @@ func (a *API) Handler() http.Handler {
 	a.registerEnvironmentSubRoutes(mux)
 
 	orgScope := func(w http.ResponseWriter, r *http.Request) *store.Org { return a.org(w, r) }
-	globalScope := func(http.ResponseWriter, *http.Request) *store.Org { return a.store.Global() }
+	globalScope := func(_ http.ResponseWriter, r *http.Request) *store.Org { return a.store.Global().As(actorID(r)) }
 	a.registerActorRoutes(mux, "/organizations/{org}/", "clients", orgScope)
 	a.registerActorRoutes(mux, "/", "users", globalScope)
 	a.registerKeyRoutes(mux, "/organizations/{org}/", "clients", orgScope)
@@ -192,5 +192,18 @@ func (a *API) org(w http.ResponseWriter, r *http.Request) *store.Org {
 		writeError(w, http.StatusNotFound, "Cannot find org "+name)
 		return nil
 	}
-	return org
+	return org.As(actorID(r))
+}
+
+// actorID names the request's authenticated actor as store.Meta records it:
+// "users/<name>" or "clients/<name>", or "" when there is none (auth off).
+func actorID(r *http.Request) string {
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.Name == "" {
+		return ""
+	}
+	if actor.IsClient {
+		return "clients/" + actor.Name
+	}
+	return "users/" + actor.Name
 }

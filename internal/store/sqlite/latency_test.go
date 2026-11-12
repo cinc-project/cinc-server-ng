@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 	"github.com/cinc-project/cinc-server-ng/internal/store/sqlite"
 )
 
@@ -58,7 +59,7 @@ func benchWriteLatency(b *testing.B, opts ...sqlite.Option) {
 			for range perWriter {
 				key := fmt.Sprintf("node%d", int(seq.Add(1))%distinctKeys)
 				t0 := time.Now()
-				if err := be.Put("acme", "nodes", key, body); err != nil {
+				if err := be.Put("acme", "nodes", key, body, store.Stamp{}); err != nil {
 					b.Error(err)
 					return
 				}

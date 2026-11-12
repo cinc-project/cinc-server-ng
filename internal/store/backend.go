@@ -17,12 +17,19 @@ package store
 type Backend interface {
 	// Object store.
 	Get(org, coll, key string) (val []byte, ok bool, err error)
-	Put(org, coll, key string, val []byte) error
-	Create(org, coll, key string, val []byte) error // ErrConflict if key exists
+	Put(org, coll, key string, val []byte, st Stamp) error
+	Create(org, coll, key string, val []byte, st Stamp) error // ErrConflict if key exists
 	Delete(org, coll, key string) (old []byte, existed bool, err error)
 	Keys(org, coll string) ([]string, error) // sorted
 	Range(org, coll string, fn func(key string, raw []byte) bool) error
 	Collections(org string) ([]string, error) // non-empty collections, sorted
+
+	// Object metadata (see Meta). It lives with the object: Delete and DeleteOrg
+	// drop it, and a transaction commits or discards it with the body.
+	Meta(org, coll, key string) (m Meta, ok bool, err error)
+	// SetMeta replaces an object's metadata without touching its body, for
+	// importers carrying times from another server. ErrNotFound if no object.
+	SetMeta(org, coll, key string, m Meta) error
 
 	// Blob store (cookbook file content).
 	PutBlob(org, checksum string, data []byte) error

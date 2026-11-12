@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 	"github.com/cinc-project/cinc-server-ng/internal/store/sqlite"
 )
 
@@ -40,7 +41,7 @@ func TestOpenCreatesOwnerOnlyFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { b.Close() })
-	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`)); err != nil {
+	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`), store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{db, db + "-wal", db + "-shm"} {
@@ -59,7 +60,7 @@ func TestOpenTightensExistingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`)); err != nil {
+	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`), store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Close(); err != nil {
@@ -80,7 +81,7 @@ func TestOpenTightensExistingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { b2.Close() })
-	if err := b2.Put("acme", "nodes", "db", []byte(`{"n":2}`)); err != nil {
+	if err := b2.Put("acme", "nodes", "db", []byte(`{"n":2}`), store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{db, db + "-wal", db + "-shm"} {

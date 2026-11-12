@@ -66,6 +66,12 @@ func CreateOrganization(st *store.Store, name, fullName string) ([]byte, error) 
 // bootstrap generate all of its keys in parallel (the slow part) and then seed
 // the store serially. This helper is shared by the POST handler and bootstrap.
 func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.PrivateKey) ([]byte, error) {
+	return createOrganization(st, name, fullName, key, "")
+}
+
+// createOrganization is CreateOrganizationWithKey, recording actor (see
+// store.Meta) as the one who created the org and everything provisioned with it.
+func createOrganization(st *store.Store, name, fullName string, key *rsa.PrivateKey, actor string) ([]byte, error) {
 	guid, err := randomGUID()
 	if err != nil {
 		return nil, err
@@ -92,10 +98,11 @@ func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.
 		if err != nil {
 			return err
 		}
+		org = org.As(actor)
 		if err := SeedOrg(org); err != nil {
 			return err
 		}
-		if err := tx.Global().Put(orgsColl, name, mustEncode(meta)); err != nil {
+		if err := tx.Global().As(actor).Put(orgsColl, name, mustEncode(meta)); err != nil {
 			return err
 		}
 		if err := org.Put("clients", validator, []byte(clientDoc)); err != nil {
@@ -156,7 +163,12 @@ func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	priv, err := CreateOrganization(a.store, name, fullName)
+	key, err := auth.GenerateKey()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	priv, err := createOrganization(a.store, name, fullName, key, actorID(r))
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Organization already exists")
 		return
@@ -223,7 +235,7 @@ func (a *API) putOrganization(w http.ResponseWriter, r *http.Request) {
 		meta["full_name"] = s
 	}
 	encoded := mustEncode(meta)
-	if err := a.store.Global().Put(orgsColl, name, encoded); err != nil {
+	if err := a.store.Global().As(actorID(r)).Put(orgsColl, name, encoded); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
