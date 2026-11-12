@@ -245,7 +245,14 @@ curl -s -u "statsuser:$STATS_PASSWORD" .../_stats
 
 # Prometheus text exposition, for a scraper
 curl -s -u "statsuser:$STATS_PASSWORD" -H 'Accept: text/plain' .../_stats
+curl -s -u "statsuser:$STATS_PASSWORD" '.../_stats?format=text'
 ```
+
+The JSON is Chef Infra Server's shape, so a client written for it decodes it
+unchanged: every number is a string, `labels` is an object (left out when a
+metric has none), and a histogram's `sample_sum`, `sample_count` and `bucket`
+list sit on its metric. `?format=json` or `?format=text` overrides `Accept`, and
+any other `format` is a 406.
 
 The user defaults to `statsuser`, Chef Infra Server's, and is set with
 `--stats-user` (or `CINC_SERVER_NG_STATS_USER`). Set the password with

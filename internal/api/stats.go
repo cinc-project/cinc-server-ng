@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"runtime"
 	"strings"
@@ -168,12 +167,24 @@ func (a *API) Metrics() *metrics.Registry { return a.stats.registry }
 
 // stats serves the metric families.
 //
-// The default remains a JSON array, which is what this endpoint has always
-// returned and what any existing consumer expects. A caller that asks for
-// text/plain — every scraper does — gets Prometheus exposition instead.
+// As on erchef (chef_wm_stats), ?format=json or ?format=text picks the format
+// and any other format value is a 406; without it, JSON is the default and an
+// Accept that prefers text/plain (every scraper's) gets Prometheus exposition.
+// The JSON is erchef's shape (metrics.WriteJSON).
 func (a *API) statsHandler(w http.ResponseWriter, r *http.Request) {
+	var text bool
+	switch format := r.URL.Query().Get("format"); {
+	case !r.URL.Query().Has("format"):
+		text = prefersText(r.Header.Get("Accept"))
+	case format == "json":
+	case format == "text":
+		text = true
+	default:
+		writeError(w, http.StatusNotAcceptable, "Unsupported format: "+format)
+		return
+	}
 	families := a.stats.registry.Gather()
-	if prefersText(r.Header.Get("Accept")) {
+	if text {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_ = metrics.WriteText(w, families)
@@ -181,9 +192,7 @@ func (a *API) statsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(families)
+	_ = metrics.WriteJSON(w, families)
 }
 
 // prefersText reports whether the Accept header asks for the text exposition

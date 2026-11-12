@@ -16,10 +16,48 @@ func TestStatsEndpoint(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("_stats = %d", resp.StatusCode)
 	}
-	// Body must be valid JSON.
-	var v any
-	if err := json.Unmarshal([]byte(body), &v); err != nil {
-		t.Fatalf("_stats body not JSON: %v (%s)", err, body)
+	// erchef's shape: values are strings, labels an object.
+	var families []struct {
+		Name    string `json:"name"`
+		Metrics []struct {
+			Labels map[string]string `json:"labels"`
+			Value  string            `json:"value"`
+		} `json:"metrics"`
+	}
+	if err := json.Unmarshal([]byte(body), &families); err != nil {
+		t.Fatalf("_stats body not erchef's JSON: %v (%s)", err, body)
+	}
+}
+
+// erchef picks the format from ?format=json|text ahead of Accept
+// (chef_wm_stats:content_types_provided), and has nothing to offer for any
+// other value: 406.
+func TestStatsFormatQuery(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	for _, c := range []struct {
+		query, accept, wantType string
+		wantStatus              int
+	}{
+		{"?format=text", "", "text/plain", 200},
+		{"?format=json", "", "application/json", 200},
+		{"?format=json", "text/plain", "application/json", 200},
+		{"?format=text", "application/json", "text/plain", 200},
+		{"?format=xml", "", "application/json", 406},
+	} {
+		req, _ := http.NewRequest("GET", srv.URL+"/_stats"+c.query, nil)
+		if c.accept != "" {
+			req.Header.Set("Accept", c.accept)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != c.wantStatus || !strings.HasPrefix(resp.Header.Get("Content-Type"), c.wantType) {
+			t.Errorf("%s Accept %q = %d %s, want %d %s", c.query, c.accept,
+				resp.StatusCode, resp.Header.Get("Content-Type"), c.wantStatus, c.wantType)
+		}
 	}
 }
 
