@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -16,13 +17,20 @@ type statFamily struct {
 	Type    string `json:"type"`
 	Help    string `json:"help"`
 	Metrics []struct {
-		Labels []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		} `json:"labels"`
-		Value float64 `json:"value"`
+		Labels      map[string]string `json:"labels"`
+		Value       string            `json:"value"`
+		SampleCount string            `json:"sample_count"`
 	} `json:"metrics"`
-	Count float64 `json:"count"`
+}
+
+// num parses one of erchef's string-encoded numbers.
+func num(t *testing.T, s string) float64 {
+	t.Helper()
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		t.Fatalf("not a number: %q", s)
+	}
+	return f
 }
 
 // statsRequest is a /_stats request carrying the server's stats credentials,
@@ -68,11 +76,11 @@ func value(t *testing.T, f statFamily, label string) float64 {
 	t.Helper()
 	for _, m := range f.Metrics {
 		if label == "" && len(m.Labels) == 0 {
-			return m.Value
+			return num(t, m.Value)
 		}
-		for _, l := range m.Labels {
-			if l.Value == label {
-				return m.Value
+		for _, v := range m.Labels {
+			if v == label {
+				return num(t, m.Value)
 			}
 		}
 	}
@@ -115,8 +123,11 @@ func TestStatsCountsRequestsByOutcome(t *testing.T) {
 	if !ok {
 		t.Fatal("no latency histogram in /_stats")
 	}
-	if lat.Count < 3 {
-		t.Errorf("latency count = %v, want every request observed", lat.Count)
+	if len(lat.Metrics) != 1 {
+		t.Fatalf("latency histogram metrics = %+v, want one", lat.Metrics)
+	}
+	if got := num(t, lat.Metrics[0].SampleCount); got < 3 {
+		t.Errorf("latency sample_count = %v, want every request observed", got)
 	}
 }
 

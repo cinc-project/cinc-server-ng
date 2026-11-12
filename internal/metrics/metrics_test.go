@@ -2,6 +2,7 @@ package metrics_test
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -77,22 +78,68 @@ func TestHistogramBucketsAreCumulative(t *testing.T) {
 	}
 }
 
-// The JSON form is what the /_stats endpoint has always returned, so it must
-// stay an array of metric families that decodes cleanly.
-func TestGatherEncodesAsJSONArray(t *testing.T) {
+// The JSON form is erchef's (chef_wm_prometheus_json_format): every number a
+// string, labels an object left out when empty, and a histogram's sum, count
+// and buckets on its metric.
+func TestWriteJSONMatchesErchef(t *testing.T) {
 	r := metrics.NewRegistry()
-	r.Counter("things_total", "things", "kind", "a").With("a").Inc()
+	r.Counter("things_total", "how many things", "kind", "a", "b").With("a").Add(2)
+	r.Gauge("ratio", "a fraction", func() float64 { return 0.25 })
+	r.Gauge("unlabelled", "a whole number", func() float64 { return 7 })
+	h := r.Histogram("latency_seconds", "how long", []float64{0.00001, 0.1, 1})
+	h.Observe(0.25)
+	h.Observe(0.5)
 
-	raw, err := json.Marshal(r.Gather())
-	if err != nil {
+	var sb strings.Builder
+	if err := metrics.WriteJSON(&sb, r.Gather()); err != nil {
 		t.Fatal(err)
 	}
-	var families []map[string]any
-	if err := json.Unmarshal(raw, &families); err != nil {
-		t.Fatalf("not a JSON array of objects: %v (%s)", err, raw)
+	want := `[` +
+		`{"name":"latency_seconds","type":"HISTOGRAM","help":"how long","metrics":[` +
+		`{"sample_sum":"0.75","sample_count":"2","bucket":[` +
+		`{"cumulative_count":"0","upper_bound":"1.0e-5"},` +
+		`{"cumulative_count":"0","upper_bound":"0.1"},` +
+		`{"cumulative_count":"2","upper_bound":"1"},` +
+		`{"cumulative_count":"2","upper_bound":"+Inf"}]}]},` +
+		`{"name":"ratio","type":"GAUGE","help":"a fraction","metrics":[{"value":"0.25"}]},` +
+		`{"name":"things_total","type":"COUNTER","help":"how many things","metrics":[` +
+		`{"labels":{"kind":"a"},"value":"2"},{"labels":{"kind":"b"},"value":"0"}]},` +
+		`{"name":"unlabelled","type":"GAUGE","help":"a whole number","metrics":[{"value":"7"}]}` +
+		`]`
+	if got := sb.String(); got != want {
+		t.Fatalf("JSON =\n%s\nwant\n%s", got, want)
 	}
-	if len(families) != 1 || families[0]["name"] != "things_total" {
-		t.Fatalf("unexpected payload: %s", raw)
+	var v any
+	if err := json.Unmarshal([]byte(sb.String()), &v); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+}
+
+// Numbers are written as erchef's as_binary writes them: an integer as its
+// digits, a float as Erlang's ~p (shortest round trip, choosing between fixed
+// and exponent notation by length), infinity as +Inf/-Inf.
+func TestErlangNumberFormat(t *testing.T) {
+	for _, c := range []struct {
+		in   float64
+		want string
+	}{
+		{0, "0"},
+		{42, "42"},
+		{-3, "-3"},
+		{1e21, "1000000000000000000000"},
+		{0.25, "0.25"},
+		{123.456, "123.456"},
+		{0.001, "0.001"},
+		{0.0001, "0.0001"},
+		{0.00001, "1.0e-5"},
+		{1.5e-7, "1.5e-7"},
+		{-0.5, "-0.5"},
+		{math.Inf(1), "+Inf"},
+		{math.Inf(-1), "-Inf"},
+	} {
+		if got := metrics.ErlangNumber(c.in); got != c.want {
+			t.Errorf("ErlangNumber(%v) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
