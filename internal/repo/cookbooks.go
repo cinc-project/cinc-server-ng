@@ -113,7 +113,10 @@ func loadCookbook(org *store.Org, cbDir, dirName string) error {
 		"version":       meta.version,
 		"chef_type":     "cookbook_version",
 		"json_class":    "Chef::CookbookVersion",
-		"all_files":     allFiles,
+		// erchef answers every version with its stored frozen flag, false
+		// unless frozen; an API upload stores it the same way.
+		"frozen?":   false,
+		"all_files": allFiles,
 		"metadata": map[string]any{
 			"name":             meta.name,
 			"version":          meta.version,

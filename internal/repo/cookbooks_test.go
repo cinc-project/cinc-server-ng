@@ -284,3 +284,30 @@ func TestLoadCookbookNameFallsBackToDir(t *testing.T) {
 		t.Fatalf("cookbook keyed by dir name with default version not stored; keys=%v", keys)
 	}
 }
+
+// TestLoadCookbookIsNotFrozen pins "frozen?": false on a loaded cookbook
+// version, as on one uploaded through the API: erchef answers every cookbook
+// version with the stored flag (chef_cookbook_version:assemble_cookbook_ejson).
+func TestLoadCookbookIsNotFrozen(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{
+		"cookbooks/apache2/metadata.rb": "name 'apache2'\nversion '1.2.3'\n",
+	})
+
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	if _, err := Load(org, dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	raw, ok, err := org.Get("cookbooks", "apache2/1.2.3")
+	if err != nil || !ok {
+		t.Fatalf("cookbook apache2/1.2.3 not stored: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if v, ok := m["frozen?"]; !ok || v != false {
+		t.Fatalf(`"frozen?" = %v (present %v), want false: %s`, v, ok, raw)
+	}
+}
