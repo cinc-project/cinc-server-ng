@@ -148,3 +148,34 @@ func TestPolicyMissing404(t *testing.T) {
 		t.Fatalf("missing policy = %d", resp.StatusCode)
 	}
 }
+
+// TestPolicyGroupReadShape pins erchef's body for GET and DELETE
+// /policy_groups/G (oc_chef_wm_named_policy_group:build_policy_revisions_json):
+// "policies" then "uri", and nothing else, whether the group was created by a
+// deploy PUT or loaded from a chef-repo file that carries "name" and an empty
+// "uri".
+func TestPolicyGroupReadShape(t *testing.T) {
+	srv, st := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	const rev = "1111111111111111111111111111111111111111111111111111111111111111"
+
+	org, _, _ := st.Org("acme")
+	if err := org.Put("policy_groups", "loaded",
+		[]byte(`{"name":"loaded","uri":"","policies":{"web":{"revision_id":"1.0.0"},"db":{"revision_id":"2.0.0"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	do(t, "PUT", base+"/policy_groups/pushed/policies/appserver", sampleRevision)
+
+	cases := []struct{ group, want string }{
+		{"loaded", `{"policies":{"db":{"revision_id":"2.0.0"},"web":{"revision_id":"1.0.0"}},"uri":"` + base + `/policy_groups/loaded"}`},
+		{"pushed", `{"policies":{"appserver":{"revision_id":"` + rev + `"}},"uri":"` + base + `/policy_groups/pushed"}`},
+	}
+	for _, c := range cases {
+		for _, method := range []string{"GET", "DELETE"} {
+			resp, body := do(t, method, base+"/policy_groups/"+c.group, "")
+			if resp.StatusCode != 200 || body != c.want {
+				t.Errorf("%s %s = %d %s\nwant %s", method, c.group, resp.StatusCode, body, c.want)
+			}
+		}
+	}
+}
