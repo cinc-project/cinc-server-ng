@@ -1,6 +1,6 @@
 module github.com/cinc-project/cinc-server-ng
 
-go 1.27.1
+go 1.27.4
 
 require modernc.org/sqlite v1.62.0
 
