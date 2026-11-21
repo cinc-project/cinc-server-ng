@@ -54,6 +54,46 @@ func TestReadBodyReadsWhatArrives(t *testing.T) {
 	}
 }
 
+// The body is read before the request is authenticated, so a declared length
+// alone must not reserve memory: a client declaring a megabyte and sending a
+// few bytes, on many connections, would otherwise hold a megabyte each.
+func TestReadBodyDoesNotTrustADeclaredLength(t *testing.T) {
+	rd := strings.NewReader(`{}`)
+	got := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			rd.Reset(`{}`)
+			if _, err := ReadBody(rd, maxPresizedBody); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}).AllocedBytesPerOp()
+	if limit := int64(presizeStep + 1); got > limit {
+		t.Fatalf("a 2-byte body declared as %d bytes allocated %d bytes, want at most %d", maxPresizedBody, got, limit)
+	}
+}
+
+// A body past the first step grows toward its declared length as it arrives,
+// in a few steps rather than doubling from 512 bytes.
+func TestReadBodyGrowsTowardTheDeclaredLength(t *testing.T) {
+	doc := bytes.Repeat([]byte("x"), 300<<10)
+	rd := bytes.NewReader(doc)
+	got := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			rd.Reset(doc)
+			body, err := ReadBody(rd, int64(len(doc)))
+			if err != nil || len(body) != len(doc) {
+				b.Fatalf("ReadBody = %d bytes, %v", len(body), err)
+			}
+		}
+	})
+	allocs := got.AllocsPerOp()
+	if bytesPer, limit := got.AllocedBytesPerOp(), int64(len(doc))*3; bytesPer > limit || allocs > 4 {
+		t.Fatalf("a %d-byte body allocated %d bytes in %d allocations, want at most %d in 4", len(doc), bytesPer, allocs, limit)
+	}
+}
+
 // A body the signature check has already read is decoded where it lies: the
 // object handlers allocate about the stored document, not a second copy of the
 // body inside the decoder plus an output grown by doubling.

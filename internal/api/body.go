@@ -12,23 +12,31 @@ import (
 // tens of kilobytes (Ohai's automatic attributes) and every chef-client run
 // saves the whole of it.
 
-// maxPresizedBody bounds how much ReadBody allocates up front on the strength
-// of a Content-Length the client declared. The body is read before the request
-// is authenticated, so the declaration alone must not reserve much; a longer
-// body is still read whole, just grown as it arrives.
+// maxPresizedBody is the longest declared body ReadBody sizes its reads for;
+// past it, a body is read as io.ReadAll reads it.
 const maxPresizedBody = 1 << 20
 
+// presizeStep is the most ReadBody allocates before any of the body has
+// arrived. The body is read before the request is authenticated, so a
+// declared length alone must not reserve memory: a client declaring a
+// megabyte and sending nothing, on many connections, would hold a megabyte
+// each. A node body usually fits in the first step.
+const presizeStep = 64 << 10
+
 // ReadBody reads r to the end. contentLength, when the client declared one, is
-// a hint: a body up to maxPresizedBody is read into a single allocation of that
-// size rather than grown by doubling from 512 bytes, which for a node is
-// several times the body in discarded buffers.
+// a hint: the first read buffer is the declared length or presizeStep, whichever
+// is smaller, and each time it fills it grows toward the declared length, at
+// most doubling, so memory stays within twice what has actually arrived. That
+// reads a node in one allocation where io.ReadAll, starting at 512 bytes and
+// doubling, discards several times the body.
 func ReadBody(r io.Reader, contentLength int64) ([]byte, error) {
 	if contentLength <= 0 || contentLength > maxPresizedBody {
 		return io.ReadAll(r)
 	}
 	// One byte past the declared length, so reaching EOF on a body of exactly
 	// that length does not grow the buffer.
-	b := make([]byte, 0, contentLength+1)
+	want := int(contentLength) + 1
+	b := make([]byte, 0, min(want, presizeStep))
 	for {
 		n, err := r.Read(b[len(b):cap(b)])
 		b = b[:len(b)+n]
@@ -39,7 +47,13 @@ func ReadBody(r io.Reader, contentLength int64) ([]byte, error) {
 			return b, err
 		}
 		if len(b) == cap(b) {
-			b = append(b, 0)[:len(b)] // a longer body than declared
+			next := 2 * cap(b)
+			if want > cap(b) {
+				next = min(next, want)
+			}
+			grown := make([]byte, len(b), next)
+			copy(grown, b)
+			b = grown
 		}
 	}
 }
