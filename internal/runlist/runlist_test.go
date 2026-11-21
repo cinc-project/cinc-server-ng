@@ -2,6 +2,7 @@ package runlist
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,25 @@ func TestNormalizeNodeUnchangedReturnsInput(t *testing.T) {
 	}
 	if &got[0] != &in[0] {
 		t.Fatal("unchanged document was copied")
+	}
+}
+
+// Every chef-client run saves its node with an already canonical run list, so
+// the check that finds nothing to change runs on every save. It reads the
+// node where it lies, without first copying it into the decoder.
+func TestNormalizeNodeCanonicalDoesNotCopy(t *testing.T) {
+	doc := []byte(`{"name":"n","automatic":{` +
+		strings.Repeat(`"fs_k":{"kb_size":"1024","mount":"/","options":["rw","noatime"]},`, 200) +
+		`"x":1},"run_list":["recipe[base]","role[web]"]}`)
+	got := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if _, err := NormalizeNode(doc); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}).AllocedBytesPerOp()
+	if limit := int64(len(doc) / 8); got > limit {
+		t.Fatalf("NormalizeNode of a canonical %d-byte node allocated %d bytes, want at most %d", len(doc), got, limit)
 	}
 }

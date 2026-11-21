@@ -96,7 +96,7 @@ func normalize(doc []byte, role bool) ([]byte, error) {
 // needsChange reports whether normalize would rewrite doc, decoding only the
 // run list members and skipping everything else.
 func needsChange(doc []byte, role bool) bool {
-	dec := jsontext.NewDecoder(bytes.NewReader(doc), jsontext.AllowDuplicateNames(true))
+	dec := jsontext.NewDecoder(bytes.NewBuffer(doc), jsontext.AllowDuplicateNames(true))
 	if tok, err := dec.ReadToken(); err != nil || tok.Kind() != '{' {
 		return false
 	}
