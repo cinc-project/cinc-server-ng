@@ -1,0 +1,210 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/server
+cpu: Apple M4 Pro
+BenchmarkFleetCheckinEnforced-14                         	  105482	     11266 ns/op	   20127 B/op	     213 allocs/op
+BenchmarkFleetCheckinEnforced-14                         	  119074	      9965 ns/op	   20056 B/op	     212 allocs/op
+BenchmarkFleetCheckinEnforced-14                         	  123201	     10025 ns/op	   20056 B/op	     212 allocs/op
+BenchmarkFleetCheckinGroupGranted128-14                  	   66056	     18943 ns/op	   20315 B/op	     189 allocs/op
+BenchmarkFleetCheckinGroupGranted128-14                  	   74534	     16565 ns/op	   20115 B/op	     189 allocs/op
+BenchmarkFleetCheckinGroupGranted128-14                  	   73851	     16153 ns/op	   20097 B/op	     188 allocs/op
+BenchmarkFleetCheckinGroupGranted512-14                  	  109672	     11461 ns/op	   19772 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted512-14                  	  126914	     10227 ns/op	   19710 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted512-14                  	  115748	     10032 ns/op	   19701 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted2048-14                 	  144344	      9205 ns/op	   19625 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted2048-14                 	  137810	      8650 ns/op	   19609 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted2048-14                 	  134586	      8406 ns/op	   19603 B/op	     187 allocs/op
+BenchmarkFleetCheckinAuthOnly-14                         	  129102	      9309 ns/op	   15232 B/op	     109 allocs/op
+BenchmarkFleetCheckinAuthOnly-14                         	  148712	      8128 ns/op	   15208 B/op	     109 allocs/op
+BenchmarkFleetCheckinAuthOnly-14                         	  146896	      8126 ns/op	   15211 B/op	     109 allocs/op
+BenchmarkFleetCheckinNoAuth-14                           	  305391	      4116 ns/op	    9663 B/op	      66 allocs/op
+BenchmarkFleetCheckinNoAuth-14                           	  354873	      3519 ns/op	    9650 B/op	      66 allocs/op
+BenchmarkFleetCheckinNoAuth-14                           	  351536	      3511 ns/op	    9649 B/op	      66 allocs/op
+BenchmarkFleetCheckinEnforcedSQLite-14                   	   19209	     59202 ns/op	   28399 B/op	     379 allocs/op
+BenchmarkFleetCheckinEnforcedSQLite-14                   	   21080	     56317 ns/op	   28370 B/op	     379 allocs/op
+BenchmarkFleetCheckinEnforcedSQLite-14                   	   16570	     61957 ns/op	   28360 B/op	     379 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteGroupCommit-14        	   26074	     45707 ns/op	   28694 B/op	     382 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteGroupCommit-14        	   25663	     44399 ns/op	   28689 B/op	     382 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteGroupCommit-14        	   26583	     44614 ns/op	   28638 B/op	     382 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusy-14               	   21704	     54282 ns/op	   27903 B/op	     380 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusy-14               	   21279	     53757 ns/op	   27902 B/op	     380 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusy-14               	   17923	     56696 ns/op	   27937 B/op	     380 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusyGroupCommit-14    	   39117	     29367 ns/op	   28784 B/op	     398 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusyGroupCommit-14    	   39208	     29216 ns/op	   28780 B/op	     398 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusyGroupCommit-14    	   39577	     29186 ns/op	   28791 B/op	     399 allocs/op
+BenchmarkRealisticNodeSave-14                            	   10000	    102060 ns/op	 232.43 MB/s	   97001 B/op	     233 allocs/op
+BenchmarkRealisticNodeSave-14                            	   10000	    102405 ns/op	 231.65 MB/s	   96956 B/op	     233 allocs/op
+BenchmarkRealisticNodeSave-14                            	   10000	    105548 ns/op	 224.75 MB/s	   97022 B/op	     233 allocs/op
+BenchmarkRealisticCheckin-14                             	  100624	     11466 ns/op	   63978 B/op	     212 allocs/op
+BenchmarkRealisticCheckin-14                             	  111091	     11152 ns/op	   63948 B/op	     212 allocs/op
+BenchmarkRealisticCheckin-14                             	  109984	     11418 ns/op	   63953 B/op	     212 allocs/op
+BenchmarkRealisticCheckinSQLite-14                       	   22077	     55209 ns/op	   91628 B/op	     377 allocs/op
+BenchmarkRealisticCheckinSQLite-14                       	   18544	     73618 ns/op	   91615 B/op	     377 allocs/op
+BenchmarkRealisticCheckinSQLite-14                       	   20904	     63508 ns/op	   91635 B/op	     377 allocs/op
+BenchmarkRealisticSearch-14                              	   68886	     15598 ns/op	   44616 B/op	     288 allocs/op
+BenchmarkRealisticSearch-14                              	   59677	     17791 ns/op	   46319 B/op	     299 allocs/op
+BenchmarkRealisticSearch-14                              	   69217	     14458 ns/op	   44524 B/op	     287 allocs/op
+BenchmarkSearchScaleExact512-14                          	    3924	    330648 ns/op	  171698 B/op	    1205 allocs/op
+BenchmarkSearchScaleExact512-14                          	    3940	    319072 ns/op	  171499 B/op	    1205 allocs/op
+BenchmarkSearchScaleExact512-14                          	    3968	    301714 ns/op	  171469 B/op	    1205 allocs/op
+BenchmarkSearchScaleExact2048-14                         	    1039	   1168423 ns/op	  625173 B/op	    4298 allocs/op
+BenchmarkSearchScaleExact2048-14                         	    1027	   1165773 ns/op	  624849 B/op	    4297 allocs/op
+BenchmarkSearchScaleExact2048-14                         	    1057	   1158681 ns/op	  624802 B/op	    4297 allocs/op
+BenchmarkSearchScaleExact8192-14                         	     242	   5426394 ns/op	 2443671 B/op	   16660 allocs/op
+BenchmarkSearchScaleExact8192-14                         	     243	   4734798 ns/op	 2443459 B/op	   16659 allocs/op
+BenchmarkSearchScaleExact8192-14                         	     242	   4941695 ns/op	 2443376 B/op	   16659 allocs/op
+BenchmarkSearchScaleSelective512-14                      	   37999	     31065 ns/op	   17025 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective512-14                      	   38066	     31229 ns/op	   16998 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective512-14                      	   38191	     31610 ns/op	   16999 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective2048-14                     	   35091	     32379 ns/op	   16974 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective2048-14                     	   39388	     30048 ns/op	   16964 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective2048-14                     	   40640	     30446 ns/op	   16964 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective8192-14                     	   39176	     30726 ns/op	   16959 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective8192-14                     	   39525	     30222 ns/op	   16955 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective8192-14                     	   39681	     30116 ns/op	   16956 B/op	     142 allocs/op
+PASS
+ok  	github.com/cinc-project/cinc-server-ng/server	344.841s
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/internal/api
+cpu: Apple M4 Pro
+BenchmarkBootstrap500-14      	    4327	    273323 ns/op	  554393 B/op	    4375 allocs/op
+BenchmarkBootstrap500-14      	    4365	    266205 ns/op	  554390 B/op	    4375 allocs/op
+BenchmarkBootstrap500-14      	    4539	    274737 ns/op	  554399 B/op	    4375 allocs/op
+BenchmarkBootstrap2000-14     	    1016	   1225806 ns/op	 2239340 B/op	   17920 allocs/op
+BenchmarkBootstrap2000-14     	     912	   1206460 ns/op	 2239342 B/op	   17920 allocs/op
+BenchmarkBootstrap2000-14     	    1060	   1146638 ns/op	 2239295 B/op	   17920 allocs/op
+BenchmarkBootstrap8000-14     	     246	   4792626 ns/op	 8977023 B/op	   72080 allocs/op
+BenchmarkBootstrap8000-14     	     234	   5587053 ns/op	 8974701 B/op	   72081 allocs/op
+BenchmarkBootstrap8000-14     	     234	   4982265 ns/op	 8975860 B/op	   72080 allocs/op
+BenchmarkCheckinsMemory-14    	  105930	     11247 ns/op	   20041 B/op	     133 allocs/op
+BenchmarkCheckinsMemory-14    	  107661	     11564 ns/op	   20045 B/op	     133 allocs/op
+BenchmarkCheckinsMemory-14    	  106236	     10983 ns/op	   20029 B/op	     133 allocs/op
+BenchmarkCheckinsSQLite-14    	   18112	     66464 ns/op	   24943 B/op	     239 allocs/op
+BenchmarkCheckinsSQLite-14    	   17082	     64317 ns/op	   24936 B/op	     239 allocs/op
+BenchmarkCheckinsSQLite-14    	   16929	     64596 ns/op	   24935 B/op	     239 allocs/op
+BenchmarkListObjects-14       	   25819	     46295 ns/op	   45743 B/op	      31 allocs/op
+BenchmarkListObjects-14       	   26742	     45714 ns/op	   45688 B/op	      31 allocs/op
+BenchmarkListObjects-14       	   25794	     46646 ns/op	   45673 B/op	      31 allocs/op
+BenchmarkSearchScanWarm-14    	   34238	     34805 ns/op	   24504 B/op	      15 allocs/op
+BenchmarkSearchScanWarm-14    	   37651	     32162 ns/op	   24504 B/op	      15 allocs/op
+BenchmarkSearchScanWarm-14    	   35570	     34700 ns/op	   24504 B/op	      15 allocs/op
+PASS
+ok  	github.com/cinc-project/cinc-server-ng/internal/api	31.071s
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/internal/store/sqlite
+cpu: Apple M4 Pro
+BenchmarkGet-14    	  270058	      4702 ns/op	    1584 B/op	      27 allocs/op
+BenchmarkGet-14    	  299533	      4435 ns/op	    1584 B/op	      27 allocs/op
+BenchmarkGet-14    	  270135	      4264 ns/op	    1584 B/op	      27 allocs/op
+BenchmarkPut-14    	  148929	      8758 ns/op	     764 B/op	      14 allocs/op
+BenchmarkPut-14    	  151256	      8795 ns/op	     764 B/op	      14 allocs/op
+BenchmarkPut-14    	  137284	      9044 ns/op	     764 B/op	      14 allocs/op
+PASS
+ok  	github.com/cinc-project/cinc-server-ng/internal/store/sqlite	9.082s
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/server
+cpu: Apple M4 Pro
+BenchmarkFleetCheckinEnforced-14                         	  104204	     11457 ns/op	   20145 B/op	     213 allocs/op
+BenchmarkFleetCheckinEnforced-14                         	  114152	      9963 ns/op	   20066 B/op	     212 allocs/op
+BenchmarkFleetCheckinEnforced-14                         	  115585	     10154 ns/op	   20066 B/op	     212 allocs/op
+BenchmarkFleetCheckinGroupGranted128-14                  	   62448	     19128 ns/op	   20294 B/op	     189 allocs/op
+BenchmarkFleetCheckinGroupGranted128-14                  	   68287	     16456 ns/op	   20091 B/op	     188 allocs/op
+BenchmarkFleetCheckinGroupGranted128-14                  	   75872	     15860 ns/op	   20049 B/op	     188 allocs/op
+BenchmarkFleetCheckinGroupGranted512-14                  	  109910	     10988 ns/op	   19777 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted512-14                  	  120277	      9738 ns/op	   19708 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted512-14                  	  121510	      9783 ns/op	   19700 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted2048-14                 	  136210	      8507 ns/op	   19619 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted2048-14                 	  140574	      8339 ns/op	   19606 B/op	     187 allocs/op
+BenchmarkFleetCheckinGroupGranted2048-14                 	  144718	      8392 ns/op	   19605 B/op	     187 allocs/op
+BenchmarkFleetCheckinAuthOnly-14                         	  131551	      9334 ns/op	   15235 B/op	     109 allocs/op
+BenchmarkFleetCheckinAuthOnly-14                         	  141696	      8464 ns/op	   15200 B/op	     109 allocs/op
+BenchmarkFleetCheckinAuthOnly-14                         	  139276	      8302 ns/op	   15207 B/op	     109 allocs/op
+BenchmarkFleetCheckinNoAuth-14                           	  314163	      4140 ns/op	    9662 B/op	      66 allocs/op
+BenchmarkFleetCheckinNoAuth-14                           	  328428	      3501 ns/op	    9649 B/op	      66 allocs/op
+BenchmarkFleetCheckinNoAuth-14                           	  326283	      3659 ns/op	    9650 B/op	      66 allocs/op
+BenchmarkFleetCheckinEnforcedSQLite-14                   	   21427	     55377 ns/op	   28364 B/op	     379 allocs/op
+BenchmarkFleetCheckinEnforcedSQLite-14                   	   22248	     54938 ns/op	   28323 B/op	     379 allocs/op
+BenchmarkFleetCheckinEnforcedSQLite-14                   	   20996	     56373 ns/op	   28323 B/op	     379 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteGroupCommit-14        	   26264	     45158 ns/op	   28586 B/op	     382 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteGroupCommit-14        	   26922	     44264 ns/op	   28630 B/op	     382 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteGroupCommit-14        	   28250	     45858 ns/op	   28665 B/op	     382 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusy-14               	   21675	     50937 ns/op	   27909 B/op	     380 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusy-14               	   23462	     48943 ns/op	   27900 B/op	     379 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusy-14               	   24577	     47791 ns/op	   27878 B/op	     379 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusyGroupCommit-14    	   42517	     28111 ns/op	   28778 B/op	     398 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusyGroupCommit-14    	   40839	     28152 ns/op	   28769 B/op	     398 allocs/op
+BenchmarkFleetCheckinEnforcedSQLiteBusyGroupCommit-14    	   41811	     28318 ns/op	   28781 B/op	     398 allocs/op
+BenchmarkRealisticNodeSave-14                            	   12186	     98784 ns/op	 240.14 MB/s	   96867 B/op	     232 allocs/op
+BenchmarkRealisticNodeSave-14                            	   12583	     95364 ns/op	 248.75 MB/s	   96840 B/op	     232 allocs/op
+BenchmarkRealisticNodeSave-14                            	   12588	     95286 ns/op	 248.96 MB/s	   96810 B/op	     232 allocs/op
+BenchmarkRealisticCheckin-14                             	  104190	     11373 ns/op	   63978 B/op	     212 allocs/op
+BenchmarkRealisticCheckin-14                             	  108793	     11078 ns/op	   63949 B/op	     212 allocs/op
+BenchmarkRealisticCheckin-14                             	  110568	     11099 ns/op	   63946 B/op	     212 allocs/op
+BenchmarkRealisticCheckinSQLite-14                       	   21746	     53014 ns/op	   91648 B/op	     377 allocs/op
+BenchmarkRealisticCheckinSQLite-14                       	   22272	     55401 ns/op	   91651 B/op	     377 allocs/op
+BenchmarkRealisticCheckinSQLite-14                       	   22370	     52769 ns/op	   91644 B/op	     377 allocs/op
+BenchmarkRealisticSearch-14                              	   64929	     15561 ns/op	   45295 B/op	     292 allocs/op
+BenchmarkRealisticSearch-14                              	   71547	     14378 ns/op	   44157 B/op	     285 allocs/op
+BenchmarkRealisticSearch-14                              	   75000	     13915 ns/op	   43635 B/op	     282 allocs/op
+BenchmarkSearchScaleExact512-14                          	    3849	    298735 ns/op	  171665 B/op	    1205 allocs/op
+BenchmarkSearchScaleExact512-14                          	    4062	    291507 ns/op	  171458 B/op	    1205 allocs/op
+BenchmarkSearchScaleExact512-14                          	    4080	    289495 ns/op	  171456 B/op	    1205 allocs/op
+BenchmarkSearchScaleExact2048-14                         	    1066	   1144504 ns/op	  625074 B/op	    4297 allocs/op
+BenchmarkSearchScaleExact2048-14                         	    1072	   1129159 ns/op	  624837 B/op	    4297 allocs/op
+BenchmarkSearchScaleExact2048-14                         	    1070	   1136039 ns/op	  624809 B/op	    4297 allocs/op
+BenchmarkSearchScaleExact8192-14                         	     260	   4807434 ns/op	 2443740 B/op	   16660 allocs/op
+BenchmarkSearchScaleExact8192-14                         	     247	   4904974 ns/op	 2443457 B/op	   16659 allocs/op
+BenchmarkSearchScaleExact8192-14                         	     252	   4576585 ns/op	 2443383 B/op	   16659 allocs/op
+BenchmarkSearchScaleSelective512-14                      	   39691	     31133 ns/op	   17025 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective512-14                      	   39914	     30695 ns/op	   16991 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective512-14                      	   39445	     31835 ns/op	   16996 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective2048-14                     	   37947	     31170 ns/op	   16977 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective2048-14                     	   38898	     30313 ns/op	   16964 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective2048-14                     	   39100	     30645 ns/op	   16966 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective8192-14                     	   38599	     30245 ns/op	   16960 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective8192-14                     	   39733	     30095 ns/op	   16956 B/op	     142 allocs/op
+BenchmarkSearchScaleSelective8192-14                     	   39997	     29932 ns/op	   16956 B/op	     142 allocs/op
+PASS
+ok  	github.com/cinc-project/cinc-server-ng/server	332.044s
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/internal/api
+cpu: Apple M4 Pro
+BenchmarkBootstrap500-14      	    4719	    253450 ns/op	  554387 B/op	    4375 allocs/op
+BenchmarkBootstrap500-14      	    4779	    254251 ns/op	  554389 B/op	    4375 allocs/op
+BenchmarkBootstrap500-14      	    4701	    255156 ns/op	  554389 B/op	    4375 allocs/op
+BenchmarkBootstrap2000-14     	    1065	   1189499 ns/op	 2239333 B/op	   17920 allocs/op
+BenchmarkBootstrap2000-14     	    1023	   1159823 ns/op	 2239316 B/op	   17920 allocs/op
+BenchmarkBootstrap2000-14     	    1005	   1163754 ns/op	 2239278 B/op	   17920 allocs/op
+BenchmarkBootstrap8000-14     	     246	   5483981 ns/op	 8976352 B/op	   72081 allocs/op
+BenchmarkBootstrap8000-14     	     240	   4907288 ns/op	 8973918 B/op	   72080 allocs/op
+BenchmarkBootstrap8000-14     	     235	   5101291 ns/op	 8975522 B/op	   72080 allocs/op
+BenchmarkCheckinsMemory-14    	  102369	     11705 ns/op	   20050 B/op	     133 allocs/op
+BenchmarkCheckinsMemory-14    	  106249	     11027 ns/op	   20029 B/op	     133 allocs/op
+BenchmarkCheckinsMemory-14    	  103950	     11474 ns/op	   20039 B/op	     133 allocs/op
+BenchmarkCheckinsSQLite-14    	   17862	     66245 ns/op	   24934 B/op	     239 allocs/op
+BenchmarkCheckinsSQLite-14    	   20023	     64776 ns/op	   24928 B/op	     239 allocs/op
+BenchmarkCheckinsSQLite-14    	   17746	     62628 ns/op	   24938 B/op	     239 allocs/op
+BenchmarkListObjects-14       	   26546	     45268 ns/op	   45629 B/op	      31 allocs/op
+BenchmarkListObjects-14       	   26463	     45280 ns/op	   45380 B/op	      31 allocs/op
+BenchmarkListObjects-14       	   25638	     46119 ns/op	   45698 B/op	      31 allocs/op
+BenchmarkSearchScanWarm-14    	   36765	     34347 ns/op	   24504 B/op	      15 allocs/op
+BenchmarkSearchScanWarm-14    	   33927	     35245 ns/op	   24504 B/op	      15 allocs/op
+BenchmarkSearchScanWarm-14    	   33962	     35078 ns/op	   24504 B/op	      15 allocs/op
+PASS
+ok  	github.com/cinc-project/cinc-server-ng/internal/api	31.825s
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/internal/store/sqlite
+cpu: Apple M4 Pro
+BenchmarkGet-14    	  268561	      4986 ns/op	    1584 B/op	      27 allocs/op
+BenchmarkGet-14    	  290490	      4397 ns/op	    1584 B/op	      27 allocs/op
+BenchmarkGet-14    	  271806	      4295 ns/op	    1584 B/op	      27 allocs/op
+BenchmarkPut-14    	  147195	      8012 ns/op	     764 B/op	      14 allocs/op
+BenchmarkPut-14    	  166032	      7750 ns/op	     764 B/op	      14 allocs/op
+BenchmarkPut-14    	  143683	      7594 ns/op	     764 B/op	      14 allocs/op
+PASS
+ok  	github.com/cinc-project/cinc-server-ng/internal/store/sqlite	8.831s
