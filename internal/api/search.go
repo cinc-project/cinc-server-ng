@@ -452,31 +452,38 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	window := matches[lo:hi]
 
+	if partial == nil {
+		rows := make([]json.RawMessage, len(window))
+		for i, m := range window {
+			if idx.aclObject != "" {
+				// A data bag item comes back through search in Chef's wrapped
+				// form, unlike the flat document a direct read returns.
+				rows[i] = wrapStoredDataBagItem(idx.aclObject, m.id, m.raw)
+			} else {
+				rows[i] = m.raw
+			}
+		}
+		writeSearchRows(w, total, start, rows)
+		return
+	}
+
 	out := make([]any, 0, len(window))
 	for _, m := range window {
-		if partial != nil {
-			// Re-fetch the merged view for this row only (a flatten-cache hit, since
-			// collectMatches flattened every match); the full result set is not merged.
-			merged, _, _ := a.searchDoc(idx.collection, m.id, m.raw, idx.mergeAttrs)
-			data := map[string]any{}
-			for key, path := range partial {
-				if len(path) == 0 {
-					data[key] = nil // empty projection: no value for this key
-					continue
-				}
-				data[key] = traversePath(merged, path)
+		// Re-fetch the merged view for this row only (a flatten-cache hit, since
+		// collectMatches flattened every match); the full result set is not merged.
+		merged, _, _ := a.searchDoc(idx.collection, m.id, m.raw, idx.mergeAttrs)
+		data := map[string]any{}
+		for key, path := range partial {
+			if len(path) == 0 {
+				data[key] = nil // empty projection: no value for this key
+				continue
 			}
-			out = append(out, map[string]any{
-				"url":  idx.urlFor(r, org.Name(), m.id),
-				"data": data,
-			})
-		} else if idx.aclObject != "" {
-			// A data bag item comes back through search in Chef's wrapped
-			// form, unlike the flat document a direct read returns.
-			out = append(out, json.RawMessage(wrapStoredDataBagItem(idx.aclObject, m.id, m.raw)))
-		} else {
-			out = append(out, m.raw)
+			data[key] = traversePath(merged, path)
 		}
+		out = append(out, map[string]any{
+			"url":  idx.urlFor(r, org.Name(), m.id),
+			"data": data,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
