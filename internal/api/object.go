@@ -96,7 +96,7 @@ var errNotObject = errors.New("request body is not a JSON object")
 // stores: the client's member order, exact integers, and erchef's number and
 // string encoding (see chefjson).
 func decodeObjectBody(r *http.Request) ([]byte, error) {
-	raw, err := chefjson.Normalize(r.Body)
+	raw, err := chefjson.Normalize(bodyReader(r))
 	if err != nil {
 		return nil, err
 	}

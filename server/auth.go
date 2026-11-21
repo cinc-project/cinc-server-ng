@@ -1,10 +1,8 @@
 package server
 
 import (
-	"bytes"
 	"crypto/rsa"
 	"encoding/json"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -52,12 +50,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		body, err := api.ReadBody(r.Body, r.ContentLength)
 		if err != nil {
 			unauthorized(w, "could not read request body")
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.Body = api.BufferBody(body)
 
 		parsed, err := auth.Parse(r.Header)
 		if err != nil {

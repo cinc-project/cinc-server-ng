@@ -37,8 +37,18 @@ import (
 
 // Normalize reads exactly one JSON value from r and returns it encoded as
 // erchef stores it. An error means erchef would answer 400 "invalid JSON".
+//
+// When r is a *bytes.Buffer (a body already read, as the signature check
+// leaves it) the value is parsed in place and the output sized from it, rather
+// than copied into the decoder's buffer and both grown by doubling: for a node
+// of tens of kilobytes that is most of what saving it allocates.
 func Normalize(r io.Reader) ([]byte, error) {
 	dec := jsontext.NewDecoder(r, jsontext.AllowDuplicateNames(true))
+	var out, scratch []byte
+	if bb, ok := r.(*bytes.Buffer); ok {
+		// Normalizing drops whitespace and rarely lengthens anything else.
+		out = make([]byte, 0, bb.Len())
+	}
 	// One frame per open container: whether it is an object, and how many
 	// tokens it has held so far (an object's keys are its even-numbered ones).
 	type frame struct {
@@ -46,7 +56,6 @@ func Normalize(r io.Reader) ([]byte, error) {
 		n      int
 	}
 	stack := make([]frame, 0, 16)
-	var out, scratch []byte
 	for {
 		kind := dec.PeekKind()
 		if kind == '}' || kind == ']' {
