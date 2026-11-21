@@ -282,15 +282,27 @@ func (o *Org) Get(coll, key string) ([]byte, bool, error) {
 	return o.backend.Get(o.name, coll, key)
 }
 
-// View returns the value at coll/key. It is retained for callers on read paths
-// that previously used a zero-copy read; with the pluggable backend it returns an
-// owned copy just like Get (the no-copy optimization is internal to the memory
-// backend's Range). Callers must still treat the result as read-only.
+// View returns the value at coll/key for a caller that only reads it. The
+// result is read-only: it may be the stored value itself (the memory backend
+// lends it rather than copying a node of tens of kilobytes on every check-in),
+// so writing into it would change what every later reader sees. It may be kept
+// after the call: a stored value is never written in place, a later write
+// replaces it. Use Get for a slice the caller may modify.
 func (o *Org) View(coll, key string) ([]byte, bool, error) {
 	if o.counts != nil {
 		o.counts.Reads.Add(1)
 	}
+	if v, ok := o.backend.(viewer); ok {
+		return v.view(o.name, coll, key)
+	}
 	return o.backend.Get(o.name, coll, key)
+}
+
+// viewer is a Backend that can lend a stored value without copying it, for
+// View. A backend implements it only if it never writes a stored value in
+// place.
+type viewer interface {
+	view(org, coll, key string) ([]byte, bool, error)
 }
 
 // Range calls fn for each key/value in coll. The raw slice passed to fn is
