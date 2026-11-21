@@ -126,7 +126,7 @@ func Normalize(r io.Reader) ([]byte, error) {
 // a string. Like erchef, it reads the first member with that name, so a later
 // duplicate never changes the answer.
 func String(doc []byte, name string) (string, bool) {
-	dec := jsontext.NewDecoder(bytes.NewReader(doc), jsontext.AllowDuplicateNames(true))
+	dec := jsontext.NewDecoder(bytes.NewBuffer(doc), jsontext.AllowDuplicateNames(true))
 	if tok, err := dec.ReadToken(); err != nil || tok.Kind() != '{' {
 		return "", false
 	}
@@ -202,7 +202,7 @@ func firstMembers(v any) any {
 // literals so no precision is lost. Use Parse to edit a document instead,
 // which keeps member order and repeats.
 func DecodeObject(doc []byte) (map[string]any, error) {
-	dec := jsontext.NewDecoder(bytes.NewReader(doc), jsontext.AllowDuplicateNames(true))
+	dec := jsontext.NewDecoder(bytes.NewBuffer(doc), jsontext.AllowDuplicateNames(true))
 	v, err := decodeOne(dec, false)
 	if err != nil {
 		return nil, err
@@ -252,7 +252,7 @@ func (o *Object) Set(name string, v any) {
 // []any, numbers json.Number, and strings, booleans and null their Go values.
 // Marshal writes the tree back out.
 func Parse(doc []byte) (any, error) {
-	dec := jsontext.NewDecoder(bytes.NewReader(doc), jsontext.AllowDuplicateNames(true))
+	dec := jsontext.NewDecoder(bytes.NewBuffer(doc), jsontext.AllowDuplicateNames(true))
 	return decodeOne(dec, true)
 }
 

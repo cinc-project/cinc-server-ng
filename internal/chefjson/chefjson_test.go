@@ -335,3 +335,26 @@ func TestParseAndDecodeObjectRejectTrailingData(t *testing.T) {
 		t.Errorf("Parse rejected trailing whitespace: %v", err)
 	}
 }
+
+// Reading fields from a stored document parses it where it lies rather than
+// first copying it into the decoder: a node is tens of kilobytes, and String
+// and Parse run on it on every save and read.
+func TestReadersDoNotCopyTheDocument(t *testing.T) {
+	doc := []byte(`{"name":"n","automatic":{` +
+		strings.Repeat(`"fs_k":{"kb_size":"1024","mount":"/","options":["rw","noatime"],"percent_used":12.5},`, 200) +
+		`"x":1}}`)
+	for name, read := range map[string]func(){
+		"String":      func() { String(doc, "name") },
+		"String/miss": func() { String(doc, "absent") }, // reads to the end
+	} {
+		got := testing.Benchmark(func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				read()
+			}
+		}).AllocedBytesPerOp()
+		if limit := int64(len(doc) / 8); got > limit {
+			t.Errorf("%s on a %d-byte document allocated %d bytes, want at most %d", name, len(doc), got, limit)
+		}
+	}
+}
