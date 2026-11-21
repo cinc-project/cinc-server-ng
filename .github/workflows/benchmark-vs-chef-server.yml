@@ -197,7 +197,11 @@ jobs:
       BASE_REF: ${{ inputs.base_ref }}
       # The fleet, search-scale, registration and store benchmarks: the ones
       # that decide how cinc-server-ng behaves as a fleet grows.
-      BENCH: '^Benchmark(FleetCheckin|SearchScale|Bootstrap|Checkins|ListObjects|SearchScanWarm|Get$|Put$)'
+      # Realistic: the same paths with a captured 23 KB node, the size a real
+      # chef-client run saves.
+      BENCH: '^Benchmark(FleetCheckin|SearchScale|Bootstrap|Checkins|ListObjects|SearchScanWarm|Get$|Put$|Realistic)'
+      # Benchmark files copied into the baseline when it predates them.
+      PORTABLE_BENCH: server/realistic_bench_test.go
       PKGS: ./server/ ./internal/api/ ./internal/store/sqlite/
       # The write-latency benchmarks run one fixed workload regardless of b.N
       # and report its distribution, so each sample must be exactly one run
@@ -227,6 +231,13 @@ jobs:
           esac
           git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "no such ref: $base" >&2; exit 1; }
           git worktree add --detach /tmp/base "$base"
+          # A benchmark added after the baseline was released would be left
+          # out by benchstat, which compares only what both sides ran. These
+          # files use nothing but helpers the baseline already has, so give
+          # the baseline any it lacks and measure both sides.
+          for f in $PORTABLE_BENCH; do
+            [ -e "/tmp/base/$f" ] || cp "$f" "/tmp/base/$f"
+          done
           echo "BASE=$base" >> "$GITHUB_ENV"
 
       - name: Install benchstat
