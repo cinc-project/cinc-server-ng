@@ -1,7 +1,9 @@
 package chefjson
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -88,15 +90,17 @@ func TestNormalizeMatchesErchef(t *testing.T) {
 		{"escaped keys", `{"\u00e9k":1,"a\/b":2,"z":{"\u0041":1}}`, `{"ék":1,"a/b":2,"z":{"A":1}}`},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := Normalize(strings.NewReader(c.in))
-			if err != nil {
-				t.Fatalf("Normalize(%s): %v", c.in, err)
-			}
-			if string(got) != c.want {
-				t.Errorf("Normalize(%s)\n got %s\nwant %s", c.in, got, c.want)
-			}
-		})
+		for via, r := range sources(c.in) {
+			t.Run(c.name+"/"+via, func(t *testing.T) {
+				got, err := Normalize(r)
+				if err != nil {
+					t.Fatalf("Normalize(%s): %v", c.in, err)
+				}
+				if string(got) != c.want {
+					t.Errorf("Normalize(%s)\n got %s\nwant %s", c.in, got, c.want)
+				}
+			})
+		}
 	}
 }
 
@@ -114,11 +118,56 @@ func TestNormalizeRejectsWhatErchefRejects(t *testing.T) {
 		{"truncated", `{"name":`},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got, err := Normalize(strings.NewReader(c.in)); err == nil {
-				t.Errorf("Normalize(%q) = %s, want an error", c.in, got)
-			}
-		})
+		for via, r := range sources(c.in) {
+			t.Run(c.name+"/"+via, func(t *testing.T) {
+				if got, err := Normalize(r); err == nil {
+					t.Errorf("Normalize(%q) = %s, want an error", c.in, got)
+				}
+			})
+		}
+	}
+}
+
+// sources gives the two ways a body reaches Normalize: streamed from the
+// connection, or already read into a buffer (as the signature check leaves it),
+// which Normalize parses in place. Both must store exactly the same bytes.
+func sources(in string) map[string]io.Reader {
+	return map[string]io.Reader{
+		"stream": strings.NewReader(in),
+		"buffer": bytes.NewBufferString(in),
+	}
+}
+
+// nodeDoc is a node-sized document: what a chef-client saves at the end of a
+// run, with Ohai's automatic attributes, is tens of kilobytes.
+func nodeDoc() []byte {
+	return []byte(`{"name":"n","run_list":["recipe[base]"],"normal":{"tags":["a","b"],"n":12345678901234567890,"f":1.5},"automatic":{` +
+		strings.Repeat(`"fs_k":{"kb_size":"1024","mount":"/","options":["rw","noatime"],"percent_used":12.5},`, 200) +
+		`"x":1}}`)
+}
+
+// bytesPerRun reports how many bytes one call of f allocates.
+func bytesPerRun(f func()) int64 {
+	return testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			f()
+		}
+	}).AllocedBytesPerOp()
+}
+
+// A buffered body is parsed where it lies and the output is sized from it, so
+// normalizing a node allocates about the output, not a copy of the input in the
+// decoder plus an output grown by doubling.
+func TestNormalizeBufferAllocatesAboutTheOutput(t *testing.T) {
+	doc := nodeDoc()
+	got := bytesPerRun(func() {
+		if _, err := Normalize(bytes.NewBuffer(doc)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if limit := int64(len(doc)) * 5 / 4; got > limit {
+		t.Fatalf("Normalize of a %d-byte buffer allocated %d bytes, want at most %d", len(doc), got, limit)
 	}
 }
 
