@@ -30,7 +30,9 @@ type preread struct {
 	raw            []byte
 }
 
-// withPreread returns a request carrying an object authorize has read.
+// withPreread returns a request carrying an object authorize has read. raw
+// comes from store.View, so it is read-only: a handler that edits the object
+// must Parse it or take its own copy.
 func withPreread(r *http.Request, org, coll, key string, raw []byte) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), prereadContextKey,
 		preread{org: org, coll: coll, key: key, raw: raw}))

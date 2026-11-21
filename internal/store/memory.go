@@ -44,6 +44,16 @@ func (m *memoryBackend) Get(org, coll, key string) ([]byte, bool, error) {
 	return clone(v), true, nil
 }
 
+// view lends the stored value for Org.View. set always stores a fresh copy and
+// nothing writes a stored value in place, so the slice stays as it is for as
+// long as the caller holds it.
+func (m *memoryBackend) view(org, coll, key string) ([]byte, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	v, ok := m.data[org][coll][key]
+	return v, ok, nil
+}
+
 // set stores a defensive copy of val and stamps its metadata: an existing key
 // keeps its creation time. Caller holds the write lock.
 func (m *memoryBackend) set(org, coll, key string, val []byte, st Stamp) {

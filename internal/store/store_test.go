@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -127,18 +128,37 @@ func TestViewReturnsStoredValue(t *testing.T) {
 	}
 }
 
-// TestViewReturnsIndependentCopy documents View's contract under the pluggable
-// backend: it returns an owned copy (the no-copy fast path is internal to the
-// backend's Range), so mutating the result must not affect stored state.
-func TestViewReturnsIndependentCopy(t *testing.T) {
+// View is the read path for callers that only look at the bytes (authorization
+// pre-reads, GET handlers, search rows). On the memory backend it hands out the
+// stored value itself: a check-in reads its whole node, tens of kilobytes, and
+// a copy per read is a large share of what the request allocates.
+func TestViewDoesNotCopyOnMemoryBackend(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")
-	mustPut(t, org, "nodes", "web", `{"name":"web"}`)
-	got, _, _ := org.View("nodes", "web")
-	got[2] = 'X'
-	again, _, _ := org.View("nodes", "web")
-	if string(again) != `{"name":"web"}` {
-		t.Fatalf("View result aliased stored value: %s", again)
+	mustPut(t, org, "nodes", "web", `{"name":"web","automatic":{"big":"`+strings.Repeat("x", 16<<10)+`"}}`)
+	allocs := testing.AllocsPerRun(100, func() {
+		if _, ok, err := org.View("nodes", "web"); !ok || err != nil {
+			t.Fatalf("View: ok=%v err=%v", ok, err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("View allocated %v times per call, want 0", allocs)
+	}
+}
+
+// A value handed out by View is never written in place: a later write stores a
+// new value rather than changing the one a reader still holds.
+func TestViewIsStableAcrossWrites(t *testing.T) {
+	s := New()
+	org, _ := s.CreateOrg("acme")
+	mustPut(t, org, "nodes", "web", `{"name":"web","v":1}`)
+	held, _, _ := org.View("nodes", "web")
+	mustPut(t, org, "nodes", "web", `{"name":"web","v":2}`)
+	if _, _, err := org.Delete("nodes", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if string(held) != `{"name":"web","v":1}` {
+		t.Fatalf("held view changed under a later write: %s", held)
 	}
 }
 

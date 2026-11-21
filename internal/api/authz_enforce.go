@@ -96,7 +96,7 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 		}
 	}
 	if check.existColl != "" {
-		raw, ok, err := org.Get(check.existColl, check.existKey)
+		raw, ok, err := org.View(check.existColl, check.existKey)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return r, false
