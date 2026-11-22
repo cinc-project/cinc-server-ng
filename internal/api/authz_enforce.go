@@ -108,6 +108,17 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 		// Hand the bytes forward so a read handler need not fetch them again.
 		r = withPreread(r, org.Name(), check.existColl, check.existKey, raw)
 	}
+	for _, e := range check.alsoExist {
+		ok, err := aclObjectExists(org, e.typ, e.name)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return r, false
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, e.msg)
+			return r, false
+		}
+	}
 	if check.aclEndpoint {
 		ok, err := aclObjectExists(org, check.aclType, check.aclName)
 		if err != nil {
@@ -179,7 +190,15 @@ type authzCheck struct {
 	// also is a further check the request must pass as well: erchef checks a
 	// push to a policy group on both the policy and the group.
 	also *authzCheck
+	// alsoExist are further objects that must exist, in order, after
+	// existColl and before any permission is checked: a missing one is a 404
+	// with its msg.
+	alsoExist []existence
 }
+
+// existence names an object (in aclObjectExists terms) that a request needs,
+// and the 404 message to give when it is missing.
+type existence struct{ typ, name, msg string }
 
 // effectivePerm is the ACL and permission a check is decided on: the object's,
 // or, for a createIn check on an object that doesn't exist yet, create on the
@@ -288,6 +307,9 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 		return classifyCookbook(method, seg, rest, read)
 	case seg == "users" || seg == "association_requests":
 		return classifyOrgMembership(method, org, rest)
+	case seg == "universe" && len(rest) == 1 && read:
+		// chef_wm_universe: read on the cookbooks container.
+		return &authzCheck{aclType: "containers", aclName: "cookbooks", perm: "read"}, true
 	case enforceSegs[seg]:
 		return classifyGeneric(method, seg, rest, read)
 	}
@@ -427,6 +449,9 @@ func classifySubResource(method, seg string, rest []string) (*authzCheck, bool) 
 	if len(rest) < 3 {
 		return nil, false
 	}
+	if check, ok := classifyEnvRoleRead(method, seg, rest); ok {
+		return check, true
+	}
 	name, sub := rest[1], rest[2]
 	read := method == http.MethodGet || method == http.MethodHead
 
@@ -462,6 +487,64 @@ func classifySubResource(method, seg string, rest []string) (*authzCheck, bool) 
 		check.also = &authzCheck{aclType: "policies", aclName: rest[3], perm: "update", createIn: "policies"}
 	}
 	return check, true
+}
+
+// classifyEnvRoleRead gates the read-only routes nested under an environment
+// or a role, each the way the erchef resource serving it does (see
+// priv/dispatch.conf for which one that is):
+//
+//   - environments/{e}/cookbook_versions, the depsolver (chef_wm_depsolver):
+//     read on the cookbooks container and on the environment. It answers a
+//     POST, which carries the run list. The handler then checks read on
+//     every cookbook in the solution (envCookbookVersions).
+//   - environments/{e}/cookbooks[/{c}] (chef_wm_environment_cookbooks) and
+//     environments/{e}/recipes (chef_wm_environment_recipes): read on the
+//     environment. The named cookbook must exist, in any version.
+//   - environments/{e}/nodes (chef_wm_nodes): read on the nodes container.
+//     The environment's existence is the handler's, after authorization.
+//   - environments/{e}/roles/{r} and roles/{r}/environments/{e}
+//     (chef_wm_environment_roles), roles/{r}/environments (chef_wm_named_role):
+//     read on the role, which must exist, and then so must the environment.
+func classifyEnvRoleRead(method, seg string, rest []string) (*authzCheck, bool) {
+	read := method == http.MethodGet || method == http.MethodHead
+	name, sub := rest[1], rest[2]
+	envExist := func(env string) (string, string, string) {
+		return "environments", env, "Cannot find environment " + env
+	}
+	roleCheck := func(role, env string) *authzCheck {
+		c := &authzCheck{aclType: "roles", aclName: role, perm: "read",
+			existColl: "roles", existKey: role, existMsg: "Cannot find role " + role}
+		if env != "" {
+			typ, key, msg := envExist(env)
+			c.alsoExist = []existence{{typ, key, msg}}
+		}
+		return c
+	}
+	switch {
+	case seg == "environments" && sub == "cookbook_versions" && len(rest) == 3 && method == http.MethodPost:
+		c := &authzCheck{aclType: "containers", aclName: "cookbooks", perm: "read",
+			also: &authzCheck{aclType: "environments", aclName: name, perm: "read"}}
+		c.existColl, c.existKey, c.existMsg = envExist(name)
+		return c, true
+	case !read:
+		return nil, false
+	case seg == "environments" && (sub == "cookbooks" && len(rest) <= 4 || sub == "recipes" && len(rest) == 3):
+		c := &authzCheck{aclType: "environments", aclName: name, perm: "read"}
+		c.existColl, c.existKey, c.existMsg = envExist(name)
+		if len(rest) == 4 {
+			c.alsoExist = []existence{{"cookbooks", rest[3], "Cannot find a cookbook named " + rest[3]}}
+		}
+		return c, true
+	case seg == "environments" && sub == "nodes" && len(rest) == 3:
+		return &authzCheck{aclType: "containers", aclName: "nodes", perm: "read"}, true
+	case seg == "environments" && sub == "roles" && len(rest) == 4:
+		return roleCheck(rest[3], name), true
+	case seg == "roles" && sub == "environments" && len(rest) == 4:
+		return roleCheck(name, rest[3]), true
+	case seg == "roles" && sub == "environments" && len(rest) == 3:
+		return roleCheck(name, ""), true
+	}
+	return nil, false
 }
 
 // classifyCookbook handles cookbooks and cookbook_artifacts, which are

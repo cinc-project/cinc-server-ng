@@ -59,9 +59,6 @@ var openWrites = []openWrite{
 		"partial search: a read that uses POST to carry the projection in a body"},
 	{http.MethodPut, "/users/{user}/association_requests/",
 		"an invitation response, which the handler restricts to the invited user"},
-	{http.MethodPost, "/organizations/{org}/environments/",
-		"cookbook-version solving: a read that uses POST to carry a run list in a body, " +
-			"returning only cookbook metadata the caller could read directly"},
 }
 
 // openWriteReason returns why a mutating route is deliberately unchecked, or ""
