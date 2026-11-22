@@ -80,6 +80,22 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// The flag is a request, never part of the actor.
 		delete(obj, "create_key")
 
+		// erchef refuses a validator's request to create another validator
+		// (oc_chef_wm_base:create_in_container), after the body is validated.
+		if a.enforceACL && segment == "clients" && obj["validator"] == true {
+			if actor, ok := actorFromContext(r.Context()); ok && actor.IsClient {
+				validator, err := isValidatorClient(org, actor.Name)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				if validator {
+					writeError(w, http.StatusForbidden, "missing create permission")
+					return
+				}
+			}
+		}
+
 		resp := map[string]any{
 			"uri": objectURL(r, orgSegment(r), segment, name),
 		}

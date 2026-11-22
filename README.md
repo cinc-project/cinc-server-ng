@@ -92,11 +92,12 @@ pipelines stay friction-free. To exercise authorization-dependent behavior
 opposite, production-leaning default: it **enforces** unless told otherwise; see
 "Use as a binary".) Enforcement matches a real Chef Infra Server: a new object
 starts from its container's ACL (so narrowing a container narrows what is
-created in it afterwards), its creator is granted full control of it, a
-registered client holds its own record and keys, joins the org's `clients`
-group and can create and manage its own node, and the standard chef-client
-bootstrap works end to end. The default groups and the ACLs on each
-container, group and the org itself follow erchef's org creation policy (so a
+created in it afterwards), its creator is granted full control of it
+(except a validator, which holds nothing on the clients it registers and
+cannot create another validator), a registered client holds its own record
+and keys, joins the org's `clients` group and can create and manage its own
+node, and the standard chef-client bootstrap works end to end. The default groups and
+the ACLs on each container, group and the org itself follow erchef's org creation policy (so a
 plain client can read the nodes, roles, environments, cookbooks, data bags and
 policies it converges from, but not list the org's clients or groups). Making
 a new object of any kind, including a new cookbook, cookbook artifact, policy
