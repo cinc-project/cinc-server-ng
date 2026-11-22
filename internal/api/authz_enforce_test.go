@@ -210,7 +210,7 @@ func TestClassifyRequest(t *testing.T) {
 		// An actor's keys are its credential, so they are gated like the actor.
 		{"GET", "/users/bob/keys", &authzCheck{superuserOnly: true, perm: "read", allowSelf: "bob", serverAdmins: true, serverAdminTarget: "bob"}},
 		// Provisioning an org is server-level; listing them stays open.
-		{"POST", "/organizations", &authzCheck{superuserOnly: true, perm: "create"}},
+		{"POST", "/organizations", &authzCheck{superuserOnly: true, perm: "create", serverAdmins: true}},
 		// cinc-server-ng's own administration routes are the superuser's
 		// alone, reads included (server-admins membership names who manages
 		// every account).

@@ -119,8 +119,13 @@ user. The bootstrap admin is a superuser and bypasses ACLs, mirroring Chef's
 
 Members of the global `server-admins` group hold what Chef Infra Server grants
 it: they may list and create users, and read, update and delete any user that
-is not a superuser, including its keys. They get nothing more: no user `_acl`
-access, no organization access, and no way to set a user's superuser flag.
+is not a superuser, including its keys. Going beyond Chef Infra Server (where
+only the superuser can), they may also create organizations with
+`POST /organizations`, and the creator becomes a member of the new org and of
+its `users` and `admins` groups, so it can run the org and invite others
+without the superuser's key. (An org the superuser creates gets no such member,
+as on Chef.) They get nothing more: no user `_acl` access, no access to an
+organization they did not create, and no way to set a user's superuser flag.
 Chef manages membership with `chef-server-ctl grant-server-admin-permissions`;
 here the superuser uses `/_cinc/server_admins`, a cinc-server-ng route with no
 Chef equivalent (for example `knife raw -m PUT /_cinc/server_admins/alice`).

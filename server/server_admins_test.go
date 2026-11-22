@@ -40,7 +40,8 @@ func serverAdmins(t *testing.T, srv *Server) []string {
 // A server-admins member holds what erchef's bootstrap grants the group
 // (create, read, update and delete on the users container, inherited by every
 // user created after it) and nothing more: no grant, so no user _acl; nothing on
-// a superuser, which predates the group; nothing in an organization.
+// a superuser, which predates the group; nothing in an organization it did not
+// create (creating one is TestServerAdminCreatesOrganization).
 func TestServerAdminManagesUsers(t *testing.T) {
 	for _, backend := range []string{"memory", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
@@ -101,7 +102,6 @@ func TestServerAdminManagesUsers(t *testing.T) {
 				{"POST", "/users/pivotal/keys", `{"name":"k2","public_key":"x","expiration_date":"infinity"}`},
 				{"GET", "/users/bob/_acl", ""},
 				{"PUT", "/users/bob/_acl/read", `{"read":{"actors":["alice"],"groups":[]}}`},
-				{"POST", "/organizations", `{"name":"evil","full_name":"Evil"}`},
 				{"GET", "/organizations/acme/nodes", ""},
 				{"POST", "/organizations/acme/users", `{"username":"alice"}`},
 				{"GET", "/_cinc/server_admins", ""},

@@ -263,12 +263,16 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 		}
 		return &authzCheck{superuserOnly: true, perm: perm}, true
 	}
-	// Provisioning an organization is a server-level operation, so it is
-	// superuser-only. Listing them stays open: it exposes only names, which a
-	// caller can already enumerate via /users/{user}/organizations.
+	// Provisioning an organization is a server-level operation: the superuser
+	// and, as a cinc-server-ng extension, members of server-admins. On Chef
+	// Infra Server only the superuser may; here a server-admin may too, so a
+	// human operator can stand up an org without holding pivotal's key (the
+	// handler makes such a creator an admin of the org, see
+	// createOrganization). Listing them stays open: it exposes only names,
+	// which a caller can already enumerate via /users/{user}/organizations.
 	if len(parts) == 1 && parts[0] == "organizations" {
 		if method == http.MethodPost {
-			return &authzCheck{superuserOnly: true, perm: "create"}, true
+			return &authzCheck{superuserOnly: true, perm: "create", serverAdmins: true}, true
 		}
 		return nil, false
 	}
