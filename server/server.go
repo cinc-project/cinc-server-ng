@@ -346,6 +346,28 @@ func upgradeValidatorClientACLs(st *store.Store) error {
 	return nil
 }
 
+// upgradeObjectACLs stores every org's objects' creation ACLs (see
+// api.UpgradeObjectACLs). On a store with nothing to change it writes nothing.
+func upgradeObjectACLs(st *store.Store) error {
+	names, err := st.ListOrgs()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		org, ok, err := st.Org(name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if err := api.UpgradeObjectACLs(org); err != nil {
+			return fmt.Errorf("upgrade org %q object ACLs: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // upgradePasswords hashes any plain-text password a durable store holds from
 // an older version, in the global scope (users) and every org. On a store
 // with none it reads each passwords collection once and writes nothing.
@@ -547,6 +569,16 @@ func New(opts Options) (*Server, error) {
 	if opts.StatePath != "" {
 		if _, err := state.Load(st, opts.StatePath); err != nil {
 			return nil, fmt.Errorf("load state %q: %w", opts.StatePath, err)
+		}
+	}
+
+	// Under enforcement every object needs the ACL erchef would have created
+	// it with: those loaded just above have none, and an older version wrote
+	// none for some kinds and an over-broad one for clients (see
+	// api.UpgradeObjectACLs).
+	if opts.EnforceACL {
+		if err := upgradeObjectACLs(st); err != nil {
+			return nil, err
 		}
 	}
 

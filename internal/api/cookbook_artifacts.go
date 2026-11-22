@@ -126,6 +126,13 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// The first identifier of a name creates the artifact, whose ACL every
+	// later identifier shares (erchef keeps one authz id per name).
+	isNew, err := a.isNewObject(org, "cookbook_artifacts", name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	for _, sum := range manifestChecksums(m) {
 		has, err := org.HasBlob(sum)
 		if err != nil {
@@ -138,6 +145,10 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := org.Put("cookbook_artifacts", cookbookKey(name, ident), raw); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.grantCreatorIfNew(r, org, "cookbook_artifacts", name, isNew); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

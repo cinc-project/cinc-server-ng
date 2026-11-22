@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+
+	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // These cases cover routes that previously fell through classifyRequest to
@@ -109,6 +111,10 @@ func TestClassifyOrgMembershipRoutes(t *testing.T) {
 // erchef's org policy lets it (the org, the groups container and a group
 // created in it, not the default groups).
 func TestFallbackACLReservesOrgAuthorityToAdmins(t *testing.T) {
+	org, err := store.New().CreateOrg("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct {
 		typ, name  string
 		usersRead  bool
@@ -122,7 +128,10 @@ func TestFallbackACLReservesOrgAuthorityToAdmins(t *testing.T) {
 		{"groups", "ops", true, true},
 		{"containers", "groups", true, true},
 	} {
-		acl := fallbackACL(c.typ, c.name)
+		acl, err := fallbackACL(org, c.typ, c.name)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, p := range []string{"create", "update", "delete", "grant"} {
 			got := anyStrings(acl[p].(map[string]any)["groups"])
 			if slices.Contains(got, "users") || slices.Contains(got, "clients") {
@@ -140,10 +149,18 @@ func TestFallbackACLReservesOrgAuthorityToAdmins(t *testing.T) {
 			t.Errorf("%s/%s read groups = %v, want no clients read", c.typ, c.name, read)
 		}
 	}
-	// Any other object keeps the permissive default.
-	for _, c := range [][2]string{{"nodes", "web01"}, {"containers", "nodes"}} {
-		if got := anyStrings(fallbackACL(c[0], c[1])["update"].(map[string]any)["groups"]); !slices.Contains(got, "users") {
-			t.Errorf("%s/%s update groups = %v, want the default", c[0], c[1], got)
+	// An object in a container reports its container's ACL: the nodes
+	// container gives the users group update, the clients container doesn't.
+	for _, c := range []struct {
+		typ, name   string
+		usersUpdate bool
+	}{{"nodes", "web01", true}, {"containers", "nodes", true}, {"clients", "web01", false}} {
+		acl, err := fallbackACL(org, c.typ, c.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := anyStrings(acl["update"].(map[string]any)["groups"]); slices.Contains(got, "users") != c.usersUpdate {
+			t.Errorf("%s/%s update groups = %v, users update want %v", c.typ, c.name, got, c.usersUpdate)
 		}
 	}
 }

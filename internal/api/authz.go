@@ -101,7 +101,10 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 // createGroup creates a group from the Chef create body, which names the group
-// in "groupname" (or "name"/"id") and may seed members.
+// in "groupname" (or "name"/"id"). A new group has no members: erchef's
+// oc_chef_group:create_record keeps only the name, and members are added with
+// a PUT. Kept, a name that does not exist yet would make whatever is later
+// created under it a member from the start.
 func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
@@ -121,18 +124,31 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid group name.")
 		return
 	}
-	users, clients, groups := groupMembers(obj)
 	a.membership.Lock()
 	defer a.membership.Unlock()
+	// Rows left by an earlier group of this name go, but only once the name
+	// is known to be free: a conflicting create must not strip an existing
+	// group of the members its rows hold.
+	if _, ok, err := org.Get("groups", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if ok {
+		writeError(w, http.StatusConflict, "Object already exists")
+		return
+	}
 	if err := clearMembers(org, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	err := org.Create("groups", name, groupJSON(name, "", users, clients, groups))
+	err := org.Create("groups", name, groupJSON(name, "", nil, nil, nil))
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Object already exists")
 		return
 	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.grantCreator(r, org, "groups", name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -468,6 +484,10 @@ func (a *API) createContainer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "Container already exists")
 		return
 	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.grantContainerCreator(r, org, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

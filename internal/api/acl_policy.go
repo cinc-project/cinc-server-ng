@@ -102,7 +102,8 @@ func containerACL(name string) map[string]any {
 }
 
 // groupACL is the ACL erchef's org policy gives the named default group. A
-// group created later takes the groups container's ACL, as in erchef.
+// group created later takes the groups container's ACL as stored when it is
+// created, as in erchef (see fallbackACL and grantCreator).
 func groupACL(name string) map[string]any {
 	switch name {
 	case "admins", "clients", "users":

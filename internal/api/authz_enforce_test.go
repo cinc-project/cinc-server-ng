@@ -140,14 +140,15 @@ func TestActorAllowedViaGroupDefaultACL(t *testing.T) {
 	if allowed {
 		t.Fatal("stranger is in no group and should be denied")
 	}
-	// Default ACL does not grant create to clients.
+	// An object with no stored ACL reports its container's: the roles
+	// container gives clients read and nothing else.
 	putGroup(t, org, "clients", nil, []string{"node1"}, nil)
-	allowed, err = actorAllowed(org, Actor{Name: "node1", IsClient: true}, "nodes", "web01", "create")
+	allowed, err = actorAllowed(org, Actor{Name: "node1", IsClient: true}, "roles", "web", "update")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if allowed {
-		t.Fatal("clients are not granted create by the default ACL")
+		t.Fatal("clients are not granted update by the roles container's ACL")
 	}
 }
 

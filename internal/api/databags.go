@@ -80,6 +80,10 @@ func (a *API) createDataBag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := a.grantCreator(r, org, "data", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]string{"uri": dataBagURL(r, org.Name(), name)})
 }
 

@@ -578,6 +578,15 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// The first version of a name creates the cookbook, whose ACL every later
+	// version shares.
+	isNew := false
+	if !existed {
+		if isNew, err = a.isNewObject(org, "cookbooks", name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	// A frozen version is overwritten only with ?force, and stays frozen: erchef
 	// (chef_wm_cookbook_version is_conflict/from_json) never clears "frozen?".
 	if existed && storedFrozen(prev) {
@@ -610,6 +619,10 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := org.Put("cookbooks", cookbookKey(name, version), raw); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.grantCreatorIfNew(r, org, "cookbooks", name, isNew); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

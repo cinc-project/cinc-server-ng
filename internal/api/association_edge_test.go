@@ -107,9 +107,13 @@ func TestDisassociateAdminRefused(t *testing.T) {
 	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/users", `{"username":"dave"}`); resp.StatusCode != 201 {
 		t.Fatalf("associate = %d: %s", resp.StatusCode, body)
 	}
-	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/groups",
-		`{"groupname":"admins","actors":{"users":["dave"],"clients":[],"groups":[]}}`); resp.StatusCode != 201 {
+	// A create stores no members (oc_chef_group:create_record); a PUT adds them.
+	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/groups", `{"groupname":"admins"}`); resp.StatusCode != 201 {
 		t.Fatalf("create admins = %d: %s", resp.StatusCode, body)
+	}
+	if resp, body := do(t, "PUT", srv.URL+"/organizations/acme/groups/admins",
+		`{"groupname":"admins","actors":{"users":["dave"],"clients":[],"groups":[]}}`); resp.StatusCode != 200 {
+		t.Fatalf("add dave to admins = %d: %s", resp.StatusCode, body)
 	}
 
 	resp, body := do(t, "DELETE", srv.URL+"/organizations/acme/users/dave", "")
@@ -140,9 +144,11 @@ func TestDisassociateNestedAdminRefused(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	do(t, "POST", srv.URL+"/users", userBody(`{"name":"dave"}`))
 	do(t, "POST", srv.URL+"/organizations/acme/users", `{"username":"dave"}`)
-	do(t, "POST", srv.URL+"/organizations/acme/groups",
+	do(t, "POST", srv.URL+"/organizations/acme/groups", `{"groupname":"ops"}`)
+	do(t, "PUT", srv.URL+"/organizations/acme/groups/ops",
 		`{"groupname":"ops","actors":{"users":["dave"],"clients":[],"groups":[]}}`)
-	do(t, "POST", srv.URL+"/organizations/acme/groups",
+	do(t, "POST", srv.URL+"/organizations/acme/groups", `{"groupname":"admins"}`)
+	do(t, "PUT", srv.URL+"/organizations/acme/groups/admins",
 		`{"groupname":"admins","actors":{"users":[],"clients":[],"groups":["ops"]}}`)
 	if resp, body := do(t, "DELETE", srv.URL+"/organizations/acme/users/dave", ""); resp.StatusCode != 403 {
 		t.Fatalf("remove nested admin = %d, want 403: %s", resp.StatusCode, body)
