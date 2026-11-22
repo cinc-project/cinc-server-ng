@@ -230,8 +230,8 @@ func (a *API) listUserOrgs(w http.ResponseWriter, r *http.Request) {
 
 // joinOrgAsAdmin makes the global user a member of org and adds it to the org's
 // users and admins groups, as an association followed by an admin's group edit
-// would. Each write is idempotent. The caller holds API.membership (shared) and
-// has checked the user exists.
+// would. Each write is idempotent. The caller has checked the user exists and,
+// while requests may be running, holds API.membership shared.
 func joinOrgAsAdmin(org *store.Org, user string) error {
 	if err := org.Put(assocColl, user, mustEncode(map[string]any{"username": user})); err != nil {
 		return err
