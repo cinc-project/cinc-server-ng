@@ -135,6 +135,11 @@ func TestUnclassifiedReadsStillPass(t *testing.T) {
 	if _, err := CreateOrganization(st, "acme", "acme"); err != nil {
 		t.Fatal(err)
 	}
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	associate(t, org, "mallory")
 	a := New(st, WithACLEnforcement(true))
 	h := a.Handler()
 

@@ -21,7 +21,7 @@ cmd/cinc-server-ng (flag parsing)
   └─ server.New(Options)            server/        — bootstraps store+admin+orgs, wires middleware
        authMiddleware               server/auth.go — verifies Mixlib signature (skipped if DisableAuth),
          └─ withAPIVersion          internal/api   — stores the actor in ctx via api.WithActor
-              └─ authzMiddleware     (api, only when EnforceACL) — ACL/group enforcement
+              └─ authzMiddleware     (api, only when EnforceACL) — org membership gate, then ACL/group enforcement
                    └─ withJSONErrors (api) — converts unrouted 404/405 to JSON
                         └─ mux       internal/api/api.go — http.ServeMux, one handler set per resource
 ```
@@ -48,6 +48,8 @@ The README status table is the authoritative feature map; package doc comments a
 
 Enforcement can leak in two independent ways, and a change usually has to answer for both. Getting one right proves nothing about the other.
 
+Ahead of both, `orgMembershipGate` refuses a user not associated with the org on every org route, classified or not (erchef's `authorized_by_org_membership_check`): clients and the superuser pass, and `principals`/`required_recipe` are exempt as in erchef. So the surfaces below leak only to org members and clients, and a stale ACL entry or group row naming an ex-member is inert only because of the gate.
+
 1. **An unclassified route.** `classifyRequest` is an allowlist; a route it does not recognize is *permitted*. `refuseUnclassifiedWrite` closes this for mutating methods (declare a deliberate exception in `openWrites`, with a reason), but unclassified **reads** are still allowed through by design. A read route that should be restricted needs either a case in `classifyRequest` or its own check in the handler — and if you choose the handler, write the check, don't just note it in a comment.
 2. **An object with no stored ACL.** `loadACL` falls back to `defaultACL()`, which grants read to `admins`/`users`/`clients` and create/update/delete to `admins`/`users`. Every org member is in `users`, so "no ACL stored" means "every member has CRUD". `grantCreator` only writes a per-object ACL from `createObject` and `createActor`; data bags, cookbooks, artifacts, policies, policy groups, groups and containers are created by dedicated handlers that never call it, and organizations never get one at all.
 
@@ -55,7 +57,7 @@ Other invariants that are easy to violate one half of:
 
 - **ACLs are keyed `"<type>/<name>"` and store actors typed, as `users` and `clients` lists.** An ACL outlives its object unless the delete handler removes it explicitly. A client and a global user may share a name (as on Chef), so a check matches a name only in the list of the actor's own type (`aceNamesFor`); an untyped `actors` list in a stored entry grants nothing. Anything else that compares `actor.Name` (self-service, membership, invitations) must check `actor.IsClient` too. `resolveAuth` returns every same-named candidate, user first, and the actor is the one whose key verifies: user-first is what stops a client registered with a user's (public) key from capturing that user's requests.
 - **Group membership is the union of the group document and the `group_members` rows.** The split is what keeps fleet bootstrap linear. Read it with `groupMembership()`, never from the document alone, and revoke both halves — dropping only the rows leaves a hand-authored or explicitly-written document still naming the actor.
-- **Adding an actor to a group grants permission; removing the actor from the org must remove it from the groups.** `association_users` and group membership are read by different code (`orgViewAllowed` vs `actorAllowed`), so a half-revocation looks correct from the membership endpoints.
+- **Adding an actor to a group grants permission; removing the actor from the org must remove it from the groups.** `association_users` and group membership are read by different code (`orgMembershipGate`/`orgViewAllowed` vs `actorAllowed`); the gate hides stale group rows while the user is out, but re-inviting them brings the rows back into force.
 
 ## Derived indexes and the write stream
 

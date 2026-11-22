@@ -585,7 +585,9 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 // invitation pending for it, and every ACL entry naming it, there and in the
 // global scope where users' own ACLs live. (Dissociating a
 // user from one org keeps its ACL entries, as Chef does: the actor still
-// exists, and is the same actor if it is invited back.)
+// exists, and is the same actor if it is invited back. Under enforcement the
+// org membership gate, as in erchef, is what keeps those entries from granting
+// anything meanwhile; see org_membership_gate.go.)
 func (a *API) removeUserFromOrgs(user string) error {
 	// Users' own ACLs live in the global scope and can name other users.
 	if err := removeFromACLs(a.store.Global(), "users", user); err != nil {

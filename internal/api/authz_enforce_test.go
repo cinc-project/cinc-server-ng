@@ -281,7 +281,21 @@ func enforcingHandler(t *testing.T) (http.Handler, *store.Store) {
 	if err := org.Put("nodes", "web01", []byte(`{"name":"web01"}`)); err != nil {
 		t.Fatal(err)
 	}
+	// The users these tests hold to ACLs are org members, in no group: a
+	// non-member is refused before any ACL is read (org_membership_gate.go).
+	associate(t, org, "stranger", "alice", "editor", "granter")
 	return New(st, WithACLEnforcement(true)).Handler(), st
+}
+
+// associate makes users members of org, as accepting an invitation does,
+// without adding them to any group.
+func associate(t *testing.T, org *store.Org, users ...string) {
+	t.Helper()
+	for _, u := range users {
+		if err := org.Put(assocColl, u, mustEncode(map[string]any{"username": u})); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // authzReq sends a request through h as actor and returns status and body.

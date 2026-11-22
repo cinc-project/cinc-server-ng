@@ -27,8 +27,9 @@ func (a *API) registerAssociationRoutes(mux *recordingMux) {
 // orgViewAllowed reports whether the request's actor may view this org's
 // membership. With no actor (auth disabled / API-layer) everything is allowed;
 // the bootstrap superuser always may; otherwise the actor must currently be a
-// member of the org. A non-member — for example a user who was removed — is
-// refused with 403, matching Chef Infra Server.
+// member of the org. Under ACL enforcement the org membership gate
+// (org_membership_gate.go) has already refused a non-member with erchef's
+// message; this covers authentication without enforcement.
 func (a *API) orgViewAllowed(w http.ResponseWriter, r *http.Request, org *store.Org) bool {
 	actor, ok := actorFromContext(r.Context())
 	if !ok || actor.IsGlobalAdmin {
@@ -189,9 +190,9 @@ func (a *API) disassociateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Association added the user to the org's "users" group, which the default
-	// ACL grants CRUD on the org's objects. Leaving that membership behind would
-	// make removal cosmetic: the membership endpoints would refuse the user while
-	// every object permission the group carries stayed live.
+	// ACL grants CRUD on the org's objects. The membership gate refuses the user
+	// while it is out of the org, but leaving the groups behind would hand every
+	// permission they carry back the moment the user is invited again.
 	if err := removeActorFromAllGroups(org, memberUsers, user); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

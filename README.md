@@ -102,10 +102,13 @@ plain client can read the nodes, roles, environments, cookbooks, data bags and
 policies it converges from, but not list the org's clients or groups). Making
 a new object of any kind, including a new cookbook, cookbook artifact, policy
 or policy group, takes create on its container, and pushing a policy to a group
-is checked on both the policy and the group. It
+is checked on both the policy and the group. A user
+who is not a member of the org (never invited, or removed from it) is refused
+every request under `/organizations/<org>` with `403`, whatever ACLs or groups
+still name them; clients and the superuser are exempt. It
 resolves actor membership through nested groups, and checks
-authentication → existence → authorization in that order (so a missing object
-reports `404`, not `403`). Enforcement covers the
+authentication → org membership → existence → authorization in that order (so
+a missing object reports `404` to a member, not `403`). Enforcement covers the
 org-scoped object endpoints (nodes, roles, data bags, cookbooks, groups,
 containers, …), the org's own ACL (`/organizations/<org>/organizations/_acl`,
 erchef's path), and the global actor endpoints: the

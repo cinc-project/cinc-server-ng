@@ -52,6 +52,12 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	if actor.IsGlobalAdmin {
 		return r, true // pivotal-style superuser bypasses ACLs
 	}
+	// A user outside the org is refused before any ACL is read, on every org
+	// route (see org_membership_gate.go).
+	memberOrg, ok := a.orgMembershipGate(w, r, actor)
+	if !ok {
+		return r, false
+	}
 	check, ok := classifyRequest(r.Method, r.URL.Path)
 	if !ok {
 		// Nothing classified this request. For a read that means the route
@@ -85,14 +91,18 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	if !check.global {
 		// classifyRequest only succeeds for org-scoped paths, so parts[1] is the org.
 		orgName := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[1]
-		var err error
-		org, ok, err = a.store.Org(orgName)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return r, false
-		}
-		if !ok {
-			return r, true // unknown org: let the handler emit its own 404
+		if memberOrg != nil && memberOrg.Name() == orgName {
+			org = memberOrg // already resolved by the membership gate
+		} else {
+			var err error
+			org, ok, err = a.store.Org(orgName)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return r, false
+			}
+			if !ok {
+				return r, true // unknown org: let the handler emit its own 404
+			}
 		}
 	}
 	if check.existColl != "" {
@@ -328,8 +338,8 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 //     (see fallbackACL). A user may always remove themself.
 //
 // Any other write to these paths is held to update on the organization too,
-// rather than left unclassified. The read routes are left to the handler's own
-// membership check (orgViewAllowed).
+// rather than left unclassified. The read routes need only membership, which
+// the org membership gate has already checked.
 func classifyOrgMembership(method, org string, rest []string) (*authzCheck, bool) {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodDelete:
