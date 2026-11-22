@@ -6,10 +6,12 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/cinc-project/cinc-server-ng/internal/api"
 	"github.com/cinc-project/cinc-server-ng/server"
 )
 
@@ -273,5 +275,103 @@ func TestBodyCapFlagsSet(t *testing.T) {
 	opts := f.serverOptions(nil)
 	if opts.MaxBodyBytes != 1000000 || opts.MaxFileStoreBytes != 1048576 {
 		t.Errorf("options caps = %d, %d, want 1000000, 1048576", opts.MaxBodyBytes, opts.MaxFileStoreBytes)
+	}
+}
+
+// The bootstrap user's password comes from a file or the environment, never a
+// flag, so it stays off the command line and out of --help.
+func TestBootstrapUserFlags(t *testing.T) {
+	t.Setenv("CINC_SERVER_NG_BOOTSTRAP_PASSWORD", "env-secret")
+	f, err := parseFlags([]string{"--bootstrap-user", "alice", "--bootstrap-email", "alice@example.com"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if f.bootstrapUser != "alice" || f.bootstrapEmail != "alice@example.com" || f.bootstrapPassword != "env-secret" {
+		t.Errorf("bootstrap = %q/%q/%q, want alice/alice@example.com/env-secret", f.bootstrapUser, f.bootstrapEmail, f.bootstrapPassword)
+	}
+	if opts := f.serverOptions(nil); opts.BootstrapUser != "alice" || opts.BootstrapEmail != "alice@example.com" || opts.BootstrapPassword != "env-secret" {
+		t.Errorf("options bootstrap = %q/%q/%q, want alice/alice@example.com/env-secret", opts.BootstrapUser, opts.BootstrapEmail, opts.BootstrapPassword)
+	}
+
+	var buf bytes.Buffer
+	if _, err := parseFlags([]string{"-h"}, &buf); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("parseFlags(-h) error = %v", err)
+	}
+	usage := buf.String()
+	if strings.Contains(usage, "env-secret") {
+		t.Errorf("usage leaks the bootstrap password:\n%s", usage)
+	}
+	for _, name := range []string{"-bootstrap-user", "-bootstrap-password-file", "-bootstrap-email"} {
+		if !strings.Contains(usage, name) {
+			t.Errorf("usage should document %s:\n%s", name, usage)
+		}
+	}
+	if strings.Contains(usage, "-bootstrap-password ") {
+		t.Errorf("usage offers a plain password flag:\n%s", usage)
+	}
+}
+
+// readPasswordFile drops one trailing newline (echo secret > file) and nothing
+// else.
+func TestReadPasswordFile(t *testing.T) {
+	for in, want := range map[string]string{
+		"s3cret\n":   "s3cret",
+		"s3cret\r\n": "s3cret",
+		"s3cret":     "s3cret",
+		"s3cret\n\n": "s3cret\n",
+		" s3cret \n": " s3cret ",
+	} {
+		path := filepath.Join(t.TempDir(), "pw")
+		if err := os.WriteFile(path, []byte(in), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readPasswordFile(path)
+		if err != nil || got != want {
+			t.Errorf("readPasswordFile(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+}
+
+// --init applies --bootstrap-user, so a pre-baked database already has the
+// console admin; the password file wins over the environment.
+func TestInitBootstrapsUser(t *testing.T) {
+	t.Setenv("CINC_SERVER_NG_BOOTSTRAP_PASSWORD", "env-secret")
+	dir := t.TempDir()
+	db, pwFile := filepath.Join(dir, "init.db"), filepath.Join(dir, "pw")
+	if err := os.WriteFile(pwFile, []byte("file-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"--storage", "sqlite", "--db", db, "--init",
+		"--bootstrap-user", "alice", "--bootstrap-password-file", pwFile}, io.Discard); err != nil {
+		t.Fatalf("run(--init): %v", err)
+	}
+	srv, err := server.New(server.Options{Storage: "sqlite", DB: db})
+	if err != nil {
+		t.Fatalf("reopen baked db: %v", err)
+	}
+	defer srv.Stop(context.Background())
+	stored, ok, err := srv.Store().Global().Get(api.PasswordsCollection, "alice")
+	if err != nil || !ok {
+		t.Fatalf("alice's password: ok=%v err=%v", ok, err)
+	}
+	if !api.VerifyPassword(stored, "file-secret") {
+		t.Error("alice's password is not the file's")
+	}
+}
+
+func TestBootstrapUserFlagErrors(t *testing.T) {
+	t.Setenv("CINC_SERVER_NG_BOOTSTRAP_PASSWORD", "")
+	missing := filepath.Join(t.TempDir(), "missing")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--bootstrap-user", "alice"}, "password"},
+		{[]string{"--bootstrap-user", "alice", "--bootstrap-password-file", missing}, "bootstrap password file"},
+		{[]string{"--bootstrap-password-file", missing}, "bootstrap password file"},
+	} {
+		if err := run(append(tc.args, "--init"), io.Discard); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("run(%v) = %v, want an error mentioning %q", tc.args, err, tc.want)
+		}
 	}
 }

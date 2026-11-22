@@ -133,6 +133,16 @@ setups should, see [DEPLOYMENT.md](DEPLOYMENT.md#running-cinc-console-against-it
    the `acme` org's nodes, roles, environments, data bags, cookbooks, and
    Policyfiles, with the server enforcing that user's view.
 
+Against a server without the seeded `dev/test-repo` state, nobody has a
+password yet. Start it with `--bootstrap-user <name>` and the password in
+`CINC_SERVER_NG_BOOTSTRAP_PASSWORD` (or `--bootstrap-password-file`) to get a
+console admin of every `--orgs` org:
+
+```sh
+CINC_SERVER_NG_BOOTSTRAP_PASSWORD=alice123 \
+  go run ./cmd/cinc-server-ng --key-out dev-admin.pem --bootstrap-user alice
+```
+
 ACL enforcement is on by default, so the console exercises authorization exactly
 as it would against a real Chef Infra Server — answering with `403` where a
 production server would. Pass `--enforce-acls=false` if you want a permissive
