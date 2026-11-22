@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -178,19 +179,16 @@ func (a *API) createSandbox(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	var req struct {
-		Checksums map[string]any `json:"checksums"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read request body")
 		return
 	}
-
-	sums := make([]string, 0, len(req.Checksums))
-	for sum := range req.Checksums {
-		sums = append(sums, sum)
+	sums, msg := sandboxChecksums(body)
+	if msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
 	}
-	sort.Strings(sums)
 
 	id := sandboxID(sums)
 	out := map[string]any{}
@@ -223,6 +221,51 @@ func (a *API) createSandbox(w http.ResponseWriter, r *http.Request) {
 		"uri":        requestBaseURL(r) + "/organizations/" + org.Name() + "/sandboxes/" + id,
 		"checksums":  out,
 	})
+}
+
+// sandboxChecksums returns the sorted checksums a sandbox request announces,
+// or the message erchef rejects it with. chef_sandbox:valid_checksum_hash
+// wants at least one checksum, each 32 hex digits (either case) mapped to
+// null, and chef_wm_malformed renders any failure as the constraint's
+// message, "Bad checksums!". Without this, any string became a file-store
+// path and an upload grant.
+func sandboxChecksums(body []byte) ([]string, string) {
+	const bad = "Bad checksums!"
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, "invalid JSON"
+	}
+	raw, ok := req["checksums"]
+	if !ok {
+		return nil, "Field 'checksums' missing"
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil || entries == nil || len(entries) == 0 {
+		return nil, bad
+	}
+	sums := make([]string, 0, len(entries))
+	for sum, v := range entries {
+		if !isMD5Hex(sum) || string(bytes.TrimSpace(v)) != "null" {
+			return nil, bad
+		}
+		sums = append(sums, sum)
+	}
+	sort.Strings(sums)
+	return sums, ""
+}
+
+// isMD5Hex is chef_sandbox:is_md5_hex: exactly 32 hex digits.
+func isMD5Hex(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *API) commitSandbox(w http.ResponseWriter, r *http.Request) {
