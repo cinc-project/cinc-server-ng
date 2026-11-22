@@ -1,0 +1,136 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/cinc-project/cinc-server-ng/internal/api
+cpu: Apple M4 Pro
+                  │   v0.20.3    │                HEAD                │
+                  │    sec/op    │    sec/op     vs base              │
+Bootstrap500-14     261.7µ ±  5%   260.7µ ±  5%       ~ (p=0.589 n=6)
+Bootstrap2000-14    1.185m ±  3%   1.177m ±  4%       ~ (p=0.818 n=6)
+Bootstrap8000-14    5.050m ±  4%   5.042m ± 11%       ~ (p=0.818 n=6)
+CheckinsMemory-14   11.64µ ± 13%   11.36µ ±  3%       ~ (p=0.240 n=6)
+CheckinsSQLite-14   65.92µ ± 30%   64.69µ ±  3%       ~ (p=0.589 n=6)
+ListObjects-14      47.39µ ±  8%   45.92µ ±  2%  -3.11% (p=0.026 n=6)
+SearchScanWarm-14   35.07µ ±  5%   34.75µ ±  7%       ~ (p=0.394 n=6)
+geomean             153.4µ         151.3µ        -1.36%
+
+                  │   v0.20.3    │                 HEAD                 │
+                  │     B/op     │     B/op      vs base                │
+Bootstrap500-14     541.4Ki ± 0%   541.4Ki ± 0%       ~ (p=0.829 n=6)
+Bootstrap2000-14    2.136Mi ± 0%   2.136Mi ± 0%       ~ (p=0.141 n=6)
+Bootstrap8000-14    8.560Mi ± 0%   8.560Mi ± 0%       ~ (p=0.699 n=6)
+CheckinsMemory-14   20.88Ki ± 0%   19.57Ki ± 0%  -6.29% (p=0.002 n=6)
+CheckinsSQLite-14   24.93Ki ± 0%   24.35Ki ± 0%  -2.33% (p=0.002 n=6)
+ListObjects-14      44.63Ki ± 1%   44.61Ki ± 1%       ~ (p=0.197 n=6)
+SearchScanWarm-14   23.93Ki ± 0%   23.93Ki ± 0%       ~ (p=1.000 n=6) ¹
+geomean             178.5Ki        176.2Ki       -1.26%
+¹ all samples are equal
+
+                  │   v0.20.3   │                HEAD                 │
+                  │  allocs/op  │  allocs/op   vs base                │
+Bootstrap500-14     4.375k ± 0%   4.375k ± 0%       ~ (p=1.000 n=6) ¹
+Bootstrap2000-14    17.92k ± 0%   17.92k ± 0%       ~ (p=1.000 n=6) ¹
+Bootstrap8000-14    72.08k ± 0%   72.08k ± 0%       ~ (p=1.000 n=6)
+CheckinsMemory-14    140.5 ± 0%    133.0 ± 0%  -5.34% (p=0.002 n=6)
+CheckinsSQLite-14    245.0 ± 0%    239.0 ± 0%  -2.45% (p=0.002 n=6)
+ListObjects-14       31.00 ± 0%    31.00 ± 0%       ~ (p=1.000 n=6) ¹
+SearchScanWarm-14    15.00 ± 0%    15.00 ± 0%       ~ (p=1.000 n=6) ¹
+geomean              709.4         701.4       -1.13%
+¹ all samples are equal
+
+pkg: github.com/cinc-project/cinc-server-ng/internal/store/sqlite
+        │   v0.20.3    │                HEAD                 │
+        │    sec/op    │    sec/op     vs base               │
+Get-14    5.019µ ± 39%   4.416µ ± 13%        ~ (p=0.065 n=6)
+Put-14    9.243µ ±  7%   8.385µ ±  9%   -9.28% (p=0.041 n=6)
+geomean   6.811µ         6.085µ        -10.65%
+
+        │   v0.20.3    │                 HEAD                 │
+        │     B/op     │     B/op      vs base                │
+Get-14    1.547Ki ± 0%   1.547Ki ± 0%       ~ (p=1.000 n=6) ¹
+Put-14      764.0 ± 0%     764.0 ± 0%       ~ (p=1.000 n=6) ¹
+geomean   1.074Ki        1.074Ki       +0.00%
+¹ all samples are equal
+
+        │  v0.20.3   │                HEAD                │
+        │ allocs/op  │ allocs/op   vs base                │
+Get-14    27.00 ± 0%   27.00 ± 0%       ~ (p=1.000 n=6) ¹
+Put-14    14.00 ± 0%   14.00 ± 0%       ~ (p=1.000 n=6) ¹
+geomean   19.44        19.44       +0.00%
+¹ all samples are equal
+
+pkg: github.com/cinc-project/cinc-server-ng/server
+                                             │   v0.20.3    │                HEAD                 │
+                                             │    sec/op    │    sec/op     vs base               │
+FleetCheckinEnforced-14                        13.24µ ± 28%   10.09µ ± 14%  -23.80% (p=0.026 n=6)
+FleetCheckinGroupGranted128-14                 17.60µ ± 16%   16.51µ ± 16%        ~ (p=0.132 n=6)
+FleetCheckinGroupGranted512-14                 10.76µ ± 11%   10.13µ ± 13%        ~ (p=0.132 n=6)
+FleetCheckinGroupGranted2048-14                9.194µ ± 10%   8.457µ ±  9%   -8.02% (p=0.015 n=6)
+FleetCheckinAuthOnly-14                        9.098µ ± 22%   8.383µ ± 11%        ~ (p=0.143 n=6)
+FleetCheckinNoAuth-14                          3.719µ ± 18%   3.589µ ± 15%        ~ (p=0.485 n=6)
+FleetCheckinEnforcedSQLite-14                  58.12µ ± 18%   56.35µ ± 10%        ~ (p=0.818 n=6)
+FleetCheckinEnforcedSQLiteGroupCommit-14       46.59µ ± 10%   44.89µ ±  2%        ~ (p=0.132 n=6)
+FleetCheckinEnforcedSQLiteBusy-14              54.91µ ± 49%   52.35µ ±  9%        ~ (p=0.180 n=6)
+FleetCheckinEnforcedSQLiteBusyGroupCommit-14   28.80µ ±  5%   28.75µ ±  2%        ~ (p=0.589 n=6)
+RealisticNodeSave-14                           129.7µ ±  6%   100.4µ ±  5%  -22.55% (p=0.002 n=6)
+RealisticCheckin-14                            14.74µ ± 15%   11.26µ ±  2%  -23.59% (p=0.002 n=6)
+RealisticCheckinSQLite-14                      59.47µ ±  8%   55.30µ ± 33%        ~ (p=0.310 n=6)
+RealisticSearch-14                             20.05µ ± 16%   15.01µ ± 19%  -25.15% (p=0.002 n=6)
+SearchScaleExact512-14                         298.6µ ±  4%   300.2µ ± 10%        ~ (p=0.589 n=6)
+SearchScaleExact2048-14                        1.148m ±  2%   1.152m ±  2%        ~ (p=0.937 n=6)
+SearchScaleExact8192-14                        4.735m ±  3%   4.856m ± 12%        ~ (p=0.132 n=6)
+SearchScaleSelective512-14                     31.83µ ±  3%   31.18µ ±  2%        ~ (p=0.065 n=6)
+SearchScaleSelective2048-14                    30.98µ ±  2%   30.55µ ±  6%        ~ (p=0.310 n=6)
+SearchScaleSelective8192-14                    31.19µ ±  2%   30.17µ ±  2%   -3.29% (p=0.004 n=6)
+geomean                                        42.56µ         39.22µ         -7.85%
+
+                                             │    v0.20.3    │                HEAD                 │
+                                             │     B/op      │     B/op      vs base               │
+FleetCheckinEnforced-14                         21.34Ki ± 0%   19.60Ki ± 0%   -8.19% (p=0.002 n=6)
+FleetCheckinGroupGranted128-14                  21.47Ki ± 1%   19.63Ki ± 1%   -8.56% (p=0.002 n=6)
+FleetCheckinGroupGranted512-14                  21.00Ki ± 0%   19.25Ki ± 0%   -8.34% (p=0.002 n=6)
+FleetCheckinGroupGranted2048-14                 20.87Ki ± 0%   19.15Ki ± 0%   -8.25% (p=0.002 n=6)
+FleetCheckinAuthOnly-14                         16.60Ki ± 0%   14.85Ki ± 0%  -10.55% (p=0.002 n=6)
+FleetCheckinNoAuth-14                          10.083Ki ± 0%   9.424Ki ± 0%   -6.53% (p=0.002 n=6)
+FleetCheckinEnforcedSQLite-14                   28.53Ki ± 0%   27.70Ki ± 0%   -2.93% (p=0.002 n=6)
+FleetCheckinEnforcedSQLiteGroupCommit-14        28.81Ki ± 0%   27.98Ki ± 0%   -2.87% (p=0.002 n=6)
+FleetCheckinEnforcedSQLiteBusy-14               28.04Ki ± 0%   27.25Ki ± 0%   -2.81% (p=0.002 n=6)
+FleetCheckinEnforcedSQLiteBusyGroupCommit-14    28.90Ki ± 0%   28.11Ki ± 0%   -2.75% (p=0.002 n=6)
+RealisticNodeSave-14                           194.32Ki ± 0%   94.64Ki ± 0%  -51.30% (p=0.002 n=6)
+RealisticCheckin-14                            118.24Ki ± 0%   62.45Ki ± 0%  -47.18% (p=0.002 n=6)
+RealisticCheckinSQLite-14                      131.58Ki ± 0%   89.49Ki ± 0%  -31.98% (p=0.002 n=6)
+RealisticSearch-14                              61.25Ki ± 4%   43.53Ki ± 4%  -28.94% (p=0.002 n=6)
+SearchScaleExact512-14                          168.6Ki ± 0%   167.5Ki ± 0%   -0.67% (p=0.002 n=6)
+SearchScaleExact2048-14                         611.3Ki ± 0%   610.2Ki ± 0%   -0.19% (p=0.002 n=6)
+SearchScaleExact8192-14                         2.331Mi ± 0%   2.330Mi ± 0%   -0.04% (p=0.002 n=6)
+SearchScaleSelective512-14                      18.08Ki ± 0%   16.60Ki ± 0%   -8.17% (p=0.002 n=6)
+SearchScaleSelective2048-14                     18.04Ki ± 0%   16.57Ki ± 0%   -8.18% (p=0.002 n=6)
+SearchScaleSelective8192-14                     18.04Ki ± 0%   16.56Ki ± 0%   -8.19% (p=0.002 n=6)
+geomean                                         48.86Ki        42.07Ki       -13.90%
+
+                                             │   v0.20.3   │                HEAD                │
+                                             │  allocs/op  │  allocs/op   vs base               │
+FleetCheckinEnforced-14                         223.0 ± 0%    212.0 ± 0%   -4.93% (p=0.002 n=6)
+FleetCheckinGroupGranted128-14                  199.5 ± 0%    188.5 ± 0%   -5.51% (p=0.002 n=6)
+FleetCheckinGroupGranted512-14                  198.0 ± 0%    187.0 ± 0%   -5.56% (p=0.002 n=6)
+FleetCheckinGroupGranted2048-14                 197.0 ± 0%    187.0 ± 0%   -5.08% (p=0.002 n=6)
+FleetCheckinAuthOnly-14                         119.0 ± 0%    109.0 ± 0%   -8.40% (p=0.002 n=6)
+FleetCheckinNoAuth-14                           70.00 ± 0%    66.00 ± 0%   -5.71% (p=0.002 n=6)
+FleetCheckinEnforcedSQLite-14                   388.0 ± 0%    379.0 ± 0%   -2.32% (p=0.002 n=6)
+FleetCheckinEnforcedSQLiteGroupCommit-14        390.0 ± 0%    382.0 ± 0%   -2.05% (p=0.002 n=6)
+FleetCheckinEnforcedSQLiteBusy-14               388.0 ± 0%    380.0 ± 0%   -2.06% (p=0.002 n=6)
+FleetCheckinEnforcedSQLiteBusyGroupCommit-14    407.0 ± 0%    398.0 ± 0%   -2.21% (p=0.002 n=6)
+RealisticNodeSave-14                            290.0 ± 0%    232.5 ± 0%  -19.83% (p=0.002 n=6)
+RealisticCheckin-14                             241.0 ± 0%    212.0 ± 0%  -12.03% (p=0.002 n=6)
+RealisticCheckinSQLite-14                       405.0 ± 0%    377.0 ± 0%   -6.91% (p=0.002 n=6)
+RealisticSearch-14                              326.5 ± 5%    287.5 ± 4%  -11.94% (p=0.002 n=6)
+SearchScaleExact512-14                         1.219k ± 0%   1.205k ± 0%   -1.15% (p=0.002 n=6)
+SearchScaleExact2048-14                        4.311k ± 0%   4.297k ± 0%   -0.32% (p=0.002 n=6)
+SearchScaleExact8192-14                        16.67k ± 0%   16.66k ± 0%   -0.08% (p=0.002 n=6)
+SearchScaleSelective512-14                      157.0 ± 0%    142.0 ± 0%   -9.55% (p=0.002 n=6)
+SearchScaleSelective2048-14                     157.0 ± 0%    142.0 ± 0%   -9.55% (p=0.002 n=6)
+SearchScaleSelective8192-14                     157.0 ± 0%    142.0 ± 0%   -9.55% (p=0.002 n=6)
+geomean                                         356.2         333.5        -6.37%
+
+                     │   v0.20.3    │                HEAD                 │
+                     │     B/s      │     B/s       vs base               │
+RealisticNodeSave-14   174.5Mi ± 5%   225.3Mi ± 5%  +29.15% (p=0.002 n=6)
