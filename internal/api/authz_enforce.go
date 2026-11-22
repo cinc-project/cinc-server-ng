@@ -119,14 +119,21 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 			return r, false
 		}
 	}
-	allowed, err := a.actorAllowed(org, actor, check.aclType, check.aclName, check.perm)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return r, false
-	}
-	if !allowed {
-		writeError(w, http.StatusForbidden, "missing "+check.perm+" permission")
-		return r, false
+	for c := check; c != nil; c = c.also {
+		typ, name, perm, err := effectivePerm(org, c)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return r, false
+		}
+		allowed, err := a.actorAllowed(org, actor, typ, name, perm)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return r, false
+		}
+		if !allowed {
+			writeError(w, http.StatusForbidden, "missing "+perm+" permission")
+			return r, false
+		}
 	}
 	return r, true
 }
@@ -160,6 +167,37 @@ type authzCheck struct {
 	// object's storage varies by type, so aclObjectExists checks it rather than
 	// existColl.
 	aclEndpoint bool
+	// createIn is erchef's create_in_container: when the aclType/aclName
+	// object doesn't exist yet, the request needs create on this container
+	// rather than perm on the object. It is how a container's ACL decides who
+	// may make a new cookbook, cookbook artifact, policy or policy group.
+	createIn string
+	// versionKey narrows createIn's existence test to one version, the
+	// "<name>/<version>" key in the aclType collection: every new cookbook
+	// artifact identifier is a creation, even of a name that has others.
+	versionKey string
+	// also is a further check the request must pass as well: erchef checks a
+	// push to a policy group on both the policy and the group.
+	also *authzCheck
+}
+
+// effectivePerm is the ACL and permission a check is decided on: the object's,
+// or, for a createIn check on an object that doesn't exist yet, create on the
+// container.
+func effectivePerm(org *store.Org, c *authzCheck) (typ, name, perm string, err error) {
+	if c.createIn == "" {
+		return c.aclType, c.aclName, c.perm, nil
+	}
+	var exists bool
+	if c.versionKey != "" {
+		_, exists, err = org.Get(c.aclType, c.aclName+"/"+c.versionKey)
+	} else {
+		exists, err = aclObjectExists(org, c.aclType, c.aclName)
+	}
+	if err != nil || exists {
+		return c.aclType, c.aclName, c.perm, err
+	}
+	return "containers", c.createIn, "create", nil
 }
 
 // enforceSegs are the generic object collections whose container ACL governs
@@ -411,7 +449,19 @@ func classifySubResource(method, seg string, rest []string) (*authzCheck, bool) 
 	if read {
 		perm = "read"
 	}
-	return &authzCheck{aclType: seg, aclName: name, perm: perm}, true
+	check := &authzCheck{aclType: seg, aclName: name, perm: perm}
+	switch {
+	case seg == "policies" && sub == "revisions" && method == http.MethodPost:
+		// The first revision creates the policy
+		// (oc_chef_wm_named_policy_revisions).
+		check.createIn = "policies"
+	case seg == "policy_groups" && sub == "policies" && method == http.MethodPut && len(rest) >= 4:
+		// A push may create the group, the policy or both, and is checked on
+		// each (oc_chef_wm_policy_group_policy_rev:prereq_object_permission).
+		check.createIn = "policy_groups"
+		check.also = &authzCheck{aclType: "policies", aclName: rest[3], perm: "update", createIn: "policies"}
+	}
+	return check, true
 }
 
 // classifyCookbook handles cookbooks and cookbook_artifacts, which are
@@ -437,7 +487,17 @@ func classifyCookbook(method, seg string, rest []string, read bool) (*authzCheck
 		if !ok {
 			return nil, false
 		}
-		return &authzCheck{aclType: seg, aclName: name, perm: perm}, true
+		check := &authzCheck{aclType: seg, aclName: name, perm: perm}
+		if method == http.MethodPut {
+			// Uploading a cookbook nobody has uploaded before, or any new
+			// artifact identifier, is a creation (chef_wm_cookbook_version,
+			// oc_chef_wm_named_cookbook_artifact_version).
+			check.createIn = seg
+			if seg == "cookbook_artifacts" {
+				check.versionKey = rest[2]
+			}
+		}
+		return check, true
 	}
 	return nil, false
 }

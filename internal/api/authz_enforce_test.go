@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -185,11 +186,13 @@ func TestClassifyRequest(t *testing.T) {
 		{"GET", "/organizations/acme/cookbooks", &authzCheck{aclType: "containers", aclName: "cookbooks", perm: "read"}},
 		{"GET", "/organizations/acme/cookbooks/apache2", &authzCheck{aclType: "cookbooks", aclName: "apache2", perm: "read"}},
 		{"GET", "/organizations/acme/cookbooks/apache2/1.0.0", &authzCheck{aclType: "cookbooks", aclName: "apache2", perm: "read"}},
-		{"PUT", "/organizations/acme/cookbooks/apache2/1.0.0", &authzCheck{aclType: "cookbooks", aclName: "apache2", perm: "update"}},
+		// A PUT creates the cookbook when it has no version yet.
+		{"PUT", "/organizations/acme/cookbooks/apache2/1.0.0", &authzCheck{aclType: "cookbooks", aclName: "apache2", perm: "update", createIn: "cookbooks"}},
 		{"DELETE", "/organizations/acme/cookbooks/apache2/1.0.0", &authzCheck{aclType: "cookbooks", aclName: "apache2", perm: "delete"}},
 		// Cookbook pseudo-endpoints fall back to the container.
 		{"GET", "/organizations/acme/cookbooks/_latest", &authzCheck{aclType: "containers", aclName: "cookbooks", perm: "read"}},
-		{"PUT", "/organizations/acme/cookbook_artifacts/foo/abc123", &authzCheck{aclType: "cookbook_artifacts", aclName: "foo", perm: "update"}},
+		// Every new artifact identifier is a creation.
+		{"PUT", "/organizations/acme/cookbook_artifacts/foo/abc123", &authzCheck{aclType: "cookbook_artifacts", aclName: "foo", perm: "update", createIn: "cookbook_artifacts", versionKey: "abc123"}},
 		// Global users collection: the superuser and server-admins (list/create).
 		{"GET", "/users", &authzCheck{superuserOnly: true, perm: "read", serverAdmins: true}},
 		{"POST", "/users", &authzCheck{superuserOnly: true, perm: "create", serverAdmins: true}},
@@ -234,7 +237,7 @@ func TestClassifyRequest(t *testing.T) {
 			t.Errorf("%s %s: allow-through, want %+v", c.method, c.path, *c.want)
 			continue
 		}
-		if *got != *c.want {
+		if !reflect.DeepEqual(*got, *c.want) {
 			t.Errorf("%s %s:\n got %+v\nwant %+v", c.method, c.path, *got, *c.want)
 		}
 	}
