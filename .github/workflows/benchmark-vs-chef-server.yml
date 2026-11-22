@@ -108,11 +108,17 @@ jobs:
           set -euo pipefail
           curl -L https://omnitruck.cinc.sh/install.sh | sudo bash -s -- -P cinc-server -c stable
           sudo mkdir -p /etc/cinc-project
-          printf "api_fqdn '%s'\n" "$(hostname -f)" | sudo tee /etc/cinc-project/cinc-server.rb
+          # Read the FQDN once, here, and reuse it: once a later step maps it to
+          # 127.0.0.1 in /etc/hosts, `hostname -f` can resolve it back through
+          # that entry and print "localhost" instead, and then nothing matches
+          # the certificate issued for this name.
+          API_FQDN=$(hostname -f)
+          echo "API_FQDN=$API_FQDN" >> "$GITHUB_ENV"
+          printf "api_fqdn '%s'\n" "$API_FQDN" | sudo tee /etc/cinc-project/cinc-server.rb
           sudo cinc-server-ctl reconfigure --chef-license=accept
 
       - name: Point the API name at loopback
-        run: echo "127.0.0.1 $(hostname -f)" | sudo tee -a /etc/hosts
+        run: echo "127.0.0.1 $API_FQDN" | sudo tee -a /etc/hosts
 
       - name: Wait for the API to be ready
         run: |
@@ -134,9 +140,9 @@ jobs:
             --filename /tmp/bench/validator.pem
           sudo chown -R "$(id -u):$(id -g)" /tmp/bench
           openssl rsa -in /tmp/bench/user.pem -pubout -out /tmp/bench/user.pub
-          openssl s_client -showcerts -connect localhost:443 -servername "$(hostname -f)" </dev/null 2>/dev/null \
+          openssl s_client -showcerts -connect localhost:443 -servername "$API_FQDN" </dev/null 2>/dev/null \
             | openssl x509 -outform PEM > /tmp/bench/ca.pem
-          echo "REF_URL=https://$(hostname -f)/organizations/$ORG" >> "$GITHUB_ENV"
+          echo "REF_URL=https://$API_FQDN/organizations/$ORG" >> "$GITHUB_ENV"
 
       - name: Give cinc-server-ng the same identity
         run: |
