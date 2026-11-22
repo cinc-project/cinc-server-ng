@@ -2,8 +2,11 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"slices"
+	"strings"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -165,4 +168,74 @@ func UpgradeOrgACLs(org *store.Org) error {
 		return nil
 	}
 	return org.Put("acls", key, mustEncode(validatorClientsACL(validator)))
+}
+
+// UpgradeValidatorClientACLs takes the org's validators off the stored ACLs of
+// its other clients. Versions before it granted a validator, as creator, every
+// permission on each client it registered, which let anyone with the validator
+// key add a key to those clients; erchef creates them as the authz superuser
+// and the validator holds nothing on them. A validator is a client flagged
+// validator, as in isValidatorClient. A validator's own ACL keeps it, and ACLs
+// of other object types are left alone. It is idempotent, and on a store with
+// nothing to convert it reads the clients and acls collections once and writes
+// nothing. It must run after UpgradeACLActors, which types the clients lists
+// it edits.
+func UpgradeValidatorClientACLs(org *store.Org) error {
+	var validators []string
+	if err := org.Range("clients", func(key string, raw []byte) bool {
+		if !bytes.Contains(raw, []byte(`"validator"`)) {
+			return true
+		}
+		if doc, err := chefjson.DecodeObject(raw); err == nil && doc["validator"] == true {
+			validators = append(validators, key)
+		}
+		return true
+	}); err != nil || len(validators) == 0 {
+		return err
+	}
+	isValidator := func(client string) bool { return slices.Contains(validators, client) }
+
+	stale := map[string][]byte{}
+	if err := org.Range("acls", func(key string, raw []byte) bool {
+		self, ok := strings.CutPrefix(key, "clients/")
+		if !ok {
+			return true
+		}
+		for _, v := range validators {
+			if v != self && bytes.Contains(raw, []byte(`"`+v+`"`)) {
+				stale[key] = bytes.Clone(raw)
+				break
+			}
+		}
+		return true
+	}); err != nil {
+		return err
+	}
+	for key, raw := range stale {
+		self := strings.TrimPrefix(key, "clients/")
+		var acl map[string]any
+		if json.Unmarshal(raw, &acl) != nil {
+			continue
+		}
+		changed := false
+		for _, perm := range aclPerms {
+			ace, ok := acl[perm].(map[string]any)
+			if !ok {
+				continue
+			}
+			users, clients, groups := aceMembers(ace)
+			kept := slices.DeleteFunc(slices.Clone(clients), func(c string) bool { return c != self && isValidator(c) })
+			if len(kept) != len(clients) {
+				acl[perm] = typedACE(users, kept, groups)
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		if err := org.Put("acls", key, mustEncode(acl)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

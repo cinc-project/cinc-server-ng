@@ -271,6 +271,28 @@ func upgradeACLActors(st *store.Store) error {
 	return nil
 }
 
+// upgradeValidatorClientACLs takes each org's validators off the stored ACLs
+// of the clients they registered (see api.UpgradeValidatorClientACLs).
+func upgradeValidatorClientACLs(st *store.Store) error {
+	names, err := st.ListOrgs()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		org, ok, err := st.Org(name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if err := api.UpgradeValidatorClientACLs(org); err != nil {
+			return fmt.Errorf("upgrade org %q client ACLs: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // upgradePasswords hashes any plain-text password a durable store holds from
 // an older version, in the global scope (users) and every org. On a store
 // with none it reads each passwords collection once and writes nothing.
@@ -434,6 +456,12 @@ func New(opts Options) (*Server, error) {
 	// entry. It is converted before anything can create a client named like a
 	// user (see api.UpgradeACLActors).
 	if err := upgradeACLActors(st); err != nil {
+		return nil, err
+	}
+
+	// Versions before it gave a validator every permission on each client it
+	// registered. It runs after upgradeACLActors, which types the lists it edits.
+	if err := upgradeValidatorClientACLs(st); err != nil {
 		return nil, err
 	}
 

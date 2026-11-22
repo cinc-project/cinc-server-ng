@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -78,6 +79,11 @@ func defaultACL() map[string]any {
 // container; they keep the object default. It is written only under ACL
 // enforcement, so the permissive default stores no extra ACLs. The creator is
 // granted as the user or the client it is, never as both.
+//
+// A validator registering a client is the exception: erchef creates that
+// client as the authz superuser (oc_chef_wm_base:create_in_container), so the
+// validator holds nothing on it. Granted as creator, anyone with the validator
+// key could add a key to every client it registered and act as that node.
 func writeCreatorACL(org *store.Org, typ, name string, creator Actor) error {
 	acl, err := creationACL(org, typ)
 	if err != nil {
@@ -87,7 +93,15 @@ func writeCreatorACL(org *store.Org, typ, name string, creator Actor) error {
 	if creator.IsClient {
 		kind = "clients"
 	}
-	grantAll(acl, kind, creator.Name)
+	validator := false
+	if typ == "clients" && creator.IsClient {
+		if validator, err = isValidatorClient(org, creator.Name); err != nil {
+			return err
+		}
+	}
+	if !validator {
+		grantAll(acl, kind, creator.Name)
+	}
 	// bifrost puts a new actor in its own ACL (create_and_add_permissions), so
 	// a client may read its own record and manage its own keys. A user's access
 	// to itself is the self rule in classifyUsers.
@@ -95,6 +109,21 @@ func writeCreatorACL(org *store.Org, typ, name string, creator Actor) error {
 		grantAll(acl, "clients", name)
 	}
 	return org.Put("acls", aclKey(typ, name), mustEncode(acl))
+}
+
+// isValidatorClient reports whether name is a client of org whose record is
+// flagged validator, which is how erchef recognizes a validator
+// (#chef_client{validator = true}), whatever its name.
+func isValidatorClient(org *store.Org, name string) (bool, error) {
+	raw, ok, err := org.Get("clients", name)
+	if err != nil || !ok {
+		return false, err
+	}
+	doc, err := chefjson.DecodeObject(raw)
+	if err != nil {
+		return false, nil
+	}
+	return doc["validator"] == true, nil
 }
 
 // grantAll adds name, as an actor of kind ("users" or "clients"), to every
