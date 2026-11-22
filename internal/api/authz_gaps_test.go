@@ -161,7 +161,7 @@ func TestClassifyOrganizationLifecycleRoutes(t *testing.T) {
 		{"GET", "/organizations/acme", authzCheck{aclType: "organizations", aclName: "acme", perm: "read"}},
 		{"PUT", "/organizations/acme", authzCheck{superuserOnly: true, perm: "update"}},
 		{"DELETE", "/organizations/acme", authzCheck{superuserOnly: true, perm: "delete"}},
-		{"POST", "/organizations", authzCheck{superuserOnly: true, perm: "create"}},
+		{"POST", "/organizations", authzCheck{superuserOnly: true, perm: "create", serverAdmins: true}},
 	}
 	for _, c := range cases {
 		got, ok := classifyRequest(c.method, c.path)

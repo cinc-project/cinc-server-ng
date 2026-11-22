@@ -17,7 +17,11 @@ import (
 // So a member may list and create users, and read, update and delete any user
 // and its keys (oc_chef_wm_keys asks for read or update on the user), but may
 // not read or edit a user's ACL, and holds nothing on a superuser, whose ACL
-// predates the group. Organizations are untouched.
+// predates the group. Organizations are untouched there.
+//
+// cinc-server-ng goes one step further than erchef: a member may also create
+// an organization (POST /organizations), and becomes a member and admin of the
+// org it creates. Existing organizations stay out of its reach.
 //
 // Here the user routes are gated by classifyUsers rather than by per-user
 // ACLs, so the grant is applied there (authzCheck.serverAdmins) instead of

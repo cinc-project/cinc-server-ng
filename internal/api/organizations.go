@@ -66,12 +66,14 @@ func CreateOrganization(st *store.Store, name, fullName string) ([]byte, error) 
 // bootstrap generate all of its keys in parallel (the slow part) and then seed
 // the store serially. This helper is shared by the POST handler and bootstrap.
 func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.PrivateKey) ([]byte, error) {
-	return createOrganization(st, name, fullName, key, "")
+	return createOrganization(st, name, fullName, key, "", "")
 }
 
 // createOrganization is CreateOrganizationWithKey, recording actor (see
 // store.Meta) as the one who created the org and everything provisioned with it.
-func createOrganization(st *store.Store, name, fullName string, key *rsa.PrivateKey, actor string) ([]byte, error) {
+// A non-empty member names a global user who joins the org, and its users and
+// admins groups, in the same transaction (see joinOrgAsAdmin).
+func createOrganization(st *store.Store, name, fullName string, key *rsa.PrivateKey, actor, member string) ([]byte, error) {
 	guid, err := randomGUID()
 	if err != nil {
 		return nil, err
@@ -108,7 +110,13 @@ func createOrganization(st *store.Store, name, fullName string, key *rsa.Private
 		if err := org.Put("clients", validator, []byte(clientDoc)); err != nil {
 			return err
 		}
-		return org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL))
+		if err := org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL)); err != nil {
+			return err
+		}
+		if member != "" {
+			return joinOrgAsAdmin(org, member)
+		}
+		return nil
 	}); err != nil {
 		return nil, err
 	}
@@ -168,7 +176,27 @@ func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	priv, err := createOrganization(a.store, name, fullName, key, actorID(r))
+	// A user other than the superuser got here as a server-admin (see
+	// classifyRequest). It holds nothing in the new org, and could not join it
+	// afterwards: direct association is the superuser's and an invitation
+	// needs an org admin. So it joins as an admin while the org is provisioned.
+	// The superuser is left out, as erchef leaves out pivotal.
+	member := ""
+	if actor, ok := actorFromContext(r.Context()); ok && !actor.IsGlobalAdmin && !actor.IsClient {
+		member = actor.Name
+		// Held from here through the membership rows, so a concurrent delete of
+		// the user cannot slip in between (see groupmembers.go).
+		a.membership.RLock()
+		defer a.membership.RUnlock()
+		if _, ok, err := a.store.Global().Get("users", member); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if !ok {
+			writeError(w, http.StatusForbidden, "missing create permission")
+			return
+		}
+	}
+	priv, err := createOrganization(a.store, name, fullName, key, actorID(r), member)
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Organization already exists")
 		return
