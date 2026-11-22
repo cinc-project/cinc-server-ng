@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"reflect"
 	"slices"
 	"testing"
 )
@@ -35,7 +36,7 @@ func TestClassifyActorKeyRoutes(t *testing.T) {
 			t.Errorf("%s %s: allow-through, want %+v", c.method, c.path, c.want)
 			continue
 		}
-		if *got != c.want {
+		if !reflect.DeepEqual(*got, c.want) {
 			t.Errorf("%s %s:\n got %+v\nwant %+v", c.method, c.path, *got, c.want)
 		}
 	}
@@ -48,11 +49,14 @@ func TestClassifyPolicyfileWriteRoutes(t *testing.T) {
 	}{
 		// Policy revisions are governed by the policy object.
 		{"GET", "/organizations/acme/policies/base/revisions/abc123", authzCheck{aclType: "policies", aclName: "base", perm: "read"}},
-		{"POST", "/organizations/acme/policies/base/revisions", authzCheck{aclType: "policies", aclName: "base", perm: "update"}},
+		// The first revision creates the policy.
+		{"POST", "/organizations/acme/policies/base/revisions", authzCheck{aclType: "policies", aclName: "base", perm: "update", createIn: "policies"}},
 		{"DELETE", "/organizations/acme/policies/base/revisions/abc123", authzCheck{aclType: "policies", aclName: "base", perm: "delete"}},
-		// Deploying a policy to a group is an update of that group.
+		// Deploying a policy to a group is an update of that group and of the
+		// policy, or creates either.
 		{"GET", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "read"}},
-		{"PUT", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "update"}},
+		{"PUT", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "update", createIn: "policy_groups",
+			also: &authzCheck{aclType: "policies", aclName: "base", perm: "update", createIn: "policies"}}},
 		{"DELETE", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "update"}},
 	}
 	for _, c := range cases {
@@ -61,7 +65,7 @@ func TestClassifyPolicyfileWriteRoutes(t *testing.T) {
 			t.Errorf("%s %s: allow-through, want %+v", c.method, c.path, c.want)
 			continue
 		}
-		if *got != c.want {
+		if !reflect.DeepEqual(*got, c.want) {
 			t.Errorf("%s %s:\n got %+v\nwant %+v", c.method, c.path, *got, c.want)
 		}
 	}
@@ -92,7 +96,7 @@ func TestClassifyOrgMembershipRoutes(t *testing.T) {
 			t.Errorf("%s %s: allow-through, want %+v", c.method, c.path, c.want)
 			continue
 		}
-		if *got != c.want {
+		if !reflect.DeepEqual(*got, c.want) {
 			t.Errorf("%s %s:\n got %+v\nwant %+v", c.method, c.path, *got, c.want)
 		}
 	}
@@ -165,7 +169,7 @@ func TestClassifyOrganizationLifecycleRoutes(t *testing.T) {
 			t.Errorf("%s %s: allow-through, want %+v", c.method, c.path, c.want)
 			continue
 		}
-		if *got != c.want {
+		if !reflect.DeepEqual(*got, c.want) {
 			t.Errorf("%s %s:\n got %+v\nwant %+v", c.method, c.path, *got, c.want)
 		}
 	}

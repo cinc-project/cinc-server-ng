@@ -98,7 +98,10 @@ group and can create and manage its own node, and the standard chef-client
 bootstrap works end to end. The default groups and the ACLs on each
 container, group and the org itself follow erchef's org creation policy (so a
 plain client can read the nodes, roles, environments, cookbooks, data bags and
-policies it converges from, but not list the org's clients or groups). It
+policies it converges from, but not list the org's clients or groups). Making
+a new object of any kind, including a new cookbook, cookbook artifact, policy
+or policy group, takes create on its container, and pushing a policy to a group
+is checked on both the policy and the group. It
 resolves actor membership through nested groups, and checks
 authentication → existence → authorization in that order (so a missing object
 reports `404`, not `403`). Enforcement covers the
