@@ -431,6 +431,15 @@ func jsonStrings(v any) []string {
 	return out
 }
 
+// containerNameRE is oc_chef_container's name rule (chef_regex's NAME_REGEX,
+// copied there): unlike most object names, no ':'.
+var containerNameRE = regexp.MustCompile(`^[.A-Za-z0-9_-]+$`)
+
+// createContainer is oc_chef_wm_containers' POST. As in
+// oc_chef_container:parse_binary_json, "id" names the container when present
+// and "containername" otherwise, the name must match containerNameRE, and the
+// stored document is {containername, containerpath} whatever else the body
+// carried. An existing container is a 409, not an overwrite.
 func (a *API) createContainer(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
@@ -441,15 +450,24 @@ func (a *API) createContainer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	name, _ := obj["containername"].(string)
-	if name == "" {
-		name, _ = obj["id"].(string)
+	name, ok := obj["id"].(string)
+	if !ok {
+		name, ok = obj["containername"].(string)
 	}
-	if name == "" {
+	if !ok {
 		writeError(w, http.StatusBadRequest, "Field 'containername' missing")
 		return
 	}
-	if err := org.Put("containers", name, mustEncode(obj)); err != nil {
+	if !containerNameRE.MatchString(name) {
+		writeError(w, http.StatusBadRequest, "Invalid name '"+name+
+			"' using regex: 'Malformed container name. Must only contain A-Z, a-z, 0-9, _, -, or .'.")
+		return
+	}
+	doc := fmt.Appendf(nil, `{"containername":%q,"containerpath":%q}`, name, name)
+	if err := org.Create("containers", name, doc); errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "Container already exists")
+		return
+	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

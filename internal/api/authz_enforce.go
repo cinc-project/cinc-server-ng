@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -58,7 +59,7 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	if !ok {
 		return r, false
 	}
-	check, ok := classifyRequest(r.Method, r.URL.Path)
+	check, ok := classifyRequest(r.Method, r.URL.EscapedPath())
 	if !ok {
 		// Nothing classified this request. For a read that means the route
 		// carries no ACL restriction; for one that changes state it means
@@ -90,7 +91,7 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	org := a.store.Global()
 	if !check.global {
 		// classifyRequest only succeeds for org-scoped paths, so parts[1] is the org.
-		orgName := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[1]
+		orgName := PathSegments(r.URL.EscapedPath())[1]
 		if memberOrg != nil && memberOrg.Name() == orgName {
 			org = memberOrg // already resolved by the membership gate
 		} else {
@@ -244,12 +245,32 @@ var existenceSegs = map[string]bool{
 	"clients": true, "groups": true, "containers": true,
 }
 
+// PathSegments splits an escaped request path (r.URL.EscapedPath()) into its
+// segments the way http.ServeMux does when it routes: on the escaped "/" only,
+// then unescaping each segment (one that isn't valid escaping stays as sent).
+// So "/nodes/sec%2Fret" is two segments, the second "sec/ret", exactly the
+// {name} the node handler is given. Anything that decides authorization or
+// authentication from the path must split it this way: splitting the decoded
+// r.URL.Path instead reads that request as "/nodes/sec/ret", a route that
+// doesn't exist, and the decision is made about a different request from the
+// one that is then served.
+func PathSegments(escapedPath string) []string {
+	parts := strings.Split(strings.Trim(escapedPath, "/"), "/")
+	for i, p := range parts {
+		if u, err := url.PathUnescape(p); err == nil {
+			parts[i] = u
+		}
+	}
+	return parts
+}
+
 // classifyRequest maps a request to the authorization it requires, or reports
 // ok=false for requests that carry no ACL restriction (search, the authenticate
 // endpoints, file-store transfers, association management, and server-global
-// routes), which are allowed through unchanged.
+// routes), which are allowed through unchanged. path is the escaped request
+// path, split as the router splits it (PathSegments).
 func classifyRequest(method, path string) (*authzCheck, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
+	parts := PathSegments(path)
 	if len(parts) >= 1 && parts[0] == "users" {
 		return classifyUsers(method, parts[1:])
 	}

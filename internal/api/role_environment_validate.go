@@ -10,13 +10,15 @@ import (
 	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 )
 
-// erchef validates role and environment bodies (chef_role and
-// chef_environment) against chef_regex's patterns and chef_json_validator's
+// erchef validates node, role and environment bodies (chef_node, chef_role
+// and chef_environment) against chef_regex's patterns and chef_json_validator's
 // run list specs, and answers 400 without storing anything. The messages are
 // the ones chef_wm_malformed renders for each failure.
 var (
-	// roleNameRE is chef_regex's role_name (ALTERNATIVE_NAME_REGEX).
+	// roleNameRE is chef_regex's role_name (ALTERNATIVE_NAME_REGEX), which
+	// is also its node_name.
 	roleNameRE = regexp.MustCompile(`^[.A-Za-z0-9_:-]+$`)
+	nodeNameRE = roleNameRE
 	// environmentNameRE is chef_regex's environment_name (NAME_REGEX), which
 	// is also its cookbook_name: no ':' allowed.
 	environmentNameRE = regexp.MustCompile(`^[.A-Za-z0-9_-]+$`)
@@ -29,22 +31,46 @@ var (
 	runListBareRE   = regexp.MustCompile(`^(?:[.A-Za-z0-9_-]+::)?[.A-Za-z0-9_-]+(?:@[0-9]+(?:\.[0-9]+){1,2})?$`)
 )
 
-// validateObjectBody validates a role or environment body the way erchef
-// does, returning the 400 message or "" when it is valid (or segment is not
+// validateObjectBody validates a node, role or environment body the way
+// erchef does, returning the 400 message or "" when it is valid (or segment is not
 // one erchef validates here). urlName is the name in the request path on an
 // update, "" on a create.
 func validateObjectBody(segment, urlName string, raw []byte) string {
-	if segment != "roles" && segment != "environments" {
+	if segment != "nodes" && segment != "roles" && segment != "environments" {
 		return ""
 	}
 	doc, err := chefjson.DecodeObject(raw)
 	if err != nil {
 		return "invalid JSON body"
 	}
-	if segment == "roles" {
+	switch segment {
+	case "nodes":
+		return validateNodeName(urlName, doc)
+	case "roles":
 		return validateRole(urlName, doc)
 	}
 	return validateEnvironment(doc)
+}
+
+// validateNodeName is the name half of chef_node:validate_json_node: the name
+// must match node_name, and on an update the body may omit it (the URL
+// supplies it) but may not name a different node. The rest of chef_node's
+// constraints are not checked here.
+func validateNodeName(urlName string, doc map[string]any) string {
+	name, hasName := doc["name"]
+	if urlName != "" {
+		if hasName && name != urlName {
+			return "Node name mismatch."
+		}
+		name, hasName = urlName, true
+	}
+	if !hasName {
+		return "Field 'name' missing"
+	}
+	if s, ok := name.(string); !ok || !nodeNameRE.MatchString(s) {
+		return "Field 'name' invalid"
+	}
+	return ""
 }
 
 // validateRole is chef_role:validate_role. On an update the body may omit its
