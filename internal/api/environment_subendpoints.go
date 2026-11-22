@@ -300,7 +300,46 @@ func (a *API) envCookbookVersions(w http.ResponseWriter, r *http.Request) {
 			queue = append(queue, dep)
 		}
 	}
+	denied, err := a.unreadableCookbooks(r, org, solved)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(denied) > 0 {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": []any{map[string]any{
+			"message":                "Read permission is not granted for one or more cookbooks",
+			"unauthorized_cookbooks": denied,
+		}}})
+		return
+	}
 	writeJSON(w, http.StatusOK, solved)
+}
+
+// unreadableCookbooks returns, sorted, the cookbooks of a solution the
+// request's actor may not read. erchef checks every one before answering
+// (oc_chef_wm_base:check_cookbook_authz), so a solution can't hand out the
+// manifest, and the file URLs in it, of a cookbook the caller couldn't fetch
+// directly, even one pulled in only as a dependency.
+func (a *API) unreadableCookbooks(r *http.Request, org *store.Org, solved map[string]any) ([]string, error) {
+	if !a.enforceACL {
+		return nil, nil
+	}
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.IsGlobalAdmin {
+		return nil, nil
+	}
+	var denied []string
+	for name := range solved {
+		allowed, err := a.actorAllowed(org, actor, "cookbooks", name, "read")
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			denied = append(denied, name)
+		}
+	}
+	sort.Strings(denied)
+	return denied, nil
 }
 
 func (a *API) envRole(w http.ResponseWriter, r *http.Request) {
