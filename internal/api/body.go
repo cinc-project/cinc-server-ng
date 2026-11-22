@@ -2,8 +2,10 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 // A signed request's body is read whole before routing, since its hash is part
@@ -17,8 +19,8 @@ import (
 const maxPresizedBody = 1 << 20
 
 // presizeStep is the most ReadBody allocates before any of the body has
-// arrived. The body is read before the request is authenticated, so a
-// declared length alone must not reserve memory: a client declaring a
+// arrived. The body is read before its signature is verified (its hash is part
+// of what is signed), so a declared length alone must not reserve memory: a client declaring a
 // megabyte and sending nothing, on many connections, would hold a megabyte
 // each. A node body usually fits in the first step.
 const presizeStep = 64 << 10
@@ -65,6 +67,22 @@ func BufferBody(body []byte) io.ReadCloser {
 }
 
 type bufferedBody struct{ *bytes.Buffer }
+
+// IsBuffered reports whether body was made by BufferBody: already read whole,
+// within the body cap.
+func IsBuffered(body io.ReadCloser) bool {
+	_, ok := body.(bufferedBody)
+	return ok
+}
+
+// WriteTooLarge writes erchef's refusal of a body over the cap
+// (chef_wm_enforce): a 413 whose error is a string, not the usual list, naming
+// what was too big ("JSON", as erchef says for every API body) and the cap.
+func WriteTooLarge(w http.ResponseWriter, what string, limit int64) {
+	msg := what + " must be no more than " + strconv.FormatInt(limit, 10) + " bytes."
+	raw, _ := json.Marshal(map[string]string{"error": msg})
+	writeRaw(w, http.StatusRequestEntityTooLarge, raw)
+}
 
 func (bufferedBody) Close() error { return nil }
 

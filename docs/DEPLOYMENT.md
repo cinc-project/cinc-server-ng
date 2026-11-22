@@ -135,9 +135,10 @@ server's clock synchronized.
 - The server allows 10 s to receive request headers and sets no overall
   request timeout, so large cookbook transfers on slow links complete. Don't
   set a short overall timeout on the proxy either.
-- Request bodies are capped at 1 GiB. Raise the proxy's limit to match what
-  your largest cookbook file needs. nginx defaults to 1 MiB, which rejects
-  ordinary cookbook uploads with `413`.
+- API request bodies are capped at 2,000,000 bytes (`--max-request-size`) and
+  cookbook files at 250 MiB (`--max-file-size`), Chef Infra Server's defaults;
+  larger ones get `413`. Set the proxy's limit to at least the file cap. nginx
+  defaults to 1 MiB, which rejects ordinary cookbook uploads with `413`.
 
 ### nginx
 
@@ -155,7 +156,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/chef.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/chef.example.com/privkey.pem;
 
-    client_max_body_size 1g;
+    client_max_body_size 250m;
 
     location / {
         proxy_pass http://cinc;            # no trailing slash: keep the path as signed
@@ -182,7 +183,7 @@ obtains and renews the certificate itself:
 ```caddy
 chef.example.com {
     request_body {
-        max_size 1GB
+        max_size 250MiB
     }
     reverse_proxy 127.0.0.1:8889
 }

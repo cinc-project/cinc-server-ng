@@ -55,6 +55,8 @@ type cliFlags struct {
 	externalURL     string
 	shutdownDelay   time.Duration
 	shutdownTimeout time.Duration
+	maxRequestSize  int64
+	maxFileSize     int64
 }
 
 // hiddenFlags are registered and functional but omitted from usage/help output
@@ -90,6 +92,8 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.StringVar(&f.externalURL, "external-url", os.Getenv("CINC_SERVER_NG_EXTERNAL_URL"), "public scheme://host[:port] used in every URL the server returns (default: derived from each request's Host and X-Forwarded-Proto)")
 	fs.DurationVar(&f.shutdownDelay, "shutdown-delay", 0, "on SIGTERM/SIGINT, fail /_status with 503 and keep serving for this long before stopping, so a load balancer drains this instance first (a second signal skips the wait)")
 	fs.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight requests when stopping before cutting them off")
+	fs.Int64Var(&f.maxRequestSize, "max-request-size", server.DefaultMaxBodyBytes, "largest API request body, in bytes, accepted (413 above it, as opscode_erchef['max_request_size']); negative for no limit")
+	fs.Int64Var(&f.maxFileSize, "max-file-size", server.DefaultMaxFileStoreBytes, "largest cookbook file, in bytes, accepted at the file store (413 above it); negative for no limit")
 	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
 
 	fs.Usage = func() {
@@ -161,27 +165,7 @@ func run(args []string, out io.Writer) error {
 		f.enforceACLs = false
 	}
 
-	srv, err := server.New(server.Options{
-		Addr:        f.addr,
-		Orgs:        splitCSV(f.orgsCSV),
-		AdminName:   f.admin,
-		DisableAuth: f.noAuth,
-		EnforceACL:  f.enforceACLs,
-		Repo:        f.repo,
-		StatePath:   f.state,
-		WebUIKey:    webuiKey,
-		Storage:     f.storage,
-		DB:          f.db,
-
-		StatsUser:     f.statsUser,
-		StatsPassword: f.statsPassword,
-
-		SQLiteGroupCommit: f.groupCommit,
-
-		ExternalURL: f.externalURL,
-		TLSCertFile: f.tlsCert,
-		TLSKeyFile:  f.tlsKey,
-	})
+	srv, err := server.New(f.serverOptions(webuiKey))
 	if err != nil {
 		return err
 	}
@@ -328,4 +312,32 @@ func enforceState(enabled bool) string {
 		return "enabled"
 	}
 	return "permissive"
+}
+
+// serverOptions maps the parsed flags onto server.Options.
+func (f *cliFlags) serverOptions(webuiKey []byte) server.Options {
+	return server.Options{
+		Addr:        f.addr,
+		Orgs:        splitCSV(f.orgsCSV),
+		AdminName:   f.admin,
+		DisableAuth: f.noAuth,
+		EnforceACL:  f.enforceACLs,
+		Repo:        f.repo,
+		StatePath:   f.state,
+		WebUIKey:    webuiKey,
+		Storage:     f.storage,
+		DB:          f.db,
+
+		StatsUser:     f.statsUser,
+		StatsPassword: f.statsPassword,
+
+		SQLiteGroupCommit: f.groupCommit,
+
+		ExternalURL: f.externalURL,
+		TLSCertFile: f.tlsCert,
+		TLSKeyFile:  f.tlsKey,
+
+		MaxBodyBytes:      f.maxRequestSize,
+		MaxFileStoreBytes: f.maxFileSize,
+	}
 }

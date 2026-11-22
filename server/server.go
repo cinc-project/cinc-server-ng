@@ -69,12 +69,18 @@ type Options struct {
 	// webui-impersonation mechanism. When empty, the bootstrap admin key doubles
 	// as the webui key, so the key written by --key-out works out of the box.
 	WebUIKey []byte
-	// MaxBodyBytes caps the size of a request body the server will read into
-	// memory, so a single oversized request cannot exhaust memory. It applies to
-	// every path, including the unauthenticated cookbook file store (whose
-	// handler reads the uploaded file fully into memory). Defaults to 1 GiB; set
-	// a negative value to disable the limit.
+	// MaxBodyBytes caps the size of an API request body, which the server reads
+	// into memory whole (a signed body's hash is part of its signature). A body
+	// over it is refused with 413, as Chef Infra Server refuses one over
+	// opscode_erchef['max_request_size'], whose default of 2,000,000 bytes is
+	// this one's. Set a negative value to disable the limit.
 	MaxBodyBytes int64
+	// MaxFileStoreBytes caps the size of a cookbook file uploaded to the
+	// pre-signed file-store URL, whose handler also reads it into memory.
+	// Defaults to 250 MiB, the nginx['client_max_body_size'] that is Chef
+	// Infra Server's only limit on cookbook files. Set a negative value to
+	// disable the limit.
+	MaxFileStoreBytes int64
 	// Storage selects the persistence backend: "memory" (default, ephemeral) or
 	// "sqlite" (durable). Ignored when Backend is set.
 	Storage string
@@ -112,6 +118,16 @@ type Options struct {
 	Backend store.Backend
 }
 
+// The default body caps, Chef Infra Server's: opscode_erchef's
+// max_request_size as packaged (erchef's built-in fallback is 1,000,000; every
+// Chef Infra Server package sets 2,000,000, and pedant checks a body of exactly
+// that size is accepted), and nginx's client_max_body_size of 250m, the only
+// cap on a cookbook file.
+const (
+	DefaultMaxBodyBytes      = 2000000
+	DefaultMaxFileStoreBytes = 250 << 20
+)
+
 func (o *Options) withDefaults() {
 	if o.Addr == "" {
 		o.Addr = "127.0.0.1:0"
@@ -135,7 +151,10 @@ func (o *Options) withDefaults() {
 		o.StatsUser = DefaultStatsUser
 	}
 	if o.MaxBodyBytes == 0 {
-		o.MaxBodyBytes = 1 << 30 // 1 GiB
+		o.MaxBodyBytes = DefaultMaxBodyBytes
+	}
+	if o.MaxFileStoreBytes == 0 {
+		o.MaxFileStoreBytes = DefaultMaxFileStoreBytes
 	}
 }
 
@@ -508,7 +527,7 @@ func New(opts Options) (*Server, error) {
 		api.WithExternalURL(opts.ExternalURL),
 	)
 	s.api = apiInstance
-	handler := apiInstance.Handler()
+	handler := s.enforceBodySize(apiInstance.Handler())
 	if !opts.DisableAuth {
 		handler = s.authMiddleware(handler)
 	}
@@ -517,9 +536,7 @@ func New(opts Options) (*Server, error) {
 	handler = apiInstance.Instrument(handler)
 	// Cap the request body outermost, so the limit is in force before any layer
 	// (auth, or a handler on an auth-exempt path) reads the body.
-	if opts.MaxBodyBytes > 0 {
-		handler = limitBody(handler, opts.MaxBodyBytes)
-	}
+	handler = s.limitBody(handler)
 	s.handler = handler
 	return s, nil
 }

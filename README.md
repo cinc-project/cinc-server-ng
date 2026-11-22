@@ -150,6 +150,14 @@ actor is allowed. Pass `--no-auth` to disable signature verification entirely
 for `--no-auth` together with an explicit `--enforce-acls` is a contradiction and
 errors out.
 
+Request bodies are capped as on Chef Infra Server, and one over its cap gets a
+`413`. `--max-request-size` (default `2000000` bytes, the packaged
+`opscode_erchef['max_request_size']`) caps API requests; `--max-file-size`
+(default 250 MiB, nginx's `client_max_body_size` there) caps cookbook files
+uploaded to the file store. A negative value removes a cap. The server checks
+a request's signing headers, clock skew, declared length and actor before it
+reads the body, so a request it refuses from its headers costs no body read.
+
 Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
 `roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`,
 `data_bags/`, and `cookbooks/`) into the first org at startup, mirroring
