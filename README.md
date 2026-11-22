@@ -90,10 +90,12 @@ pipelines stay friction-free. To exercise authorization-dependent behavior
 (requests a real server answers with `403 Forbidden`), set
 `Options{EnforceACL: true}`. (The standalone `cinc-server-ng` binary takes the
 opposite, production-leaning default: it **enforces** unless told otherwise; see
-"Use as a binary".) Enforcement matches a real Chef Infra Server: the creator of
-an object is granted full control of it, a registered client joins the org's
-`clients` group and can create and manage its own node, and the standard
-chef-client bootstrap works end to end. The default groups and the ACLs on each
+"Use as a binary".) Enforcement matches a real Chef Infra Server: a new object
+starts from its container's ACL (so narrowing a container narrows what is
+created in it afterwards), its creator is granted full control of it, a
+registered client holds its own record and keys, joins the org's `clients`
+group and can create and manage its own node, and the standard chef-client
+bootstrap works end to end. The default groups and the ACLs on each
 container, group and the org itself follow erchef's org creation policy (so a
 plain client can read the nodes, roles, environments, cookbooks, data bags and
 policies it converges from, but not list the org's clients or groups). It

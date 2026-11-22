@@ -67,23 +67,80 @@ func defaultACL() map[string]any {
 	}
 }
 
-// writeCreatorACL seeds a newly created object's per-object ACL from the container
-// default plus the creating actor, granting the creator full control of what it
-// created (mirroring Chef, where the creator owns the object — e.g. a chef-client
-// can update the node it just registered). It is written only under ACL
+// writeCreatorACL seeds a newly created object's per-object ACL the way erchef
+// does (oc_chef_authz:create_entity_with_container_acl): its container's ACL as
+// it stands now, merged with full control for the creating actor (so a
+// chef-client can update the node it just registered) and, for a client, for
+// the client itself. A container's ACL is
+// what an admin narrows to narrow every object created in it, and erchef's
+// clients container gives the users group read and delete only, so a member
+// can't take over another client's keys. Users are global and have no org
+// container; they keep the object default. It is written only under ACL
 // enforcement, so the permissive default stores no extra ACLs. The creator is
 // granted as the user or the client it is, never as both.
 func writeCreatorACL(org *store.Org, typ, name string, creator Actor) error {
+	acl, err := creationACL(org, typ)
+	if err != nil {
+		return err
+	}
 	kind := "users"
 	if creator.IsClient {
 		kind = "clients"
 	}
-	acl := defaultACL()
-	for _, p := range aclPerms {
-		ace := acl[p].(map[string]any)
-		ace[kind] = append(ace[kind].([]string), creator.Name)
+	grantAll(acl, kind, creator.Name)
+	// bifrost puts a new actor in its own ACL (create_and_add_permissions), so
+	// a client may read its own record and manage its own keys. A user's access
+	// to itself is the self rule in classifyUsers.
+	if typ == "clients" {
+		grantAll(acl, "clients", name)
 	}
 	return org.Put("acls", aclKey(typ, name), mustEncode(acl))
+}
+
+// grantAll adds name, as an actor of kind ("users" or "clients"), to every
+// permission of acl.
+func grantAll(acl map[string]any, kind, name string) {
+	for _, p := range aclPerms {
+		ace := acl[p].(map[string]any)
+		if names := ace[kind].([]string); !slices.Contains(names, name) {
+			ace[kind] = append(names, name)
+		}
+	}
+}
+
+// creationACL is the ACL a new object of type typ starts from before its
+// creator is added: a copy of its container's effective ACL, typed as users,
+// clients and groups. The clients container stored here also names the org's
+// validator on create, which erchef handles in its clients handler rather than
+// in the ACL, so that entry is left off the copy.
+func creationACL(org *store.Org, typ string) (map[string]any, error) {
+	if typ == "users" {
+		return defaultACL(), nil
+	}
+	container, err := loadACL(org, "containers", typ)
+	if err != nil {
+		return nil, err
+	}
+	validator := org.Name() + "-validator"
+	acl := map[string]any{}
+	for _, p := range aclPerms {
+		ace, _ := container[p].(map[string]any)
+		clients := aceStrings(ace["clients"])
+		if typ == "clients" {
+			clients = slices.DeleteFunc(clients, func(c string) bool { return c == validator })
+		}
+		acl[p] = typedACE(aceStrings(ace["users"]), clients, aceStrings(ace["groups"]))
+	}
+	return acl, nil
+}
+
+// aceStrings copies an ACE list, which is a []string in an ACL built here (the
+// fallback policy) and a []any in one decoded from the store.
+func aceStrings(v any) []string {
+	if s, ok := v.([]string); ok {
+		return slices.Clone(s)
+	}
+	return jsonStrings(v)
 }
 
 // grantCreator records the creating actor as the owner of a newly created object.
