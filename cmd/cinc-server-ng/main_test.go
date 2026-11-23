@@ -248,3 +248,30 @@ func TestStatsBanner(t *testing.T) {
 		})
 	}
 }
+
+// The body caps default to Chef Infra Server's: opscode_erchef's
+// max_request_size for API requests and nginx's client_max_body_size for
+// cookbook files.
+func TestBodyCapFlagsDefault(t *testing.T) {
+	f, err := parseFlags(nil, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if f.maxRequestSize != 2000000 {
+		t.Errorf("--max-request-size default = %d, want 2000000", f.maxRequestSize)
+	}
+	if f.maxFileSize != 250<<20 {
+		t.Errorf("--max-file-size default = %d, want 250 MiB", f.maxFileSize)
+	}
+}
+
+func TestBodyCapFlagsSet(t *testing.T) {
+	f, err := parseFlags([]string{"--max-request-size", "1000000", "--max-file-size", "1048576"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	opts := f.serverOptions(nil)
+	if opts.MaxBodyBytes != 1000000 || opts.MaxFileStoreBytes != 1048576 {
+		t.Errorf("options caps = %d, %d, want 1000000, 1048576", opts.MaxBodyBytes, opts.MaxFileStoreBytes)
+	}
+}

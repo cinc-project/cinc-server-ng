@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/url"
@@ -50,16 +51,22 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		body, err := api.ReadBody(r.Body, r.ContentLength)
-		if err != nil {
-			unauthorized(w, "could not read request body")
-			return
-		}
-		r.Body = api.BufferBody(body)
-
+		// Everything that can be judged from the headers is judged before the
+		// body is read, as erchef's malformed_request does: the signing
+		// headers, the clock, and the declared size. A request refused here
+		// costs no body read at all.
 		parsed, err := auth.Parse(r.Header)
 		if err != nil {
 			unauthorized(w, err.Error())
+			return
+		}
+		if err := s.checkSkew(parsed.Timestamp); err != nil {
+			unauthorized(w, err.Error())
+			return
+		}
+		limit := s.bodyLimit(r.URL.Path)
+		if limit > 0 && r.ContentLength > limit {
+			api.WriteTooLarge(w, "JSON", limit)
 			return
 		}
 
@@ -69,6 +76,10 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// the webui key and run as that user. This mirrors Chef Infra Server's
 		// webui-key mechanism, which a console uses to honor each user's ACLs.
 		if strings.EqualFold(r.Header.Get("X-Ops-Request-Source"), "web") {
+			body, ok := readSignedBody(w, r)
+			if !ok {
+				return
+			}
 			if err := auth.Verify(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"), s.webuiPub); err != nil {
 				unauthorized(w, "Invalid webui signature for request source 'web'")
 				return
@@ -86,10 +97,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			// so of a same-named user and client the user is the actor.
 			actor := candidates[0].actor
 			actor.ViaWebUI = true
-			if err := s.checkSkew(parsed.Timestamp); err != nil {
-				unauthorized(w, err.Error())
-				return
-			}
 			r = r.WithContext(api.WithActor(r.Context(), actor))
 			next.ServeHTTP(w, r)
 			return
@@ -109,6 +116,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"'. Ensure that your node_name and client key are correct.")
 			return
 		}
+		// The actor is known, so the body is worth reading: its hash is part of
+		// the signature.
+		body, ok := readSignedBody(w, r)
+		if !ok {
+			return
+		}
 		var actor api.Actor
 		verified := false
 		for _, c := range candidates {
@@ -119,11 +132,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 		if !verified {
 			unauthorized(w, "Invalid signature for user or client '"+parsed.UserID+"'")
-			return
-		}
-
-		if err := s.checkSkew(parsed.Timestamp); err != nil {
-			unauthorized(w, err.Error())
 			return
 		}
 
@@ -293,18 +301,93 @@ func serverError(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": []string{err.Error()}})
 }
 
-// limitBody caps the request body size so a single oversized request cannot
-// exhaust server memory when a handler reads the whole body into memory. It
-// applies to every path, including the unauthenticated file store. Reading past
-// the cap makes the body read fail, which the handler reports as a request
-// error (a 4xx) rather than an out-of-memory crash.
-func limitBody(next http.Handler, max int64) http.Handler {
+// readSignedBody reads a signed request's body, which the outer limitBody
+// caps, and hands it on buffered. A body that runs past the cap (one sent
+// chunked, or longer than it declared) is refused as erchef refuses it.
+func readSignedBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	body, err := api.ReadBody(r.Body, r.ContentLength)
+	if err != nil {
+		if tooBig, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			api.WriteTooLarge(w, "JSON", tooBig.Limit)
+			return nil, false
+		}
+		unauthorized(w, "could not read request body")
+		return nil, false
+	}
+	r.Body = api.BufferBody(body)
+	return body, true
+}
+
+// bodyLimit is the most of a request body to path the server reads: the
+// cookbook file store's cap for a file upload, the API cap for everything
+// else. Zero or less means no cap.
+func (s *Server) bodyLimit(path string) int64 {
+	if _, _, ok := fileStorePath(path); ok {
+		return s.opts.MaxFileStoreBytes
+	}
+	return s.opts.MaxBodyBytes
+}
+
+// limitBody caps every request body, on every path, at bodyLimit, so that no
+// layer (auth, or a handler on an auth-exempt path) can read more than that
+// into memory. Reading past the cap fails with *http.MaxBytesError.
+func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil {
-			r.Body = http.MaxBytesReader(w, r.Body, max)
+		if limit := s.bodyLimit(r.URL.Path); limit > 0 && r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// enforceBodySize refuses, with erchef's 413, a body that authMiddleware has
+// not already read: every body when authentication is off, and file-store
+// uploads, which carry a pre-signed URL instead of a signature. A body
+// declared over the cap is refused unread; any other API body is read here,
+// under the cap, so that one running past it is a 413 rather than whatever
+// its handler makes of a failed read. A file-store body is left to stream to
+// its handler, which reports an overrun itself. The system endpoints and
+// /_stats take no body, so one sent to them is never read.
+func (s *Server) enforceBodySize(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit := s.bodyLimit(r.URL.Path)
+		if limit <= 0 || r.Body == nil || r.Body == http.NoBody || api.IsBuffered(r.Body) ||
+			api.SystemPaths[r.URL.Path] || r.URL.Path == statsPath {
+			next.ServeHTTP(w, r)
+			return
+		}
+		_, _, fileStore := fileStorePath(r.URL.Path)
+		if r.ContentLength > limit {
+			what := "JSON"
+			if fileStore {
+				what = "File"
+			}
+			api.WriteTooLarge(w, what, limit)
+			return
+		}
+		if fileStore {
+			next.ServeHTTP(w, r)
+			return
+		}
+		body, err := api.ReadBody(r.Body, r.ContentLength)
+		if err != nil {
+			if tooBig, ok := errors.AsType[*http.MaxBytesError](err); ok {
+				api.WriteTooLarge(w, "JSON", tooBig.Limit)
+				return
+			}
+			writeBadRequest(w, "could not read request body")
+			return
+		}
+		r.Body = api.BufferBody(body)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeBadRequest reports a request the server could not take in as a JSON 400.
+func writeBadRequest(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": []string{msg}})
 }
 
 // fileStorePath reports whether path addresses the cookbook file store

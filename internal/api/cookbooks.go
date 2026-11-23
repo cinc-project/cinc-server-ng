@@ -126,8 +126,13 @@ func (a *API) putFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	checksum := r.PathValue("checksum")
+	// The server caps the body (MaxFileStoreBytes); past it the read fails.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if tooBig, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			WriteTooLarge(w, "File", tooBig.Limit)
+			return
+		}
 		writeError(w, http.StatusBadRequest, "could not read request body")
 		return
 	}
