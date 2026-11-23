@@ -184,6 +184,10 @@ func TestClassifyRequest(t *testing.T) {
 		{"PUT", "/organizations/acme/data/secrets/item1", &authzCheck{aclType: "data", aclName: "secrets", perm: "update", existColl: "data_bags", existKey: "secrets", existMsg: "Cannot find data bag secrets"}},
 		// Cookbooks: versioned; the cookbook object ACL governs versions.
 		{"GET", "/organizations/acme/cookbooks", &authzCheck{aclType: "containers", aclName: "cookbooks", perm: "read"}},
+		// Both halves of the sandbox handshake need create on the sandboxes
+		// container (chef_wm_sandboxes, chef_wm_named_sandbox).
+		{"POST", "/organizations/acme/sandboxes", &authzCheck{aclType: "containers", aclName: "sandboxes", perm: "create"}},
+		{"PUT", "/organizations/acme/sandboxes/abc", &authzCheck{aclType: "containers", aclName: "sandboxes", perm: "create"}},
 		{"GET", "/organizations/acme/cookbooks/apache2", &authzCheck{aclType: "cookbooks", aclName: "apache2", perm: "read"}},
 		{"GET", "/organizations/acme/cookbooks/apache2/1.0.0", &authzCheck{aclType: "cookbooks", aclName: "apache2", perm: "read"}},
 		// A PUT creates the cookbook when it has no version yet.

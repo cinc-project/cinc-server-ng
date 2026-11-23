@@ -102,7 +102,10 @@ plain client can read the nodes, roles, environments, cookbooks, data bags and
 policies it converges from, but not list the org's clients or groups). Making
 a new object of any kind, including a new cookbook, cookbook artifact, policy
 or policy group, takes create on its container, and pushing a policy to a group
-is checked on both the policy and the group. A user
+is checked on both the policy and the group. Uploading cookbook files (creating
+and committing a sandbox) takes create on the `sandboxes` container, which by
+default only admins and users hold, so a client (the validator included)
+cannot store files. A user
 who is not a member of the org (never invited, or removed from it) is refused
 every request under `/organizations/<org>` with `403`, whatever ACLs or groups
 still name them; clients and the superuser are exempt. It

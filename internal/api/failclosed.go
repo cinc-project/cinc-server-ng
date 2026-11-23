@@ -49,10 +49,6 @@ type openWrite struct {
 var openWrites = []openWrite{
 	{http.MethodPost, "/authenticate_user",
 		"verifies a password and is restricted to the superuser (or the web UI) by the handler itself"},
-	{http.MethodPost, "/organizations/{org}/sandboxes",
-		"announces cookbook checksums; the cookbook write that follows is what carries the ACL check"},
-	{http.MethodPut, "/organizations/{org}/sandboxes/",
-		"commits a sandbox announced above; the cookbook write is what carries the ACL check"},
 	{http.MethodPut, "/organizations/{org}/file_store/",
 		"cookbook file transfer, authorized by the pre-signed URL rather than a signed request"},
 	{http.MethodPost, "/organizations/{org}/search/",

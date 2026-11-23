@@ -246,7 +246,7 @@ var existenceSegs = map[string]bool{
 
 // classifyRequest maps a request to the authorization it requires, or reports
 // ok=false for requests that carry no ACL restriction (search, the authenticate
-// endpoints, sandbox/file uploads, association management, and server-global
+// endpoints, file-store transfers, association management, and server-global
 // routes), which are allowed through unchanged.
 func classifyRequest(method, path string) (*authzCheck, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
@@ -324,8 +324,25 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	case seg == "universe" && len(rest) == 1 && read:
 		// chef_wm_universe: read on the cookbooks container.
 		return &authzCheck{aclType: "containers", aclName: "cookbooks", perm: "read"}, true
+	case seg == "sandboxes":
+		return classifySandbox(method, rest)
 	case enforceSegs[seg]:
 		return classifyGeneric(method, seg, rest, read)
+	}
+	return nil, false
+}
+
+// classifySandbox gates the cookbook-upload handshake. The file is stored
+// when it is uploaded, before any cookbook write, so the sandbox that issues
+// the upload URL must be authorized itself. erchef treats announcing
+// (POST /sandboxes, {create_in_container, sandbox} in chef_wm_sandboxes) and
+// committing (PUT /sandboxes/<id>, {container, sandbox, create} in
+// chef_wm_named_sandbox) as two halves of one operation and checks create on
+// the sandboxes container for both. The default container ACL grants that to
+// admins and users only, so no client, the validator included, can upload.
+func classifySandbox(method string, rest []string) (*authzCheck, bool) {
+	if (method == http.MethodPost && len(rest) == 1) || (method == http.MethodPut && len(rest) == 2) {
+		return &authzCheck{aclType: "containers", aclName: "sandboxes", perm: "create"}, true
 	}
 	return nil, false
 }
