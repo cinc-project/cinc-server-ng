@@ -198,15 +198,26 @@ func (a *API) createPolicyRevision(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, revID, err := decodeRevision(r, r.PathValue("name"))
+	name := r.PathValue("name")
+	raw, revID, err := decodeRevision(r, name)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := org.Create(policyRevColl(r.PathValue("name")), revID, raw); errors.Is(err, store.ErrConflict) {
+	// The first revision creates the policy.
+	isNew, err := a.isNewObject(org, "policies", name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := org.Create(policyRevColl(name), revID, raw); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Policy revision already exists")
 		return
 	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.grantCreatorIfNew(r, org, "policies", name, isNew); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -394,7 +405,18 @@ func (a *API) putGroupPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// A push may create the policy, the group or both, and each new one takes
+	// its container's ACL (oc_chef_wm_policy_group_policy_rev).
+	newPolicy, err := a.isNewObject(org, "policies", policy)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := org.Put(policyRevColl(policy), revID, raw); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.grantCreatorIfNew(r, org, "policies", policy, newPolicy); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -410,6 +432,10 @@ func (a *API) putGroupPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	g.Policies[policy] = groupPolicy{RevisionID: revID}
 	if err := saveGroup(org, groupName, g); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.grantCreatorIfNew(r, org, policyGroupsColl, groupName, !ok); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

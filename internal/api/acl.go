@@ -172,6 +172,39 @@ func aceStrings(v any) []string {
 	return jsonStrings(v)
 }
 
+// writeContainerACL stores the ACL an object of type typ takes when it is
+// created with no creator to grant (loaded from a chef-repo or state
+// directory, or created before per-object ACLs were written): its container's
+// ACL and, for a client, the client itself.
+func writeContainerACL(org *store.Org, typ, name string) error {
+	acl, err := fallbackACL(org, typ, name)
+	if err != nil {
+		return err
+	}
+	return org.Put("acls", aclKey(typ, name), mustEncode(acl))
+}
+
+// isNewObject reports whether typ/name does not exist yet, so that a write to
+// it creates it and must store its creation ACL (grantCreator). A handler that
+// can create an object by writing to it (a first cookbook version, a first
+// policy revision, a policy push to a new group) asks before the write. It
+// reads nothing, and reports false, unless ACLs are enforced.
+func (a *API) isNewObject(org *store.Org, typ, name string) (bool, error) {
+	if !a.enforceACL {
+		return false, nil
+	}
+	ok, err := aclObjectExists(org, typ, name)
+	return !ok, err
+}
+
+// grantCreatorIfNew is grantCreator for an object isNewObject found new.
+func (a *API) grantCreatorIfNew(r *http.Request, org *store.Org, typ, name string, isNew bool) error {
+	if !isNew {
+		return nil
+	}
+	return a.grantCreator(r, org, typ, name)
+}
+
 // grantCreator records the creating actor as the owner of a newly created object.
 // It is a no-op unless ACL enforcement is on and a verified actor is present, so
 // the permissive default writes no per-object ACLs and behaves exactly as before.
@@ -186,6 +219,27 @@ func (a *API) grantCreator(r *http.Request, org *store.Org, typ, name string) er
 	return writeCreatorACL(org, typ, name, actor)
 }
 
+// grantContainerCreator stores a new container's ACL: full control for its
+// creator and nothing else. erchef's merge_acl_from_container skips containers,
+// so a container does not take its parent's ACL, and bifrost's creator grant
+// is all it has. Like grantCreator, it writes only under enforcement.
+func (a *API) grantContainerCreator(r *http.Request, org *store.Org, name string) error {
+	if !a.enforceACL {
+		return nil
+	}
+	actor, ok := actorFromContext(r.Context())
+	if !ok {
+		return nil
+	}
+	kind := "users"
+	if actor.IsClient {
+		kind = "clients"
+	}
+	acl := policyACL()
+	grantAll(acl, kind, actor.Name)
+	return org.Put("acls", aclKey("containers", name), mustEncode(acl))
+}
+
 // deleteACL removes an object's per-object ACL.
 //
 // An ACL is keyed by object type and name, and loadACL resolves it by that key
@@ -194,9 +248,9 @@ func (a *API) grantCreator(r *http.Request, org *store.Org, typ, name string) er
 // to take the ACL with the object, or a grant made to a contractor on last
 // year's "vault" data bag still governs this year's.
 //
-// Objects created through createObject/createActor happen to mask this, since
-// grantCreator overwrites the ACL on create; data bags, cookbooks, policies,
-// groups and containers have no such path and inherit the stale one verbatim.
+// Every create path overwrites the ACL through grantCreator, which masks a
+// stale one under enforcement; without enforcement nothing does, and a stale
+// one would be what enforcement finds once it is turned on.
 func deleteACL(org *store.Org, typ, name string) error {
 	_, _, err := org.Delete("acls", aclKey(typ, name))
 	return err
@@ -251,15 +305,22 @@ func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
 			return m, nil
 		}
 	}
-	return fallbackACL(typ, name), nil
+	return fallbackACL(org, typ, name)
 }
 
-// fallbackACL is the ACL an object with no stored one reports. For most objects
-// that is defaultACL(), which lets every org member (the "users" group) create,
-// update and delete.
+// fallbackACL is the ACL an object with no stored one reports.
 //
-// The organization, its containers and its groups instead report the ACL
-// erchef's org creation policy (oc_chef_authz_org_creator) gives them; see
+// An object in one of the org's containers reports the ACL it would have been
+// created with, less a creator: its container's ACL as stored now and, for a
+// client, the client itself (writeContainerACL). Every create path stores that
+// ACL (grantCreator), and the startup upgrade stores it for objects that
+// predate this or were loaded from disk (UpgradeObjectACLs), so this is the
+// net for a create path that forgets: it fails to the container's ACL, never
+// to a grant the container does not make. A global user, which has no
+// container, reports defaultACL().
+//
+// The organization, its containers and its default groups instead report the
+// ACL erchef's org creation policy (oc_chef_authz_org_creator) gives them; see
 // acl_policy.go. None of them gets an ACL written when it is created here
 // (bar the clients container, for the validator), so the policy has to live in
 // the fallback, and it is what keeps authority over the org with the admins:
@@ -276,16 +337,30 @@ func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
 //
 // An ACL written for any of them through the _acl endpoints still replaces
 // this fallback, as for any object.
-func fallbackACL(typ, name string) map[string]any {
+func fallbackACL(org *store.Org, typ, name string) (map[string]any, error) {
 	switch typ {
 	case "organizations":
-		return orgACL()
+		return orgACL(), nil
 	case "containers":
-		return containerACL(name)
+		return containerACL(name), nil
 	case "groups":
-		return groupACL(name)
+		if slices.Contains(defaultGroups, name) {
+			return groupACL(name), nil
+		}
+	case "users":
+		return defaultACL(), nil
 	}
-	return defaultACL()
+	if !slices.Contains(aclObjectTypes, typ) {
+		return defaultACL(), nil
+	}
+	acl, err := creationACL(org, typ)
+	if err != nil {
+		return nil, err
+	}
+	if typ == "clients" {
+		grantAll(acl, "clients", name)
+	}
+	return acl, nil
 }
 
 // The org-scoped object handlers resolve the {org} path value to its store and
