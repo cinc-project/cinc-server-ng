@@ -50,6 +50,11 @@ type cliFlags struct {
 	statsUser      string
 	statsPassword  string
 
+	bootstrapUser         string
+	bootstrapPasswordFile string
+	bootstrapPassword     string // from CINC_SERVER_NG_BOOTSTRAP_PASSWORD
+	bootstrapEmail        string
+
 	tlsCert         string
 	tlsKey          string
 	externalURL     string
@@ -94,6 +99,9 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight requests when stopping before cutting them off")
 	fs.Int64Var(&f.maxRequestSize, "max-request-size", server.DefaultMaxBodyBytes, "largest API request body, in bytes, accepted (413 above it, as opscode_erchef['max_request_size']); negative for no limit")
 	fs.Int64Var(&f.maxFileSize, "max-file-size", server.DefaultMaxFileStoreBytes, "largest cookbook file, in bytes, accepted at the file store (413 above it); negative for no limit")
+	fs.StringVar(&f.bootstrapUser, "bootstrap-user", "", "create this user at startup as the first console admin: a password user in server-admins and a member and admin of every --orgs org. Its password comes from --bootstrap-password-file or CINC_SERVER_NG_BOOTSTRAP_PASSWORD. If the user already exists (a restart on --storage sqlite), its password and profile are left unchanged and only its memberships are ensured")
+	fs.StringVar(&f.bootstrapPasswordFile, "bootstrap-password-file", "", "file holding the --bootstrap-user password (one trailing newline is dropped); takes precedence over CINC_SERVER_NG_BOOTSTRAP_PASSWORD")
+	fs.StringVar(&f.bootstrapEmail, "bootstrap-email", "", "email address for --bootstrap-user (default \"<user>@localhost.localdomain\")")
 	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
 
 	fs.Usage = func() {
@@ -124,6 +132,8 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	if f.statsPassword == "" {
 		f.statsPassword = os.Getenv("CINC_SERVER_NG_STATS_PASSWORD")
 	}
+	// Like the stats password, read after parsing so it never shows in --help.
+	f.bootstrapPassword = os.Getenv("CINC_SERVER_NG_BOOTSTRAP_PASSWORD")
 	return &f, nil
 }
 
@@ -152,6 +162,12 @@ func run(args []string, out io.Writer) error {
 		webuiKey, err = os.ReadFile(f.webuiKey)
 		if err != nil {
 			return fmt.Errorf("read webui key: %w", err)
+		}
+	}
+
+	if f.bootstrapPasswordFile != "" {
+		if f.bootstrapPassword, err = readPasswordFile(f.bootstrapPasswordFile); err != nil {
+			return fmt.Errorf("read bootstrap password file: %w", err)
 		}
 	}
 
@@ -219,6 +235,9 @@ func run(args []string, out io.Writer) error {
 	if f.externalURL != "" {
 		fmt.Fprintf(out, "  external url: %s\n", f.externalURL)
 	}
+	if f.bootstrapUser != "" {
+		fmt.Fprintf(out, "  bootstrap user: %s (server-admin, admin of %s)\n", f.bootstrapUser, f.orgsCSV)
+	}
 
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
@@ -276,6 +295,21 @@ func envOr(key, def string) string {
 	return def
 }
 
+// readPasswordFile reads a password from path, dropping one trailing newline
+// ("\n" or "\r\n") so a file written with echo works. Anything else, including
+// surrounding spaces, is part of the password.
+func readPasswordFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	s := string(raw)
+	if t, ok := strings.CutSuffix(s, "\r\n"); ok {
+		return t, nil
+	}
+	return strings.TrimSuffix(s, "\n"), nil
+}
+
 func splitCSV(s string) []string {
 	var out []string
 	for part := range strings.SplitSeq(s, ",") {
@@ -330,6 +364,10 @@ func (f *cliFlags) serverOptions(webuiKey []byte) server.Options {
 
 		StatsUser:     f.statsUser,
 		StatsPassword: f.statsPassword,
+
+		BootstrapUser:     f.bootstrapUser,
+		BootstrapPassword: f.bootstrapPassword,
+		BootstrapEmail:    f.bootstrapEmail,
 
 		SQLiteGroupCommit: f.groupCommit,
 

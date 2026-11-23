@@ -236,7 +236,26 @@ cinc-server-ng --storage sqlite --db /data/cinc.db \
 
 The console logs users in with a password, which it checks with
 `POST /authenticate_user`. A fresh server has only `pivotal`, which has a key
-but no password. So first create a user, as `pivotal`, with
+but no password. The simplest fix is to have the server create the first
+admin at startup:
+
+```sh
+cinc-server-ng --storage sqlite --db /data/cinc.db --orgs myorg \
+  --webui-key /data/webui_pub.pem --key-out /data/pivotal.pem \
+  --bootstrap-user alice --bootstrap-password-file /run/secrets/alice
+```
+
+`alice` is created with that password, joins the global `server-admins` group
+(so she can create users and organizations) and becomes a member and admin of
+every `--orgs` org. The password comes from the file (one trailing newline is
+dropped) or from `CINC_SERVER_NG_BOOTSTRAP_PASSWORD`; there is no password
+flag. Set `--bootstrap-email` for a real address (the default is
+`alice@localhost.localdomain`). On every later start the user is left as it is,
+so a password changed through the console or `cinc user password` survives a
+restart; only the memberships are re-applied. `--key-out` is still how you get
+`pivotal`'s key.
+
+Or create users by hand, as `pivotal`, with
 [cinc-cli](https://github.com/cinc-project/cinc-cli) (or the equivalent `knife`
 commands):
 

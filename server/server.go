@@ -112,6 +112,20 @@ type Options struct {
 	// read at New and again on ReloadTLS.
 	TLSCertFile string
 	TLSKeyFile  string
+	// BootstrapUser, when set, names a human administrator created at startup
+	// with BootstrapPassword, so a fresh server has someone who can log in to a
+	// web console (cinc-console authenticates by password, then signs as the
+	// user with the webui key). The user joins the global server-admins group
+	// and becomes a member of every organization in Orgs and of its users and
+	// admins groups. On a store that already holds the user (a restart on
+	// SQLite), its password and profile are left alone, since an operator may
+	// have changed them; only the memberships are ensured. BootstrapPassword is
+	// required with it, and neither it nor BootstrapEmail may be set without it.
+	BootstrapUser     string
+	BootstrapPassword string
+	// BootstrapEmail is the bootstrap user's email address, which a password
+	// user must have. Defaults to "<BootstrapUser>@localhost.localdomain".
+	BootstrapEmail string
 	// Backend, when non-nil, is used directly and overrides Storage/DB. It lets
 	// embedding tests inject a specific store.Backend (e.g. a shared in-memory
 	// SQLite DB).
@@ -156,6 +170,26 @@ func (o *Options) withDefaults() {
 	if o.MaxFileStoreBytes == 0 {
 		o.MaxFileStoreBytes = DefaultMaxFileStoreBytes
 	}
+}
+
+// bootstrapUser validates the Bootstrap* options and returns the user to
+// create, or nil when none is configured. Called after withDefaults, so
+// AdminName is set.
+func (o *Options) bootstrapUser() (*api.BootstrapUser, error) {
+	if o.BootstrapUser == "" {
+		if o.BootstrapPassword != "" || o.BootstrapEmail != "" {
+			return nil, errors.New("BootstrapPassword and BootstrapEmail require BootstrapUser (--bootstrap-user)")
+		}
+		return nil, nil
+	}
+	if o.BootstrapUser == o.AdminName {
+		return nil, fmt.Errorf("bootstrap user %q is the superuser (--admin); choose another name", o.BootstrapUser)
+	}
+	u := &api.BootstrapUser{Name: o.BootstrapUser, Password: o.BootstrapPassword, Email: o.BootstrapEmail}
+	if err := u.Validate(); err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 // buildStore constructs the data store for the given options: an injected Backend
@@ -349,6 +383,10 @@ func New(opts Options) (*Server, error) {
 	if opts.Repo != "" && opts.StatePath != "" {
 		return nil, errors.New("options Repo and StatePath are mutually exclusive; a state directory already subsumes a chef-repo")
 	}
+	bootstrapUser, err := opts.bootstrapUser()
+	if err != nil {
+		return nil, err
+	}
 	if opts.ExternalURL != "" {
 		base, err := normalizeExternalURL(opts.ExternalURL)
 		if err != nil {
@@ -509,6 +547,14 @@ func New(opts Options) (*Server, error) {
 	if opts.StatePath != "" {
 		if _, err := state.Load(st, opts.StatePath); err != nil {
 			return nil, fmt.Errorf("load state %q: %w", opts.StatePath, err)
+		}
+	}
+
+	// After the orgs (it joins each) and any state load (which may already
+	// define the user).
+	if bootstrapUser != nil {
+		if _, err := bootstrapUser.Apply(st, opts.Orgs); err != nil {
+			return nil, err
 		}
 	}
 

@@ -170,6 +170,29 @@ uploaded to the file store. A negative value removes a cap. The server checks
 a request's signing headers, clock skew, declared length and actor before it
 reads the body, so a request it refuses from its headers costs no body read.
 
+A fresh server has only the key-based superuser (`pivotal`), so nobody can log
+in to a web console such as
+[cinc-console](https://github.com/cinc-project/cinc-console), which signs users
+in with a password. `--bootstrap-user` creates that first human admin at
+startup: a password user in the global `server-admins` group and a member and
+admin (`users` and `admins` groups) of every `--orgs` org. The password comes
+from `--bootstrap-password-file` (one trailing newline is dropped) or the
+`CINC_SERVER_NG_BOOTSTRAP_PASSWORD` environment variable, never from a flag, so
+it stays off the command line. `--bootstrap-email` sets the user's email
+(default `<user>@localhost.localdomain`). A one-command production start:
+
+```sh
+cinc-server-ng --storage sqlite --db /data/cinc.db --orgs myorg \
+  --webui-key webui_pub.pem --key-out /data/pivotal.pem \
+  --bootstrap-user alice --bootstrap-password-file /run/secrets/alice
+```
+
+`--key-out` is still how you get `pivotal`'s key. On a restart against the same
+database the user is left as it is (its password and profile may have been
+changed since), and only its memberships are ensured, including in any org newly
+added to `--orgs`. `--init` applies it too, so a pre-baked database can ship with
+its console admin.
+
 Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
 `roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`,
 `data_bags/`, and `cookbooks/`) into the first org at startup, mirroring
