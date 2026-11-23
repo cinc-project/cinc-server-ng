@@ -41,7 +41,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// knife/chef-client/cinc-client PUT/GET without signing them. cinc-server-ng
 		// reproduces that shape, so authorization rides on the URL — the grant
 		// the server issued, scoped to this org, checksum, and operation.
-		if org, checksum, ok := fileStorePath(r.URL.Path); ok {
+		if org, checksum, ok := fileStorePath(r.URL.EscapedPath()); ok {
 			if err := auth.VerifyFileStore(s.fileStoreKey, org, checksum,
 				fileStoreOp(r.Method), r.URL.Query(), s.opts.Now()); err != nil {
 				unauthorized(w, err.Error())
@@ -84,7 +84,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				unauthorized(w, "Invalid webui signature for request source 'web'")
 				return
 			}
-			candidates, err := s.resolveAuth(r.URL.Path, parsed.UserID)
+			candidates, err := s.resolveAuth(r.URL.EscapedPath(), parsed.UserID)
 			if err != nil {
 				serverError(w, err)
 				return
@@ -107,7 +107,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// one whose key verifies the signature, as in erchef's
 		// verify_request_signature: a user and a client may share a name, and
 		// the key, not the name, says which of them signed.
-		candidates, err := s.resolveAuth(r.URL.Path, parsed.UserID)
+		candidates, err := s.resolveAuth(r.URL.EscapedPath(), parsed.UserID)
 		if err != nil {
 			serverError(w, err)
 			return
@@ -391,10 +391,10 @@ func writeBadRequest(w http.ResponseWriter, msg string) {
 }
 
 // fileStorePath reports whether path addresses the cookbook file store
-// (/organizations/{org}/file_store/{checksum}), returning the org and checksum
-// a pre-signed grant must cover.
+// (/organizations/{org}/file_store/{checksum}, escaped and split as the router
+// splits it), returning the org and checksum a pre-signed grant must cover.
 func fileStorePath(path string) (org, checksum string, ok bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
+	parts := api.PathSegments(path)
 	if len(parts) != 4 || parts[0] != "organizations" || parts[2] != "file_store" {
 		return "", "", false
 	}
@@ -410,14 +410,13 @@ func fileStoreOp(method string) string {
 	return auth.FileStoreGet
 }
 
-// orgFromPath extracts the organization name from an "/organizations/{org}/..."
-// request path, or "" if the path is not org-scoped.
+// orgFromPath extracts the organization name from an escaped
+// "/organizations/{org}/..." request path, split as the router splits it, or
+// "" if the path is not org-scoped.
 func orgFromPath(path string) string {
-	const prefix = "/organizations/"
-	if !strings.HasPrefix(path, prefix) {
+	parts := api.PathSegments(path)
+	if len(parts) < 2 || parts[0] != "organizations" {
 		return ""
 	}
-	rest := path[len(prefix):]
-	org, _, _ := strings.Cut(rest, "/")
-	return org
+	return parts[1]
 }

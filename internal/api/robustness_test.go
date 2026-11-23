@@ -21,19 +21,31 @@ var trickyNames = []string{
 	`emoji😀tail`,
 }
 
-// TestObjectNameRoundTrip pins that an object name with JSON-special or Unicode
-// characters survives create → get → list as canonical JSON. This guards the
-// class of bug where a name is concatenated into JSON or a URL without
-// escaping (cf. the data-bag and global-user-URI fixes).
+// TestObjectNameRoundTrip pins two things about node names with JSON-special
+// or Unicode characters. erchef refuses every one of them (its node_name
+// rule), so a create is a 400 that stores nothing. And one a store already
+// holds, written before names were validated, still survives get and list as
+// canonical JSON. This guards the class of bug where a name is concatenated
+// into JSON or a URL without escaping (cf. the data-bag and global-user-URI
+// fixes).
 func TestObjectNameRoundTrip(t *testing.T) {
-	srv, _ := newTestAPI(t)
+	srv, st := newTestAPI(t)
 	const base = "/organizations/acme/nodes"
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, name := range trickyNames {
 		t.Run(name, func(t *testing.T) {
 			body, _ := json.Marshal(map[string]any{"name": name, "marker": "v"})
-			if resp, b := do(t, "POST", srv.URL+base, string(body)); resp.StatusCode != http.StatusCreated {
-				t.Fatalf("create = %d: %s", resp.StatusCode, b)
+			resp, b := do(t, "POST", srv.URL+base, string(body))
+			wantError(t, "create", resp, b, "Field 'name' invalid")
+			if resp, _ := do(t, "GET", srv.URL+base+"/"+url.PathEscape(name), ""); resp.StatusCode != http.StatusNotFound {
+				t.Fatalf("refused create left a node behind: GET = %d", resp.StatusCode)
+			}
+			if err := org.Put("nodes", name, body); err != nil {
+				t.Fatal(err)
 			}
 
 			// GET it back via a properly-escaped path segment.

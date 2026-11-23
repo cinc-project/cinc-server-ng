@@ -71,11 +71,12 @@ func openWriteReason(method, path string) string {
 	return ""
 }
 
-// matchesRoutePrefix compares a declared prefix against a concrete path,
-// treating "{org}" and "{user}" as single-segment wildcards.
+// matchesRoutePrefix compares a declared prefix against a concrete escaped
+// path, split as the router splits it (PathSegments), treating "{org}" and
+// "{user}" as single-segment wildcards.
 func matchesRoutePrefix(prefix, path string) bool {
 	pParts := strings.Split(strings.Trim(prefix, "/"), "/")
-	aParts := strings.Split(strings.Trim(path, "/"), "/")
+	aParts := PathSegments(path)
 	if len(aParts) < len(pParts) {
 		return false
 	}
@@ -102,7 +103,7 @@ func (a *API) refuseUnclassifiedWrite(r *http.Request) bool {
 	if !mutatingMethod(r.Method) {
 		return false
 	}
-	if openWriteReason(r.Method, r.URL.Path) != "" {
+	if openWriteReason(r.Method, r.URL.EscapedPath()) != "" {
 		return false
 	}
 	return a.routeMatched(r)

@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -36,7 +35,7 @@ var membershipExempt = map[string]bool{
 // handler writes the 404), or no route matches (the 404 or 405 stands, as
 // webmachine decides both before is_authorized).
 func (a *API) orgMembershipGate(w http.ResponseWriter, r *http.Request, actor Actor) (*store.Org, bool) {
-	parts := strings.SplitN(strings.Trim(r.URL.Path, "/"), "/", 4)
+	parts := PathSegments(r.URL.EscapedPath())
 	if len(parts) < 2 || parts[0] != "organizations" || parts[1] == "" {
 		return nil, true
 	}
