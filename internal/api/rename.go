@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -83,6 +84,21 @@ func moveACL(org *store.Org, typ, oldName, newName string) error {
 	return moveKey(org, "acls", aclKey(typ, oldName), aclKey(typ, newName))
 }
 
+// mayName reports whether raw, a stored JSON document, can hold name as a
+// string. A rename scans every document of a kind, and decoding is what costs:
+// one that cannot name the renamed object is skipped unread. A name is ruled
+// out only when JSON writes it literally (no character an encoder escapes) and
+// neither its quoted form nor any \u escape, which could spell it another way,
+// appears in raw.
+func mayName(raw []byte, name string) bool {
+	for i := 0; i < len(name); i++ {
+		if c := name[i]; c < 0x20 || c > 0x7e || strings.IndexByte(`"\/<>&`, c) >= 0 {
+			return true
+		}
+	}
+	return bytes.Contains(raw, []byte(`"`+name+`"`)) || bytes.Contains(raw, []byte(`\u`))
+}
+
 // renameInACLs replaces oldName with newName in the actors or groups (kind) of
 // every ACE of every ACL stored in org, as erchef's authz ids follow a renamed
 // object. ACLs are collected during the scan and rewritten after it, since a
@@ -90,6 +106,9 @@ func moveACL(org *store.Org, typ, oldName, newName string) error {
 func renameInACLs(org *store.Org, kind, oldName, newName string) error {
 	changed := map[string][]byte{}
 	if err := org.Range("acls", func(key string, raw []byte) bool {
+		if !mayName(raw, oldName) {
+			return true
+		}
 		var acl map[string]any
 		if json.Unmarshal(raw, &acl) != nil {
 			return true
@@ -162,36 +181,34 @@ func renameInGroups(org *store.Org, kind, oldName, newName string) error {
 			return err
 		}
 	}
-	names, err := org.Keys("groups")
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		raw, ok, err := org.Get("groups", name)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue
+	changed := map[string][]byte{}
+	if err := org.Range("groups", func(name string, raw []byte) bool {
+		if !mayName(raw, oldName) {
+			return true
 		}
 		var g map[string]any
 		if json.Unmarshal(raw, &g) != nil {
-			continue
+			return true
 		}
 		users, clients, groups := groupMembers(g)
-		var changed bool
+		var renamed bool
 		switch kind {
 		case memberUsers:
-			users, changed = renamedIn(users, oldName, newName)
+			users, renamed = renamedIn(users, oldName, newName)
 		case memberClients:
-			clients, changed = renamedIn(clients, oldName, newName)
+			clients, renamed = renamedIn(clients, oldName, newName)
 		case memberGroups:
-			groups, changed = renamedIn(groups, oldName, newName)
+			groups, renamed = renamedIn(groups, oldName, newName)
 		}
-		if !changed {
-			continue
+		if renamed {
+			changed[name] = groupJSON(name, "", users, clients, groups)
 		}
-		if err := org.Put("groups", name, groupJSON(name, "", users, clients, groups)); err != nil {
+		return true
+	}); err != nil {
+		return err
+	}
+	for name, raw := range changed {
+		if err := org.Put("groups", name, raw); err != nil {
 			return err
 		}
 	}
@@ -205,6 +222,9 @@ func renameInGroups(org *store.Org, kind, oldName, newName string) error {
 func renameInviter(org *store.Org, client bool, oldName, newName string) error {
 	changed := map[string][]byte{}
 	if err := org.Range(assocReqColl, func(key string, raw []byte) bool {
+		if !mayName(raw, oldName) {
+			return true
+		}
 		var inv map[string]any
 		if json.Unmarshal(raw, &inv) != nil {
 			return true
