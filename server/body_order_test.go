@@ -239,3 +239,71 @@ func TestBodylessEndpointsDoNotReadABody(t *testing.T) {
 		})
 	}
 }
+
+// A path whose file_store segment ends in an escaped slash is not the file
+// store: it is not exempt from signing, and its body is held to the API cap,
+// not the file store's, before any signature is checked. (The signature here
+// covers an empty body, so it never verifies against the one sent.)
+func TestEscapedFileStorePathGetsTheAPICap(t *testing.T) {
+	const limit, fileLimit = 512, 1 << 20
+	const url = "/organizations/acme/file_store%2Fx"
+	cases := map[string]struct {
+		opts  Options
+		build func(srv *Server) *http.Request
+	}{
+		"signed": {
+			Options{Orgs: []string{"acme"}, MaxBodyBytes: limit, MaxFileStoreBytes: fileLimit},
+			func(srv *Server) *http.Request { return signedEmpty(t, srv, "PUT", url) },
+		},
+		"web": {
+			Options{Orgs: []string{"acme"}, MaxBodyBytes: limit, MaxFileStoreBytes: fileLimit},
+			func(srv *Server) *http.Request {
+				req := signedEmpty(t, srv, "PUT", url)
+				req.Header.Set("X-Ops-Request-Source", "web")
+				return req
+			},
+		},
+		"no auth": {
+			Options{Orgs: []string{"acme"}, MaxBodyBytes: limit, MaxFileStoreBytes: fileLimit, DisableAuth: true},
+			func(srv *Server) *http.Request { return httptest.NewRequest("PUT", url, nil) },
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := startServer(t, tc.opts)
+			want := `{"error":"JSON must be no more than 512 bytes."}`
+
+			rec, body := serveBody(t, srv, tc.build(srv), limit+1)
+			if rec.Code != http.StatusRequestEntityTooLarge || rec.Body.String() != want {
+				t.Fatalf("declared over the API cap = %d %s, want 413 %s", rec.Code, rec.Body, want)
+			}
+			if body.n != 0 {
+				t.Fatalf("read %d bytes of a body declared over the API cap, want 0", body.n)
+			}
+
+			rec, body = serveBody(t, srv, tc.build(srv), -1)
+			if rec.Code != http.StatusRequestEntityTooLarge || rec.Body.String() != want {
+				t.Fatalf("chunked over the API cap = %d %s, want 413 %s", rec.Code, rec.Body, want)
+			}
+			if body.n > 2*limit {
+				t.Fatalf("read %d bytes of an endless body with a %d-byte API cap", body.n, limit)
+			}
+		})
+	}
+}
+
+// A web-sourced request naming no actor is refused before its body is read,
+// as a request signed by the actor itself is.
+func TestWebRequestForUnknownActorIsNotRead(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}})
+	req := signedEmpty(t, srv, "POST", "/organizations/acme/nodes")
+	req.Header.Set("X-Ops-Request-Source", "web")
+	req.Header.Set("X-Ops-Userid", "nobody")
+	rec, body := serveBody(t, srv, req, 1000)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body)
+	}
+	if body.n != 0 {
+		t.Fatalf("read %d body bytes of a web request for an unknown actor, want 0", body.n)
+	}
+}
