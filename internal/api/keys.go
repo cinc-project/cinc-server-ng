@@ -13,9 +13,10 @@ import (
 
 // Key management implements Chef's v1 key API for actors (clients and users).
 // Named keys live in a per-actor collection ("<segment>_keys:<actor>") within
-// the actor's scope (org for clients, global for users). As with actor
-// creation, a key POSTed without a public_key has one generated, and the
-// private key is returned once.
+// the actor's scope (org for clients, global for users). A key POST names its
+// expiration_date and either a public_key or "create_key": true, as erchef
+// requires; with create_key the server generates the pair and returns the
+// private key once.
 //
 // The "default" key is the stored "default" row when there is one, and is
 // otherwise synthesized from the actor record's public_key (which is where
@@ -280,15 +281,11 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
-		keyName, _ := body["name"].(string)
-		if keyName == "" {
-			writeError(w, http.StatusBadRequest, "Field 'name' missing")
-			return
-		}
-		if msg := validateKeyFields(body); msg != "" {
+		if msg := validateKeyFields(body, true); msg != "" {
 			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
+		keyName, _ := body["name"].(string)
 		// The default key made with the actor is a key like any other, so a
 		// second "default" conflicts with it even though it has no stored row.
 		if keyName == defaultKeyName && str(actor["public_key"]) != "" {
@@ -297,8 +294,10 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 
 		resp := map[string]any{"uri": keysBaseURL(r, segment, name) + "/" + keyName}
+		// validateKeyFields leaves exactly one source: a public_key, or a
+		// true create_key asking the server for a new pair.
 		pub, hasPub := body["public_key"].(string)
-		if !hasPub || pub == "" {
+		if !hasPub {
 			key, err := auth.GenerateKey()
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "key generation failed")
@@ -314,9 +313,6 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 
 		expiration, _ := body["expiration_date"].(string)
-		if expiration == "" {
-			expiration = "infinity"
-		}
 		stored := map[string]any{"name": keyName, "public_key": pub, "expiration_date": expiration}
 		if err := org.Create(keysColl(segment, name), keyName, mustEncode(stored)); errors.Is(err, store.ErrConflict) {
 			writeError(w, http.StatusConflict, "Key already exists")
@@ -351,19 +347,21 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
-		// As erchef's chef_key_base:maybe_generate_key_pair: create_key asks the
-		// server for a new pair in place of the key's public_key, so asking for
-		// both is contradictory. The flag is a request, never part of the key.
-		createKey, _ := body["create_key"].(bool)
-		delete(body, "create_key")
-		if createKey && str(body["public_key"]) != "" {
-			writeError(w, http.StatusBadRequest, "Since you requested a new key be created, you cannot also specify a public_key.")
+		// As erchef's chef_key:parse_binary_json(_, update): the body must
+		// carry at least one key field, and each one it carries is checked.
+		if !hasKeyUpdateField(body) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": keyUpdateFieldMissingMessage})
 			return
 		}
-		if msg := validateKeyFields(body); msg != "" {
+		if msg := validateKeyFields(body, false); msg != "" {
 			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
+		// As erchef's chef_key_base:maybe_generate_key_pair: create_key asks the
+		// server for a new pair in place of the key's public_key. The flag is a
+		// request, never part of the key.
+		createKey, _ := body["create_key"].(bool)
+		delete(body, "create_key")
 		coll := keysColl(segment, name)
 		oldRaw, stored, err := org.Get(coll, keyName)
 		if err != nil {

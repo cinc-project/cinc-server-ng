@@ -66,25 +66,87 @@ func validExpirationDate(s string) bool {
 	return err == nil
 }
 
-// validateKeyFields checks whichever of a key body's name, public_key and
-// expiration_date are present (chef_key:parse_binary_json), returning erchef's
-// error message or "". An empty or null public_key or expiration_date is left
-// to the caller, which treats it as absent.
-func validateKeyFields(body map[string]any) string {
+// Key body errors erchef answers from chef_wm_malformed.
+const (
+	createOrPubkeyMissingMessage    = "You must either provide a valid value for 'public_key', or specify 'create_key': true"
+	createAndPubkeySpecifiedMessage = "You must specify either create_key or public_key, but not both"
+	privateKeyFieldMessage          = "Please use create_key: true instead of private_key: true"
+	// keyUpdateFieldMissingMessage is oc_chef_wm_named_key's answer for a PUT
+	// carrying none of the key fields. Unlike the others, erchef sends it as
+	// a bare string, not a list.
+	keyUpdateFieldMissingMessage = "At least one of 'name', 'expiration_date', or 'public_key' must be specified"
+)
+
+// hasKeyUpdateField reports whether a key PUT body carries any of the fields
+// chef_key:parse_binary_json(_, update) looks for. A null is present, as it is
+// for ej:get, and is then refused by the field's own check.
+func hasKeyUpdateField(body map[string]any) bool {
+	for _, f := range []string{"expiration_date", "name", "public_key", "create_key"} {
+		if _, ok := body[f]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// validateKeyFields checks a key body as chef_key:parse_binary_json does,
+// returning erchef's error message or "". On create (required) name,
+// expiration_date and exactly one of public_key and a true create_key must be
+// present; on update each is optional, but create_key and public_key are still
+// exclusive. A field that is present is checked whatever its value, so an
+// empty string or null is invalid, not absent.
+func validateKeyFields(body map[string]any, required bool) string {
+	// validate_name
 	if v, ok := body["name"]; ok {
 		if s, _ := v.(string); !validKeyName(s) {
 			return "Field 'name' invalid"
 		}
+	} else if required {
+		return "Field 'name' missing"
 	}
-	if v, ok := body["public_key"]; ok && v != nil && v != "" {
-		if s, _ := v.(string); !validPublicKey(s) {
+
+	// chef_key_base:validate_public_key_fields
+	if _, ok := body["private_key"]; ok {
+		return privateKeyFieldMessage
+	}
+	createKey, hasCreate := body["create_key"]
+	if hasCreate {
+		if _, ok := createKey.(bool); !ok {
+			return "Field 'create_key' invalid"
+		}
+	}
+	pub, hasPub := body["public_key"]
+	if hasPub {
+		s, ok := pub.(string)
+		if !ok {
+			return "Field 'public_key' invalid"
+		}
+		if !validPublicKey(s) {
 			return invalidPublicKeyMessage
 		}
 	}
-	if v, ok := body["expiration_date"]; ok && v != nil && v != "" {
-		if s, _ := v.(string); !validExpirationDate(s) {
+	switch {
+	case required && !hasPub && !hasCreate:
+		return createOrPubkeyMissingMessage
+	case hasPub && createKey == true:
+		return createAndPubkeySpecifiedMessage
+	case required && !hasPub && createKey == false:
+		// erchef passes this body to chef_key:new_record, which fails on the
+		// missing public_key with a 500; refuse it as the missing key it is.
+		return createOrPubkeyMissingMessage
+	}
+
+	// validate_expiration_date
+	if v, ok := body["expiration_date"]; ok {
+		s, isString := v.(string)
+		if !isString {
+			return "Field 'expiration_date' invalid"
+		}
+		if !validExpirationDate(s) {
 			return badExpirationDateMessage
 		}
+	} else if required {
+		return "Field 'expiration_date' missing"
 	}
 	return ""
 }

@@ -14,7 +14,7 @@ func TestPutKeyReplaceNamedKey(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 	do(t, "POST", base+"/clients", `{"name":"web01"}`)
-	do(t, "POST", base+"/clients/web01/keys", `{"name":"key2"}`)
+	do(t, "POST", base+"/clients/web01/keys", `{"name":"key2","create_key":true,"expiration_date":"infinity"}`)
 
 	replacement := testPublicKeyPEM(t)
 	body, _ := json.Marshal(map[string]any{"public_key": replacement, "expiration_date": "2030-01-01T00:00:00Z"})

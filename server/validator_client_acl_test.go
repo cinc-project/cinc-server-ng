@@ -27,7 +27,7 @@ func TestValidatorHoldsNothingOnClientsItRegisters(t *testing.T) {
 	// Baseline: the validator key is valid and may register clients.
 	webKey := createClientAndKey(t, srv, acme, "web01")
 
-	mustStatus(t, signedAs(t, "acme-validator", vkey, "POST", acme+"/clients/web01/keys", `{"name":"stolen","create_key":true}`), http.StatusForbidden)
+	mustStatus(t, signedAs(t, "acme-validator", vkey, "POST", acme+"/clients/web01/keys", `{"name":"stolen","create_key":true,"expiration_date":"infinity"}`), http.StatusForbidden)
 	mustStatus(t, signedAs(t, "acme-validator", vkey, "GET", acme+"/clients/web01/_acl", ""), http.StatusForbidden)
 	mustStatus(t, signedAs(t, "acme-validator", vkey, "PUT", acme+"/clients/web01/_acl/update",
 		`{"update":{"actors":["acme-validator"],"groups":[]}}`), http.StatusForbidden)
@@ -36,7 +36,7 @@ func TestValidatorHoldsNothingOnClientsItRegisters(t *testing.T) {
 
 	// The client itself keeps full control of its own record.
 	mustStatus(t, signedAs(t, "web01", webKey, "GET", acme+"/clients/web01", ""), http.StatusOK)
-	mustStatus(t, signedAs(t, "web01", webKey, "POST", acme+"/clients/web01/keys", `{"name":"rotated","create_key":true}`), http.StatusCreated)
+	mustStatus(t, signedAs(t, "web01", webKey, "POST", acme+"/clients/web01/keys", `{"name":"rotated","create_key":true,"expiration_date":"infinity"}`), http.StatusCreated)
 	mustStatus(t, signedAs(t, "web01", webKey, "GET", acme+"/clients/web01/keys/stolen", ""), http.StatusNotFound)
 
 	// Its ACL names the client itself and no other actor.
@@ -127,7 +127,7 @@ func TestOtherValidatorHoldsNothingOnClientsItRegisters(t *testing.T) {
 		`{"create":{"actors":["acme-validator","val2"],"groups":["admins"]}}`), http.StatusOK)
 	mustStatus(t, signedAs(t, "val2", vkey, "POST", acme+"/clients", `{"name":"web01"}`), http.StatusCreated)
 
-	mustStatus(t, signedAs(t, "val2", vkey, "POST", acme+"/clients/web01/keys", `{"name":"stolen","create_key":true}`), http.StatusForbidden)
+	mustStatus(t, signedAs(t, "val2", vkey, "POST", acme+"/clients/web01/keys", `{"name":"stolen","create_key":true,"expiration_date":"infinity"}`), http.StatusForbidden)
 	mustStatus(t, signedAs(t, "val2", vkey, "PUT", acme+"/clients/web01", `{"name":"web01"}`), http.StatusForbidden)
 	mustStatus(t, signedAs(t, "val2", vkey, "DELETE", acme+"/clients/web01", ""), http.StatusForbidden)
 	mustStatus(t, signedAs(t, "val2", vkey, "POST", acme+"/clients", `{"name":"evil","validator":true}`), http.StatusForbidden)
@@ -178,6 +178,6 @@ func TestValidatorRemovedFromRegisteredClientACLsOnStart(t *testing.T) {
 	defer stopServer(t, srv2)
 	acme = srv2.URL() + "/organizations/acme"
 	mustStatus(t, signedAs(t, "acme-validator", vkey, "GET", acme+"/clients/web01/_acl", ""), http.StatusForbidden)
-	mustStatus(t, signedAs(t, "acme-validator", vkey, "POST", acme+"/clients/web01/keys", `{"name":"stolen","create_key":true}`), http.StatusForbidden)
+	mustStatus(t, signedAs(t, "acme-validator", vkey, "POST", acme+"/clients/web01/keys", `{"name":"stolen","create_key":true,"expiration_date":"infinity"}`), http.StatusForbidden)
 	assertClientACLActors(t, srv2, acme+"/clients/web01/_acl?detail=granular", "web01")
 }

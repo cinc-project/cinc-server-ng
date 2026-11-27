@@ -71,7 +71,7 @@ func TestOrgMemberCannotManageAnotherClientsKeys(t *testing.T) {
 		t.Fatalf("create client = %d: %s", code, body)
 	}
 
-	if s := respStatus(t, signedAs(t, "bob", bobKey, "POST", base+"/clients/web01/keys", `{"name":"bobs","create_key":true}`)); s != http.StatusForbidden {
+	if s := respStatus(t, signedAs(t, "bob", bobKey, "POST", base+"/clients/web01/keys", `{"name":"bobs","create_key":true,"expiration_date":"infinity"}`)); s != http.StatusForbidden {
 		t.Errorf("member adds a key to web01 = %d, want 403", s)
 	}
 	if s := respStatus(t, signedAs(t, "bob", bobKey, "DELETE", base+"/clients/web01/keys/default", "")); s != http.StatusForbidden {
@@ -135,9 +135,9 @@ func TestNewClientHoldsItsOwnRecord(t *testing.T) {
 	acme := srv.URL() + "/organizations/acme"
 	key := createClientAndKey(t, srv, acme, "web01")
 	mustStatus(t, signedAs(t, "web01", key, "GET", acme+"/clients/web01", ""), http.StatusOK)
-	mustStatus(t, signedAs(t, "web01", key, "POST", acme+"/clients/web01/keys", `{"name":"rotated","create_key":true}`), http.StatusCreated)
+	mustStatus(t, signedAs(t, "web01", key, "POST", acme+"/clients/web01/keys", `{"name":"rotated","create_key":true,"expiration_date":"infinity"}`), http.StatusCreated)
 
 	// But not another client's.
 	createClientAndKey(t, srv, acme, "web02")
-	mustStatus(t, signedAs(t, "web01", key, "POST", acme+"/clients/web02/keys", `{"name":"mine","create_key":true}`), http.StatusForbidden)
+	mustStatus(t, signedAs(t, "web01", key, "POST", acme+"/clients/web02/keys", `{"name":"mine","create_key":true,"expiration_date":"infinity"}`), http.StatusForbidden)
 }
