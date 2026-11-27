@@ -45,6 +45,16 @@ var accepted = []Accepted{
 		Reason: "the sandbox URI embeds the server's own address and identifier scheme.",
 	},
 	{
+		Step:  "auth bad signature",
+		Field: "error*",
+		Reason: "a real server answers a bad signature from an existing user or client with " +
+			"\"Invalid signature for user or client\" but an unknown name with \"Failed to " +
+			"authenticate as\", so anyone who can reach it, holding no credential, can learn " +
+			"which user and client names exist. cinc-server-ng answers every authentication " +
+			"failure with the unknown-name message (same status, same shape) and logs the " +
+			"specific reason server-side. Clients act only on the 401 status.",
+	},
+	{
 		Step:  "server api version",
 		Field: "max_api_version",
 		Reason: "the supported API version range is a property of each implementation " +

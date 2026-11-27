@@ -36,6 +36,14 @@ func Script(actor string) []Step {
 		{Name: "server api version", Method: "GET", Path: "/server_api_version", ServerRoot: true},
 		{Name: "license", Method: "GET", Path: "/license", ServerRoot: true},
 
+		// --- authentication failures ---------------------------------------
+		// A request signed with a key neither server knows, once naming
+		// nobody and once naming the actor the run signs as. erchef answers
+		// the two differently; cinc-server-ng answers both alike (see
+		// known.go).
+		{Name: "auth unknown actor", Method: "GET", Path: "/nodes", SignAs: "diff-absent-actor", ForeignKey: true},
+		{Name: "auth bad signature", Method: "GET", Path: "/nodes", ForeignKey: true},
+
 		// --- nodes ----------------------------------------------------------
 		{Name: "node list empty", Method: "GET", Path: "/nodes"},
 		{Name: "node create", Method: "POST", Path: "/nodes", Body: node},

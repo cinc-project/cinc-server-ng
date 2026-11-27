@@ -3,10 +3,12 @@ package differential_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -330,5 +332,44 @@ func TestEventuallyConsistentStepWaitsForTheReference(t *testing.T) {
 	steps[1] = differential.Step{Name: "search", Method: "GET", Path: "/search/node?q=name:lag-node-2"}
 	if diffs, _ := differential.Run(context.Background(), steps, reference, candidate, nil); len(searchDiffs(diffs)) == 0 {
 		t.Error("an unmarked step did not report the lagging reference")
+	}
+}
+
+// The authentication-failure steps must really fail authentication, or the
+// difference they exist to record (known.go) would go unseen.
+func TestAuthFailureStepsAreRefused(t *testing.T) {
+	var mu sync.Mutex
+	got := map[string]string{}
+	record := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rec := httptest.NewRecorder()
+			next.ServeHTTP(rec, r)
+			mu.Lock()
+			got[r.Header.Get("X-Ops-Userid")] = fmt.Sprintf("%d %s", rec.Code, rec.Body.String())
+			mu.Unlock()
+			w.WriteHeader(rec.Code)
+			_, _ = w.Write(rec.Body.Bytes())
+		})
+	}
+	reference := startTarget(t, "reference", nil)
+	candidate := startTarget(t, "candidate", record)
+
+	var steps []differential.Step
+	for _, s := range differential.Script("pivotal") {
+		if strings.HasPrefix(s.Name, "auth ") {
+			steps = append(steps, s)
+		}
+	}
+	if len(steps) != 2 {
+		t.Fatalf("auth steps = %d, want 2", len(steps))
+	}
+	if _, err := differential.Run(context.Background(), steps, reference, candidate, differential.AcceptedDifferences()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, name := range []string{"diff-absent-actor", "pivotal"} {
+		want := `401 {"error":["Failed to authenticate as '` + name + `'. Ensure that your node_name and client key are correct."]}` + "\n"
+		if got[name] != want {
+			t.Errorf("signed as %s: got %q, want %q", name, got[name], want)
+		}
 	}
 }

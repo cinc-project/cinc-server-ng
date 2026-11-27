@@ -19,6 +19,7 @@ package differential
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
@@ -26,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
@@ -106,7 +108,20 @@ type Step struct {
 	// inherently unequal — one that returns a freshly generated private key,
 	// say — where normalizing would amount to deleting the whole payload.
 	SkipBody bool
+	// SignAs names the actor the request claims to come from, in place of
+	// the target's own User.
+	SignAs string
+	// ForeignKey signs the request with a key neither server knows, so it
+	// fails authentication; with SignAs it shows how an unknown name and a
+	// known one with a bad signature are answered.
+	ForeignKey bool
 }
+
+// foreignKey is the key ForeignKey steps sign with: made once per run, and
+// registered with neither target.
+var foreignKey = sync.OnceValues(func() (*rsa.PrivateKey, error) {
+	return rsa.GenerateKey(rand.Reader, 2048)
+})
 
 // Observation is one target's response to a step, after normalization.
 type Observation struct {
@@ -167,8 +182,17 @@ func (t *Target) do(ctx context.Context, step Step) Observation {
 	// it — without it, the request is answered with a friendly landing page
 	// instead of being routed to the API.
 	req.Header.Set("X-Chef-Version", chefClientVersion)
+	user, key := t.User, t.Key
+	if step.SignAs != "" {
+		user = step.SignAs
+	}
+	if step.ForeignKey {
+		if key, err = foreignKey(); err != nil {
+			return Observation{Transport: fmt.Errorf("foreign key: %w", err)}
+		}
+	}
 	ts := time.Now().UTC().Format(time.RFC3339)
-	if err := auth.SignRequest(req, t.User, ts, payload, t.Key); err != nil {
+	if err := auth.SignRequest(req, user, ts, payload, key); err != nil {
 		return Observation{Transport: fmt.Errorf("sign: %w", err)}
 	}
 

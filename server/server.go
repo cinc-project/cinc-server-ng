@@ -15,6 +15,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -81,6 +82,10 @@ type Options struct {
 	// Infra Server's only limit on cookbook files. Set a negative value to
 	// disable the limit.
 	MaxFileStoreBytes int64
+	// Logger receives server-side diagnostics, such as the specific reason a
+	// request failed to authenticate (the client is told only that it did).
+	// Defaults to slog.Default().
+	Logger *slog.Logger
 	// Storage selects the persistence backend: "memory" (default, ephemeral) or
 	// "sqlite" (durable). Ignored when Backend is set.
 	Storage string
@@ -160,6 +165,9 @@ func (o *Options) withDefaults() {
 	}
 	if o.Now == nil {
 		o.Now = time.Now
+	}
+	if o.Logger == nil {
+		o.Logger = slog.Default()
 	}
 	if o.StatsUser == "" {
 		o.StatsUser = DefaultStatsUser

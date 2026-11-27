@@ -446,6 +446,17 @@ compatibility statement.** "100% compatible" is not a claim anyone can check;
 "here are the ways we differ, and why each is acceptable" is, and an
 unexplained difference fails the run, so the list only grows deliberately.
 
+One deviation is a security choice rather than a limitation: **every failed
+authentication gets the same 401 body.** Chef Infra Server answers a request
+naming an unknown user or client with "Failed to authenticate as '<name>'..."
+but a bad signature from a real one with "Invalid signature for user or client
+'<name>'", so anyone who can reach it, holding no credential, can list which
+user and node names exist. cinc-server-ng answers both (and an actor whose keys
+have all expired, and a failed web-UI request) with the first message, which
+echoes only the name the caller sent, and logs the specific reason on the
+server. Clients act on the 401 status, not the text, so nothing that works
+against Chef Infra Server stops working.
+
 ## Development
 
 Building, testing, the `knife` conformance suite, the dev fixtures
