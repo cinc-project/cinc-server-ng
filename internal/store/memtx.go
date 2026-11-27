@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"maps"
 	"sort"
@@ -10,8 +11,11 @@ import (
 // reads consult ahead of the backend, and commit applies the overlay to the
 // backend in one step under the write lock. Rollback is dropping the overlay,
 // so it can never undo another writer's work, and no reader outside the
-// transaction sees its writes before commit. Nothing is copied up front: the
-// cost of a transaction is that of what it touches.
+// transaction sees its writes before commit. Commit is optimistic: if another
+// writer changed an object the transaction writes after the transaction read
+// it, the commit fails with ErrConflict rather than overwrite that change.
+// Nothing is copied up front: the cost of a transaction is that of what it
+// touches.
 //
 // A memTx belongs to the goroutine running the transaction's fn; it is not
 // safe for concurrent use.
@@ -26,10 +30,22 @@ type memTx struct {
 	// dropped names the orgs the transaction deleted: the backend's objects
 	// and blobs of these are hidden from it, and dropped on commit.
 	dropped map[string]bool
-	// created lists the keys the transaction created, and createdOrgs the
-	// orgs: commit fails with ErrConflict if another writer took one first.
-	created     []objRef
+	// seen records each object as the transaction first read it from the
+	// backend (every write reads first, to keep the creation time or refuse
+	// a Create). Commit fails with ErrConflict if an object the transaction
+	// writes has changed in the backend since: its write was derived from
+	// what it read, and applying it would undo the other writer's change.
+	seen map[objRef]seenObj
+	// createdOrgs lists the orgs the transaction created: commit fails with
+	// ErrConflict if another writer created one first.
 	createdOrgs []string
+}
+
+// seenObj is an object as the transaction read it from the backend. Stored
+// values are never written in place, so val stays as it was read.
+type seenObj struct {
+	val []byte
+	ok  bool
 }
 
 type objRef struct{ org, coll, key string }
@@ -58,6 +74,7 @@ func newMemTx(m *memoryBackend) *memTx {
 		blobs:   map[string]map[string]*txBlob{},
 		orgs:    map[string]bool{},
 		dropped: map[string]bool{},
+		seen:    map[objRef]seenObj{},
 	}
 }
 
@@ -88,12 +105,22 @@ func (t *memTx) base(org, coll, key string) ([]byte, Meta, bool) {
 		return nil, Meta{}, false
 	}
 	t.m.mu.RLock()
-	defer t.m.mu.RUnlock()
 	v, ok := t.m.data[org][coll][key]
+	md := t.m.meta[org][coll][key]
+	t.m.mu.RUnlock()
+	t.see(objRef{org, coll, key}, v, ok)
 	if !ok {
 		return nil, Meta{}, false
 	}
-	return v, t.m.meta[org][coll][key], true
+	return v, md, true
+}
+
+// see records an object as the transaction read it from the backend, unless
+// it already read it.
+func (t *memTx) see(r objRef, val []byte, ok bool) {
+	if _, done := t.seen[r]; !done {
+		t.seen[r] = seenObj{val: val, ok: ok}
+	}
 }
 
 // lookup returns org/coll/key as the transaction sees it. The value is shared:
@@ -147,7 +174,6 @@ func (t *memTx) Create(org, coll, key string, val []byte, st Stamp) error {
 		return ErrConflict
 	}
 	t.set(org, coll, key, val, st)
-	t.created = append(t.created, objRef{org, coll, key})
 	return nil
 }
 
@@ -190,6 +216,9 @@ func (t *memTx) visible(org, coll string) map[string][]byte {
 		t.m.mu.RLock()
 		maps.Copy(out, t.m.data[org][coll])
 		t.m.mu.RUnlock()
+		for k, v := range out {
+			t.see(objRef{org, coll, k}, v, true)
+		}
 	}
 	for k, e := range t.objs[org][coll] {
 		switch {
@@ -340,8 +369,10 @@ func (t *memTx) Tx(func(tx Backend) error) error { return errNestedTx }
 func (t *memTx) Close() error { return nil }
 
 // commit applies the overlay to the backend under its write lock. It fails
-// with ErrConflict, applying nothing, if another writer has meanwhile created
-// a key or org this transaction created.
+// with ErrConflict, applying nothing, if another writer has meanwhile changed
+// an object this transaction writes (see seen), or created an org it created.
+// Objects of an org the transaction dropped are not checked: the drop
+// discards them whatever they hold.
 func (t *memTx) commit() error {
 	m := t.m
 	m.mu.Lock()
@@ -351,13 +382,18 @@ func (t *memTx) commit() error {
 			return ErrConflict
 		}
 	}
-	for _, r := range t.created {
-		e := t.entry(r.org, r.coll, r.key)
-		if e == nil || e.deleted || t.dropped[r.org] {
+	for org, colls := range t.objs {
+		if t.dropped[org] {
 			continue
 		}
-		if _, ok := m.data[r.org][r.coll][r.key]; ok {
-			return ErrConflict
+		for coll, keys := range colls {
+			for key := range keys {
+				was, read := t.seen[objRef{org, coll, key}]
+				now, ok := m.data[org][coll][key]
+				if !read || was.ok != ok || !bytes.Equal(was.val, now) {
+					return ErrConflict
+				}
+			}
 		}
 	}
 	for name := range t.dropped {

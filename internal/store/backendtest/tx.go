@@ -138,6 +138,57 @@ func testTxCreateRace(t *testing.T, b store.Backend) {
 	}
 }
 
+// testTxNoLostUpdate asserts a transaction that reads a key, then writes it
+// back, cannot commit over another writer's change to that key made in
+// between: either the transaction fails with ErrConflict or the other write
+// is ordered after it. Both ways the other writer's value is what remains.
+// read is how the transaction reads the key: a point read, or a Range as the
+// rename scans do.
+func testTxNoLostUpdate(t *testing.T, b store.Backend, read func(tx store.Backend) ([]byte, error)) {
+	mustPut(t, b, "acme", "acls", "nodes/web", `{"read":["alice","bob"]}`)
+	var done <-chan struct{}
+	var otherErr error
+	txErr := b.Tx(func(tx store.Backend) error {
+		old, err := read(tx)
+		if err != nil {
+			return err
+		}
+		if string(old) != `{"read":["alice","bob"]}` {
+			return fmt.Errorf("tx read %q", old)
+		}
+		done = concurrently(func() {
+			otherErr = b.Put("acme", "acls", "nodes/web", []byte(`{"read":["alice"]}`), store.Stamp{})
+		})
+		return tx.Put("acme", "acls", "nodes/web", []byte(`{"read":["alicia","bob"]}`), store.Stamp{})
+	})
+	<-done
+	if otherErr != nil {
+		t.Fatalf("other writer: %v", otherErr)
+	}
+	if txErr != nil && !errors.Is(txErr, store.ErrConflict) {
+		t.Fatalf("Tx = %v, want nil or ErrConflict", txErr)
+	}
+	if got, _, _ := b.Get("acme", "acls", "nodes/web"); string(got) != `{"read":["alice"]}` {
+		t.Errorf("stored %q: the transaction overwrote a concurrent write (tx err %v)", got, txErr)
+	}
+}
+
+func readByGet(tx store.Backend) ([]byte, error) {
+	v, _, err := tx.Get("acme", "acls", "nodes/web")
+	return v, err
+}
+
+func readByRange(tx store.Backend) ([]byte, error) {
+	var v []byte
+	err := tx.Range("acme", "acls", func(k string, raw []byte) bool {
+		if k == "nodes/web" {
+			v = append([]byte(nil), raw...)
+		}
+		return true
+	})
+	return v, err
+}
+
 // testTxView asserts every read inside a transaction sees its own writes,
 // deletes and org drop, and that rolling it back leaves the backend as it was.
 func testTxView(t *testing.T, b store.Backend) {

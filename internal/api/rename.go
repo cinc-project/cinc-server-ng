@@ -42,6 +42,22 @@ func renamedLocation(w http.ResponseWriter, url string) int {
 	return http.StatusCreated
 }
 
+// renameTx runs a rename's transaction, retrying it a few times when it fails
+// with store.ErrConflict. A rename reads and rewrites documents (ACLs, groups)
+// that other requests may change while it runs; the memory backend then
+// refuses the commit rather than overwrite their change, and a fresh attempt
+// reads it. A conflict that persists, such as the new name being taken, is
+// returned.
+func renameTx(st *store.Store, fn func(tx *store.Store) error) error {
+	var err error
+	for range 3 {
+		if err = st.Tx(fn); !errors.Is(err, store.ErrConflict) {
+			return err
+		}
+	}
+	return err
+}
+
 // txScope returns the transaction's handle on the space named like scope: the
 // global space for "", otherwise the organization.
 func txScope(tx *store.Store, scope *store.Org) (*store.Org, error) {
@@ -283,7 +299,7 @@ func moveActorKeys(org *store.Org, segment, oldName, newName string, dropDefault
 // renameClient moves client oldName of org to newName, storing doc as its
 // record. It returns store.ErrConflict when newName is taken.
 func (a *API) renameClient(r *http.Request, scope *store.Org, oldName, newName string, doc []byte) error {
-	return a.store.Tx(func(tx *store.Store) error {
+	return renameTx(a.store, func(tx *store.Store) error {
 		org, err := txScope(tx, scope)
 		if err != nil {
 			return err
@@ -313,7 +329,7 @@ func (a *API) renameClient(r *http.Request, scope *store.Org, oldName, newName s
 // and, when set, password as its password: across the global space and every
 // organization. It returns store.ErrConflict when newName is taken.
 func (a *API) renameUser(r *http.Request, oldName, newName string, doc []byte, obj map[string]any) error {
-	return a.store.Tx(func(tx *store.Store) error {
+	return renameTx(a.store, func(tx *store.Store) error {
 		global := tx.Global()
 		if err := global.As(actorID(r)).Create("users", newName, doc); err != nil {
 			return err
@@ -398,7 +414,7 @@ func renameUserInOrg(org *store.Org, oldName, newName string) error {
 // whole membership) as its record. It returns store.ErrConflict when newName
 // is taken.
 func (a *API) renameGroup(r *http.Request, scope *store.Org, oldName, newName string, doc []byte) error {
-	return a.store.Tx(func(tx *store.Store) error {
+	return renameTx(a.store, func(tx *store.Store) error {
 		org, err := txScope(tx, scope)
 		if err != nil {
 			return err

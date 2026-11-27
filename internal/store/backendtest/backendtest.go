@@ -41,6 +41,8 @@ func Run(t *testing.T, newBackend func(t *testing.T) store.Backend) {
 	t.Run("TxRollbackKeepsConcurrentWrites", func(t *testing.T) { testTxRollbackKeepsConcurrentWrites(t, newBackend(t)) })
 	t.Run("TxUncommittedInvisible", func(t *testing.T) { testTxUncommittedInvisible(t, newBackend(t)) })
 	t.Run("TxCreateRace", func(t *testing.T) { testTxCreateRace(t, newBackend(t)) })
+	t.Run("TxNoLostUpdateGet", func(t *testing.T) { testTxNoLostUpdate(t, newBackend(t), readByGet) })
+	t.Run("TxNoLostUpdateRange", func(t *testing.T) { testTxNoLostUpdate(t, newBackend(t), readByRange) })
 	t.Run("TxView", func(t *testing.T) { testTxView(t, newBackend(t)) })
 	t.Run("MetaCreateStamps", func(t *testing.T) { testMetaCreateStamps(t, newBackend(t)) })
 	t.Run("MetaPutKeepsCreated", func(t *testing.T) { testMetaPutKeepsCreated(t, newBackend(t)) })
