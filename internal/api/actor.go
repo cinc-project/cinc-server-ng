@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
@@ -433,6 +434,17 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 		// create_key is a request, never part of the actor.
 		delete(obj, "create_key")
+		// newName is the name the body gives the actor; a different one from
+		// the path renames it (see rename.go).
+		newName := name
+		if segment == "clients" {
+			dest, msg := clientDestinationName(obj, name)
+			if msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+			newName = dest
+		}
 		// A user update is validated like erchef's, then merged into the stored
 		// record rather than replacing it: a field the body omits keeps its
 		// value, and only an explicit null removes one.
@@ -446,8 +458,24 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 				writeError(w, http.StatusBadRequest, msg)
 				return
 			}
+			// erchef's chef_user:username_from_ejson: "name", then
+			// "username". An update that gives neither keeps the name.
+			if n, ok := userNameField(obj); ok {
+				newName, _ = n.(string)
+			}
 			lowerEmail(obj)
 			obj = mergeUser(stored, obj)
+			obj["username"] = newName
+		}
+		rename := newName != name
+		if rename {
+			if _, ok, err := org.Get(segment, newName); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			} else if ok {
+				writeRenameConflict(w, segment, newName)
+				return
+			}
 		}
 		// At API v0, "private_key": true asks the server to regenerate the
 		// actor's default key and return the new private key: what `knife
@@ -474,14 +502,19 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			}
 			pub, privateKey = string(pubPEM), string(auth.EncodePrivateKeyPEM(key))
 		}
-		if pub != "" {
+		switch {
+		case rename && segment == "clients":
+			// A renamed client keeps a default key only when this update
+			// gives it one (see rename.go); the move drops a stored default
+			// row.
+		case pub != "":
 			// The body's key replaces the default key, which may be a row the
 			// keys API stored rather than the actor's own public_key.
 			if err := setStoredDefaultPublicKey(org, segment, name, pub); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-		} else {
+		default:
 			stored, err := storedPublicKey(org, segment, name)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
@@ -490,6 +523,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			pub = stored
 		}
 		delete(obj, "chef_key")
+		delete(obj, "public_key")
 		if pub != "" {
 			obj["public_key"] = pub
 		}
@@ -497,35 +531,117 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if _, err := StashPassword(org, name, obj); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		raw := mustEncode(obj)
-		if err := org.Put(segment, name, raw); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+		status := http.StatusOK
+		var raw []byte
+		if rename {
+			// The move rewrites group membership, so it is ordered against
+			// revocations like any membership write (see groupmembers.go).
+			a.membership.Lock()
+			var err error
+			if segment == "users" {
+				// The password is stored under the new name, in the move.
+				raw = mustEncode(withoutPassword(obj))
+				err = a.renameUser(r, name, newName, raw, obj)
+			} else {
+				raw = mustEncode(obj)
+				err = a.renameClient(r, org, name, newName, raw)
+			}
+			a.membership.Unlock()
+			if errors.Is(err, store.ErrConflict) {
+				writeRenameConflict(w, segment, newName)
+				return
+			} else if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			status = renamedLocation(w, objectURL(r, orgSegment(r), segment, newName))
+		} else {
+			if _, err := StashPassword(org, name, obj); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			raw = mustEncode(obj)
+			if err := org.Put(segment, name, raw); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		if segment == "users" {
 			// erchef answers a user update with the user's URI, plus a
 			// generated private key, and not the user
 			// (oc_chef_wm_named_user:finalize_update_body, kept for
 			// opscode-account's clients). Clients echo the object.
-			resp := map[string]any{"uri": objectURL(r, orgSegment(r), segment, name)}
+			resp := map[string]any{"uri": objectURL(r, orgSegment(r), segment, newName)}
 			if privateKey != "" {
 				resp["private_key"] = privateKey
 			}
-			writeJSON(w, http.StatusOK, resp)
+			writeJSON(w, status, resp)
 			return
 		}
 		if privateKey != "" {
 			// The private key is returned once and never stored.
 			obj["private_key"] = privateKey
-			writeJSON(w, http.StatusOK, obj)
+			writeJSON(w, status, obj)
 			return
 		}
-		writeRaw(w, http.StatusOK, actorView(r, raw))
+		writeRaw(w, status, actorView(r, raw))
 	}
+}
+
+// withoutPassword returns obj without its password, which is stored apart
+// from the record (see StashPassword).
+func withoutPassword(obj map[string]any) map[string]any {
+	if _, ok := obj["password"]; !ok {
+		return obj
+	}
+	out := make(map[string]any, len(obj))
+	for k, v := range obj {
+		if k != "password" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// writeRenameConflict is erchef's 409 for an update that renames an actor onto
+// a taken name (chef_wm_named_client and oc_chef_wm_named_user
+// conflict_message).
+func writeRenameConflict(w http.ResponseWriter, segment, name string) {
+	if segment == "users" {
+		writeError(w, http.StatusConflict, "User '"+name+"' already exists")
+		return
+	}
+	writeError(w, http.StatusConflict, "Client already exists")
+}
+
+// clientDestinationName is the name a client update gives the client, as
+// erchef's chef_client:destination_name reads it: "name", or "clientname",
+// which must agree when both are given, or else the path's name. It sets the
+// fields obj carries to it, and returns the 400 message when the body is
+// refused.
+func clientDestinationName(obj map[string]any, pathName string) (string, string) {
+	n, hasName := obj["name"]
+	cn, hasClientName := obj["clientname"]
+	var dest any
+	switch {
+	case hasName && hasClientName && n != cn:
+		return "", "name and clientname must match"
+	case hasName:
+		dest = n
+	case hasClientName:
+		dest = cn
+	default:
+		dest = pathName
+	}
+	s, ok := dest.(string)
+	if !ok || !clientNameRE.MatchString(s) {
+		return "", invalidClientNameMessage(fmt.Sprint(dest))
+	}
+	obj["name"] = s
+	if hasClientName {
+		obj["clientname"] = s
+	}
+	return s, ""
 }
 
 func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {

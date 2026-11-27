@@ -188,6 +188,22 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// erchef checks "id", or else "groupname", as on create, and renames the
+	// group to "groupname" (oc_chef_wm_named_group:auth_info,
+	// oc_chef_group:update_from_ejson).
+	if v, ok := obj["id"]; ok || obj["groupname"] != nil {
+		if !ok {
+			v = obj["groupname"]
+		}
+		if s, isString := v.(string); !isString || !groupNameRE.MatchString(s) {
+			writeError(w, http.StatusBadRequest, "Invalid group name.")
+			return
+		}
+	}
+	newName := name
+	if v, ok := obj["groupname"].(string); ok {
+		newName = v
+	}
 	// Read-modify-write: a revocation landing between the read and the write
 	// would be undone (see groupmembers.go). The group is checked again under
 	// the lock, so a concurrent delete is not undone either.
@@ -219,6 +235,25 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if newName != name {
+		if _, taken, err := groupDocWithMembers(org, newName); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if taken {
+			writeGroupConflict(w)
+			return
+		}
+		err := a.renameGroup(r, org, name, newName, groupJSON(newName, "", users, clients, groups))
+		if errors.Is(err, store.ErrConflict) {
+			writeGroupConflict(w)
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRaw(w, renamedLocation(w, objectURL(r, r.PathValue("org"), "groups", newName)), raw)
+		return
+	}
 	// The document now records the whole membership, so the rows it absorbed,
 	// and those of a replaced kind, go.
 	if err := clearMembers(org, name); err != nil {
@@ -230,6 +265,13 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
+}
+
+// writeGroupConflict is erchef's 409 for a group update that renames onto a
+// taken name: oc_chef_wm_named_group:conflict_message, whose error is a string
+// rather than the usual list.
+func writeGroupConflict(w http.ResponseWriter) {
+	writeStringError(w, http.StatusConflict, "Group already exists")
 }
 
 // groupUpdateMembers returns the member kinds a group update replaces, each
