@@ -80,6 +80,13 @@ func TestSelfUpdatePreservesOwnProfileFields(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("self update = %d, want 200: %s", resp.StatusCode, body)
 	}
+	// erchef answers a user update with its URI; read the record back.
+	resp, err = http.DefaultClient.Do(signedAs(t, "nina", key, "GET", srv.URL()+"/users/nina", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
 	var got map[string]any
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
