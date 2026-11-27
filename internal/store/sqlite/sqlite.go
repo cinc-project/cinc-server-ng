@@ -5,6 +5,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -783,6 +784,17 @@ func (b *Backend) Tx(fn func(tx store.Backend) error) error {
 		return err
 	}
 	return sqlTx.Commit()
+}
+
+// Ping implements store.Pinger: the writer pool must reach the database, and a
+// reader must read the database header (PRAGMA schema_version), so a closed
+// backend or an unreadable file fails the check.
+func (b *Backend) Ping(ctx context.Context) error {
+	if err := b.db.PingContext(ctx); err != nil {
+		return err
+	}
+	var v int
+	return b.rdb.QueryRowContext(ctx, "PRAGMA schema_version").Scan(&v)
 }
 
 func (b *Backend) Close() error {

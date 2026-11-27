@@ -1,5 +1,7 @@
 package store
 
+import "context"
+
 // Backend is the pluggable persistence layer beneath Store/Org. It stores opaque
 // canonical-JSON object bodies keyed by (org, collection, key) and opaque blob
 // content keyed by (org, checksum). The empty org string ("") addresses the
@@ -50,4 +52,13 @@ type Backend interface {
 	Tx(fn func(tx Backend) error) error
 
 	Close() error
+}
+
+// Pinger is implemented by a Backend that has something to check: a database
+// handle that can be closed or lose its file. A Backend without it (the memory
+// backend) is always reachable.
+type Pinger interface {
+	// Ping reports whether the backend can serve reads, cheaply enough for a
+	// load balancer to call it on every health check.
+	Ping(ctx context.Context) error
 }
