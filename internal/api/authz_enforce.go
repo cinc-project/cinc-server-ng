@@ -137,7 +137,7 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 			return r, false
 		}
 		if !ok {
-			writeError(w, http.StatusNotFound, "Cannot find "+check.aclType+" "+check.aclName)
+			writeError(w, http.StatusNotFound, aclNotFoundMessage(check.aclType, check.aclName))
 			return r, false
 		}
 	}
@@ -478,7 +478,7 @@ func classifyGeneric(method, seg string, rest []string, read bool) (*authzCheck,
 		}
 		c := &authzCheck{aclType: seg, aclName: name, perm: perm}
 		if existenceSegs[seg] {
-			c.existColl, c.existKey, c.existMsg = seg, name, "Cannot find "+seg+" "+name
+			c.existColl, c.existKey, c.existMsg = seg, name, notFoundMessage(seg, name)
 		}
 		return c, true
 	}
@@ -641,9 +641,6 @@ func classifyCookbook(method, seg string, rest []string, read bool) (*authzCheck
 // The "data" container governs the collection; the bag's existence (not the
 // item's) is what the middleware checks before authorizing item operations.
 func classifyDataBag(method string, rest []string, read bool) (*authzCheck, bool) {
-	bagExist := func(bag string) (string, string, string) {
-		return dataBagsColl, bag, "Cannot find data bag " + bag
-	}
 	switch len(rest) {
 	case 1:
 		switch {
@@ -659,7 +656,7 @@ func classifyDataBag(method string, rest []string, read bool) (*authzCheck, bool
 			return nil, false
 		}
 		c := &authzCheck{aclType: "data", aclName: bag, perm: perm}
-		c.existColl, c.existKey, c.existMsg = bagExist(bag)
+		c.existColl, c.existKey, c.existMsg = dataBagsColl, bag, dataBagNotFoundMessage(method, bag)
 		return c, true
 	case 3:
 		bag := rest[1]
@@ -668,7 +665,7 @@ func classifyDataBag(method string, rest []string, read bool) (*authzCheck, bool
 			return nil, false
 		}
 		c := &authzCheck{aclType: "data", aclName: bag, perm: perm}
-		c.existColl, c.existKey, c.existMsg = bagExist(bag)
+		c.existColl, c.existKey, c.existMsg = dataBagsColl, bag, dataBagItemNotFoundMessage(method, bag, rest[2])
 		return c, true
 	}
 	return nil, false

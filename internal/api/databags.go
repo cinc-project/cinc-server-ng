@@ -99,7 +99,7 @@ func (a *API) deleteDataBag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find data bag "+bag)
+		writeError(w, http.StatusNotFound, notFoundMessage(dataBagsColl, bag))
 		return
 	}
 	// Remove the bag's items too.
@@ -130,15 +130,16 @@ func (a *API) deleteDataBag(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
-// bagExists reports whether the named bag exists, writing a 404 if not.
-func (a *API) bagExists(w http.ResponseWriter, org *store.Org, bag string) bool {
+// bagExists reports whether the named bag exists, writing a 404 carrying msg
+// if not. erchef words that 404 by route and method, so the caller supplies it.
+func (a *API) bagExists(w http.ResponseWriter, org *store.Org, bag, msg string) bool {
 	_, ok, err := org.Get(dataBagsColl, bag)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find data bag "+bag)
+		writeError(w, http.StatusNotFound, msg)
 		return false
 	}
 	return true
@@ -150,7 +151,7 @@ func (a *API) listDataBagItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bag := r.PathValue("bag")
-	if !a.bagExists(w, org, bag) {
+	if !a.bagExists(w, org, bag, dataBagNotFoundMessage(r.Method, bag)) {
 		return
 	}
 	ids, err := org.Keys(dataBagItemsColl(bag))
@@ -171,7 +172,7 @@ func (a *API) createDataBagItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bag := r.PathValue("bag")
-	if !a.bagExists(w, org, bag) {
+	if !a.bagExists(w, org, bag, dataBagNotFoundMessage(r.Method, bag)) {
 		return
 	}
 	raw, id, err := decodeItem(r)
@@ -203,7 +204,7 @@ func (a *API) getDataBagItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bag := r.PathValue("bag")
-	if !a.bagExists(w, org, bag) {
+	if !a.bagExists(w, org, bag, dataBagItemNotFoundMessage(r.Method, bag, r.PathValue("item"))) {
 		return
 	}
 	raw, ok, err := org.Get(dataBagItemsColl(bag), r.PathValue("item"))
@@ -212,7 +213,7 @@ func (a *API) getDataBagItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find data bag item "+r.PathValue("item"))
+		writeError(w, http.StatusNotFound, dataBagItemNotFoundMessage(r.Method, bag, r.PathValue("item")))
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
@@ -224,11 +225,11 @@ func (a *API) putDataBagItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bag := r.PathValue("bag")
-	if !a.bagExists(w, org, bag) {
+	if !a.bagExists(w, org, bag, dataBagItemNotFoundMessage(r.Method, bag, r.PathValue("item"))) {
 		return
 	}
 	item := r.PathValue("item")
-	if !exists(w, r, org, dataBagItemsColl(bag), item, "Cannot find data bag item "+item) {
+	if !exists(w, r, org, dataBagItemsColl(bag), item, dataBagItemNotFoundMessage(r.Method, bag, item)) {
 		return
 	}
 	raw, _, err := decodeItem(r)
@@ -249,7 +250,7 @@ func (a *API) deleteDataBagItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bag := r.PathValue("bag")
-	if !a.bagExists(w, org, bag) {
+	if !a.bagExists(w, org, bag, dataBagItemNotFoundMessage(r.Method, bag, r.PathValue("item"))) {
 		return
 	}
 	item := r.PathValue("item")
@@ -259,7 +260,7 @@ func (a *API) deleteDataBagItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find data bag item "+item)
+		writeError(w, http.StatusNotFound, dataBagItemNotFoundMessage(r.Method, bag, item))
 		return
 	}
 	writeRaw(w, http.StatusOK, wrapStoredDataBagItem(bag, item, raw))

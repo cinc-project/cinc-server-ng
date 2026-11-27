@@ -170,7 +170,7 @@ func loadActor(w http.ResponseWriter, org *store.Org, segment, name string) (map
 		return nil, false
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
+		writeError(w, http.StatusNotFound, notFoundMessage(segment, name))
 		return nil, false
 	}
 	var obj map[string]any

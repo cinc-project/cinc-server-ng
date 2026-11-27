@@ -161,10 +161,10 @@ func TestClassifyRequest(t *testing.T) {
 		{"GET", "/organizations/acme/nodes", &authzCheck{aclType: "containers", aclName: "nodes", perm: "read"}},
 		{"POST", "/organizations/acme/nodes", &authzCheck{aclType: "containers", aclName: "nodes", perm: "create"}},
 		// Generic object item: object ACL governs, existence checked first.
-		{"GET", "/organizations/acme/nodes/web01", &authzCheck{aclType: "nodes", aclName: "web01", perm: "read", existColl: "nodes", existKey: "web01", existMsg: "Cannot find nodes web01"}},
-		{"HEAD", "/organizations/acme/nodes/web01", &authzCheck{aclType: "nodes", aclName: "web01", perm: "read", existColl: "nodes", existKey: "web01", existMsg: "Cannot find nodes web01"}},
-		{"PUT", "/organizations/acme/roles/web", &authzCheck{aclType: "roles", aclName: "web", perm: "update", existColl: "roles", existKey: "web", existMsg: "Cannot find roles web"}},
-		{"DELETE", "/organizations/acme/environments/prod", &authzCheck{aclType: "environments", aclName: "prod", perm: "delete", existColl: "environments", existKey: "prod", existMsg: "Cannot find environments prod"}},
+		{"GET", "/organizations/acme/nodes/web01", &authzCheck{aclType: "nodes", aclName: "web01", perm: "read", existColl: "nodes", existKey: "web01", existMsg: "node 'web01' not found"}},
+		{"HEAD", "/organizations/acme/nodes/web01", &authzCheck{aclType: "nodes", aclName: "web01", perm: "read", existColl: "nodes", existKey: "web01", existMsg: "node 'web01' not found"}},
+		{"PUT", "/organizations/acme/roles/web", &authzCheck{aclType: "roles", aclName: "web", perm: "update", existColl: "roles", existKey: "web", existMsg: "Cannot load role web"}},
+		{"DELETE", "/organizations/acme/environments/prod", &authzCheck{aclType: "environments", aclName: "prod", perm: "delete", existColl: "environments", existKey: "prod", existMsg: "Cannot load environment prod"}},
 		// _acl endpoints require grant on the target object, and the object must exist first.
 		{"GET", "/organizations/acme/nodes/web01/_acl", &authzCheck{aclType: "nodes", aclName: "web01", perm: "grant", aclEndpoint: true}},
 		{"PUT", "/organizations/acme/nodes/web01/_acl/grant", &authzCheck{aclType: "nodes", aclName: "web01", perm: "grant", aclEndpoint: true}},
@@ -179,10 +179,10 @@ func TestClassifyRequest(t *testing.T) {
 		// Data bags: container governs the collection; the bag ACL governs items.
 		{"GET", "/organizations/acme/data", &authzCheck{aclType: "containers", aclName: "data", perm: "read"}},
 		{"POST", "/organizations/acme/data", &authzCheck{aclType: "containers", aclName: "data", perm: "create"}},
-		{"GET", "/organizations/acme/data/secrets", &authzCheck{aclType: "data", aclName: "secrets", perm: "read", existColl: "data_bags", existKey: "secrets", existMsg: "Cannot find data bag secrets"}},
-		{"POST", "/organizations/acme/data/secrets", &authzCheck{aclType: "data", aclName: "secrets", perm: "update", existColl: "data_bags", existKey: "secrets", existMsg: "Cannot find data bag secrets"}},
-		{"DELETE", "/organizations/acme/data/secrets", &authzCheck{aclType: "data", aclName: "secrets", perm: "delete", existColl: "data_bags", existKey: "secrets", existMsg: "Cannot find data bag secrets"}},
-		{"PUT", "/organizations/acme/data/secrets/item1", &authzCheck{aclType: "data", aclName: "secrets", perm: "update", existColl: "data_bags", existKey: "secrets", existMsg: "Cannot find data bag secrets"}},
+		{"GET", "/organizations/acme/data/secrets", &authzCheck{aclType: "data", aclName: "secrets", perm: "read", existColl: "data_bags", existKey: "secrets", existMsg: "Cannot load data bag secrets"}},
+		{"POST", "/organizations/acme/data/secrets", &authzCheck{aclType: "data", aclName: "secrets", perm: "update", existColl: "data_bags", existKey: "secrets", existMsg: "No data bag 'secrets' could be found. Please create this data bag before adding items to it."}},
+		{"DELETE", "/organizations/acme/data/secrets", &authzCheck{aclType: "data", aclName: "secrets", perm: "delete", existColl: "data_bags", existKey: "secrets", existMsg: "Cannot load data bag secrets"}},
+		{"PUT", "/organizations/acme/data/secrets/item1", &authzCheck{aclType: "data", aclName: "secrets", perm: "update", existColl: "data_bags", existKey: "secrets", existMsg: "Cannot load data bag item item1 for data bag secrets"}},
 		// Cookbooks: versioned; the cookbook object ACL governs versions.
 		{"GET", "/organizations/acme/cookbooks", &authzCheck{aclType: "containers", aclName: "cookbooks", perm: "read"}},
 		// Both halves of the sandbox handshake need create on the sandboxes
