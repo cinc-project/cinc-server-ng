@@ -42,7 +42,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// knife/chef-client/cinc-client PUT/GET without signing them. cinc-server-ng
 		// reproduces that shape, so authorization rides on the URL — the grant
 		// the server issued, scoped to this org, checksum, and operation.
-		if org, checksum, ok := fileStorePath(r.URL.EscapedPath()); ok {
+		if org, checksum, ok := fileStoreRequest(r); ok {
 			if err := auth.VerifyFileStore(s.fileStoreKey, org, checksum,
 				fileStoreOp(r.Method), r.URL.Query(), s.opts.Now()); err != nil {
 				unauthorized(w, err.Error())
@@ -65,7 +65,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			unauthorized(w, err.Error())
 			return
 		}
-		limit := s.bodyLimit(r.URL.Path)
+		limit := s.bodyLimit(r)
 		if limit > 0 && r.ContentLength > limit {
 			api.WriteTooLarge(w, "JSON", limit)
 			return
@@ -77,14 +77,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// the webui key and run as that user. This mirrors Chef Infra Server's
 		// webui-key mechanism, which a console uses to honor each user's ACLs.
 		if strings.EqualFold(r.Header.Get("X-Ops-Request-Source"), "web") {
-			body, ok := readSignedBody(w, r)
-			if !ok {
-				return
-			}
-			if err := auth.Verify(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"), s.webuiPub); err != nil {
-				unauthorized(w, "Invalid webui signature for request source 'web'")
-				return
-			}
+			// The actor is resolved before the body is read, as on the signed
+			// path below: a name that runs as no one is refused unread.
 			candidates, err := s.resolveAuth(r.URL.EscapedPath(), parsed.UserID)
 			if err != nil {
 				serverError(w, err)
@@ -100,6 +94,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			// erchef's answer for a requestor it cannot find.
 			if len(candidates) == 0 || candidates[0].actor.IsClient {
 				unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"'. Ensure that your node_name and client key are correct.")
+				return
+			}
+			body, ok := readSignedBody(w, r)
+			if !ok {
+				return
+			}
+			if err := auth.Verify(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"), s.webuiPub); err != nil {
+				unauthorized(w, "Invalid webui signature for request source 'web'")
 				return
 			}
 			actor := candidates[0].actor
@@ -328,11 +330,13 @@ func readSignedBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	return body, true
 }
 
-// bodyLimit is the most of a request body to path the server reads: the
-// cookbook file store's cap for a file upload, the API cap for everything
-// else. Zero or less means no cap.
-func (s *Server) bodyLimit(path string) int64 {
-	if _, _, ok := fileStorePath(path); ok {
+// bodyLimit is the most of r's body the server reads: the cookbook file
+// store's cap for a file upload, the API cap for everything else. Zero or less
+// means no cap. Whether r is a file upload is fileStoreRequest's answer, the
+// same one that exempts it from signing, so a request held to the file
+// store's cap is always one that must carry a file-store grant.
+func (s *Server) bodyLimit(r *http.Request) int64 {
+	if _, _, ok := fileStoreRequest(r); ok {
 		return s.opts.MaxFileStoreBytes
 	}
 	return s.opts.MaxBodyBytes
@@ -343,7 +347,7 @@ func (s *Server) bodyLimit(path string) int64 {
 // into memory. Reading past the cap fails with *http.MaxBytesError.
 func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if limit := s.bodyLimit(r.URL.Path); limit > 0 && r.Body != nil {
+		if limit := s.bodyLimit(r); limit > 0 && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		next.ServeHTTP(w, r)
@@ -360,13 +364,13 @@ func (s *Server) limitBody(next http.Handler) http.Handler {
 // /_stats take no body, so one sent to them is never read.
 func (s *Server) enforceBodySize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		limit := s.bodyLimit(r.URL.Path)
+		limit := s.bodyLimit(r)
 		if limit <= 0 || r.Body == nil || r.Body == http.NoBody || api.IsBuffered(r.Body) ||
 			api.SystemPaths[r.URL.Path] || r.URL.Path == statsPath {
 			next.ServeHTTP(w, r)
 			return
 		}
-		_, _, fileStore := fileStorePath(r.URL.Path)
+		_, _, fileStore := fileStoreRequest(r)
 		if r.ContentLength > limit {
 			what := "JSON"
 			if fileStore {
@@ -398,6 +402,15 @@ func writeBadRequest(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": []string{msg}})
+}
+
+// fileStoreRequest reports whether r is a cookbook file-store transfer, judged
+// from its escaped path as the router routes it. It is the one decision behind
+// both the exemption from signing and the body cap: a path that only decodes
+// to the file store's shape (file_store%2Fx) is neither exempt nor given the
+// file store's cap.
+func fileStoreRequest(r *http.Request) (org, checksum string, ok bool) {
+	return fileStorePath(r.URL.EscapedPath())
 }
 
 // fileStorePath reports whether path addresses the cookbook file store
