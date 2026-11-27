@@ -71,7 +71,8 @@ func shapeManifest(obj *chefjson.Object, version int) {
 // file belongs to the segment its name starts with, and loses that prefix
 // ("files/default/foo.conf" is "default/foo.conf" in files; Chef keeps the
 // specificity directory), and each segment lists its files most recent first,
-// as Chef does.
+// as Chef does. A file with no directory is a root file; one whose directory
+// is not a segment is dropped (chef_cookbook_version:populate_segments).
 func toSegments(obj *chefjson.Object) {
 	all, ok := obj.Get("all_files")
 	if !ok {
@@ -86,8 +87,12 @@ func toSegments(obj *chefjson.Object) {
 		}
 		name, _ := entry.Get("name")
 		segment, rest, found := strings.Cut(asString(name), "/")
-		if !found || !isCookbookSegment(segment) {
+		if !found {
 			segment, rest = "root_files", asString(name)
+		} else if !isCookbookSegment(segment) {
+			// No segment holds it ("ohai/...", "compliance/..."), so Chef
+			// drops it: only a v2 client sees such a file.
+			continue
 		}
 		entry.Set("name", rest)
 		bySegment[segment] = append(bySegment[segment], entry)

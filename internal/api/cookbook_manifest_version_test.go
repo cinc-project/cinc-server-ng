@@ -222,3 +222,54 @@ func TestToSegmentsIsLinear(t *testing.T) {
 		t.Errorf("segment order = %v, want most recent first", names)
 	}
 }
+
+// Below v2, erchef rebuilds the nine segments from all_files and drops a file
+// whose directory is not one of them (chef_cookbook_version:populate_segments,
+// for cookbook versions and artifacts alike). A file at the cookbook root,
+// with no directory, is a root file.
+func TestCookbookManifestBelowV2DropsNonSegmentFiles(t *testing.T) {
+	srv, st := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	org, _, _ := st.Org("acme")
+	sums := map[string]string{}
+	paths := []string{"recipes/default.rb", "ohai/plugins/x.rb", "compliance/profiles/p.rb", "README.md"}
+	var entries []string
+	for _, path := range paths {
+		sums[path] = md5hex(path)
+		if err := org.PutBlob(sums[path], []byte(path)); err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, `{"name":"`+path+`","path":"`+path+`","checksum":"`+sums[path]+`","specificity":"default"}`)
+	}
+	body := `{"name":"probe-1.0.0","cookbook_name":"probe","version":"1.0.0","json_class":"Chef::CookbookVersion",` +
+		`"chef_type":"cookbook_version","frozen?":false,"metadata":{"name":"probe","version":"1.0.0","dependencies":{}},` +
+		`"all_files":[` + strings.Join(entries, ",") + `]}`
+	if resp, b := doAt(t, "2", "PUT", base+"/cookbooks/probe/1.0.0", body); resp.StatusCode != 201 {
+		t.Fatalf("PUT = %d %s", resp.StatusCode, b)
+	}
+	const id = "1111111111111111111111111111111111111111"
+	art := strings.Replace(body, `"name":"probe-1.0.0"`, `"name":"probe","identifier":"`+id+`"`, 1)
+	if resp, b := doAt(t, "2", "PUT", base+"/cookbook_artifacts/probe/"+id, art); resp.StatusCode != 201 {
+		t.Fatalf("artifact PUT = %d %s", resp.StatusCode, b)
+	}
+
+	f := func(name, path string) string { return name + "|" + path + "|" + sums[path] }
+	want := map[string][]string{
+		"attributes": {}, "definitions": {}, "files": {}, "libraries": {}, "providers": {},
+		"recipes":    {f("default.rb", "recipes/default.rb")},
+		"resources":  {},
+		"root_files": {f("README.md", "README.md")},
+		"templates":  {},
+	}
+	for _, url := range []string{base + "/cookbooks/probe/1.0.0", base + "/cookbook_artifacts/probe/" + id} {
+		for _, v := range []string{"0", "1"} {
+			_, got := doAt(t, v, "GET", url, "")
+			manifestEqual(t, url+" at v"+v, manifestFiles(t, got), want)
+		}
+		// At v2 every file is still there.
+		_, got := doAt(t, "2", "GET", url, "")
+		if files := manifestFiles(t, got)["all_files"]; len(files) != len(paths) {
+			t.Errorf("%s at v2 = %v, want all %d files", url, files, len(paths))
+		}
+	}
+}
