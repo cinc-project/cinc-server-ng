@@ -187,7 +187,7 @@ func TestNodeClientSolvesRunListAndDownloadsFiles(t *testing.T) {
 	key := createClientAndKey(t, srv, base, "node1")
 	mustStatus(t, signedAs(t, "node1", key, "POST", base+"/nodes", `{"name":"node1"}`), http.StatusCreated)
 	code, raw := signedBody(t, signedAs(t, "node1", key, "POST",
-		base+"/environments/_default/cookbook_versions", `{"run_list":["recipe[nginx]"]}`))
+		base+"/environments/_default/cookbook_versions", `{"run_list":["nginx"]}`))
 	if code != http.StatusOK {
 		t.Fatalf("solve = %d, want 200: %s", code, raw)
 	}

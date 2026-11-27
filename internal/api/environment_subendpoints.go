@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -233,7 +234,7 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 
 // envCookbookVersions is a simplified dependency solver: for each cookbook named
 // in the run list it picks the newest version satisfying the environment's
-// constraint, then recursively pulls in metadata dependencies (by name, also
+// constraint (or the version an "@" item pins), then recursively pulls in metadata dependencies (by name, also
 // honoring environment constraints). Dependency-level version constraints
 // beyond the environment's are not solved. Returns 412 if a cookbook cannot be
 // satisfied.
@@ -259,17 +260,58 @@ func (a *API) envCookbookVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	all, err := cookbookVersions(org)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	available, err := filteredCookbookVersions(org, constraints)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	solved := map[string]any{}
-	queue := make([]string, 0, len(body.RunList))
-	for _, item := range body.RunList {
-		queue = append(queue, cookbookFromRunListItem(item))
+
+	// erchef first refuses run list cookbooks with no version at all, then
+	// (in dep_selector) items no version satisfies under the environment's
+	// constraints and the item's own pin, each reported in full.
+	items := depsolverRunListItems(body.RunList)
+	var missing []string
+	for _, it := range items {
+		if len(all[it.cookbook]) == 0 {
+			missing = append(missing, it.cookbook)
+		}
+	}
+	if len(missing) > 0 {
+		writeDepsolverError(w, depsolverNotFound(missing))
+		return
+	}
+	pinned := map[string]string{}
+	queue := make([]string, 0, len(items))
+	var unmet []string
+	for _, it := range items {
+		versions := available[it.cookbook]
+		if it.version != "" {
+			versions = slices.DeleteFunc(slices.Clone(versions), func(v string) bool {
+				return compareVersions(v, it.version) != 0
+			})
+		}
+		if len(versions) == 0 {
+			unmet = append(unmet, it.solutionConstraint())
+			continue
+		}
+		if it.version != "" {
+			if _, ok := pinned[it.cookbook]; !ok {
+				pinned[it.cookbook] = versions[0]
+			}
+		}
+		queue = append(queue, it.cookbook)
+	}
+	if len(unmet) > 0 {
+		writeDepsolverError(w, depsolverConstraintsNotMet(unmet))
+		return
 	}
 
+	solved := map[string]any{}
 	for len(queue) > 0 {
 		name := queue[0]
 		queue = queue[1:]
@@ -277,6 +319,9 @@ func (a *API) envCookbookVersions(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		versions := available[name]
+		if v, ok := pinned[name]; ok {
+			versions = []string{v}
+		}
 		if len(versions) == 0 {
 			writeError(w, http.StatusPreconditionFailed,
 				"Run list contains invalid items: no versions match the constraints on cookbook "+name+".")
@@ -429,16 +474,76 @@ func roleRunList(role map[string]any, env string) []any {
 	return []any{}
 }
 
-// cookbookFromRunListItem extracts the cookbook name from a run-list entry such
-// as "recipe[apache2::default]", "role[web]" (ignored), or a bare "apache2".
-func cookbookFromRunListItem(item string) string {
-	item = strings.TrimSpace(item)
-	if strings.HasPrefix(item, "role[") {
-		return ""
+// depsolverItem is one run list item as erchef's depsolver reads it: a
+// cookbook name and, for a "name@version" item, the exact version it pins.
+type depsolverItem struct {
+	cookbook, version string
+}
+
+// solutionConstraint is the item as dep_selector prints a SolutionConstraint
+// ("(name op version)"), which is how erchef names it in a 412: an unversioned
+// item is ">= 0.0.0", a pinned one "= X.Y.Z".
+func (it depsolverItem) solutionConstraint() string {
+	if it.version == "" {
+		return "(" + it.cookbook + " >= 0.0.0)"
 	}
-	if strings.HasPrefix(item, "recipe[") && strings.HasSuffix(item, "]") {
-		item = item[len("recipe[") : len(item)-1]
+	v := it.version
+	if strings.Count(v, ".") == 1 {
+		v += ".0"
 	}
-	name, _, _ := strings.Cut(item, "::")
-	return name
+	return "(" + it.cookbook + " = " + v + ")"
+}
+
+// depsolverRunListItems parses run list items as
+// chef_wm_depsolver:cookbooks_for_runlist does: split on "@" for a version,
+// then on "::" for the cookbook, and nothing else. A "recipe[apache2]" or
+// "role[web]" item is a cookbook literally named that (chef-client expands
+// roles and sends bare recipe names). Duplicates are dropped, keeping the
+// first, as remove_dups does.
+func depsolverRunListItems(runList []string) []depsolverItem {
+	var out []depsolverItem
+	seen := map[depsolverItem]bool{}
+	for _, item := range runList {
+		recipe, version, _ := strings.Cut(item, "@")
+		name, _, _ := strings.Cut(recipe, "::")
+		it := depsolverItem{cookbook: name, version: version}
+		if !seen[it] {
+			seen[it] = true
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// depsolverFailure is the object erchef puts in a depsolver 412's error list.
+type depsolverFailure struct {
+	Message                 string   `json:"message"`
+	NonExistentCookbooks    []string `json:"non_existent_cookbooks"`
+	CookbooksWithNoVersions []string `json:"cookbooks_with_no_versions"`
+}
+
+func writeDepsolverError(w http.ResponseWriter, f depsolverFailure) {
+	writeJSON(w, http.StatusPreconditionFailed, map[string]any{"error": []any{f}})
+}
+
+// depsolverNotFound is chef_wm_depsolver:not_found_message(cookbook_version,
+// Names): run list cookbooks with no version at all, in run list order.
+func depsolverNotFound(names []string) depsolverFailure {
+	msg := "Run list contains invalid items: no such cookbook " + names[0] + "."
+	if len(names) > 1 {
+		msg = "Run list contains invalid items: no such cookbooks " + strings.Join(names, ", ") + "."
+	}
+	return depsolverFailure{Message: msg, NonExistentCookbooks: names, CookbooksWithNoVersions: []string{}}
+}
+
+// depsolverConstraintsNotMet is chef_wm_depsolver:invalid_constraints_message
+// for run list items no version satisfies once the environment's constraints
+// and the item's pin apply.
+func depsolverConstraintsNotMet(constraints []string) depsolverFailure {
+	msg := "Run list contains invalid items: no versions match the constraints on cookbook " + constraints[0] + "."
+	if len(constraints) > 1 {
+		msg = "Run list contains invalid items: no versions match the constraints on cookbooks " +
+			strings.Join(constraints, ", ") + "."
+	}
+	return depsolverFailure{Message: msg, NonExistentCookbooks: []string{}, CookbooksWithNoVersions: constraints}
 }
