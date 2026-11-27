@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -118,7 +120,7 @@ func TestEnvironmentCookbookVersionsDepsolve(t *testing.T) {
 	doAt(t, "2", "POST", base+"/environments", `{"name":"prod","cookbook_versions":{"apache2":"= 1.0.0"}}`)
 
 	_, body := doAt(t, "2", "POST", base+"/environments/prod/cookbook_versions",
-		`{"run_list":["recipe[apache2]"]}`)
+		`{"run_list":["apache2"]}`)
 	var solved map[string]map[string]any
 	json.Unmarshal([]byte(body), &solved)
 	cb, ok := solved["apache2"]
@@ -167,5 +169,83 @@ func TestRoleEnvironments(t *testing.T) {
 	json.Unmarshal([]byte(body), &rl)
 	if len(rl.RunList) != 1 || rl.RunList[0] != "recipe[nginx]" {
 		t.Fatalf("env/prod/roles/web run_list = %s", body)
+	}
+}
+
+// TestDepsolverRunListItemsAreLiteral pins erchef's run list item parsing
+// (chef_wm_depsolver:cookbooks_for_runlist): split on "@", then "::", and
+// nothing else. recipe[...] and role[...] are cookbook names as written.
+func TestDepsolverRunListItemsAreLiteral(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	seedCookbook(t, base, "apache2", "1.0.0")
+	solve := base + "/environments/_default/cookbook_versions"
+
+	cases := []struct {
+		name, runList, want string
+	}{
+		{"recipe wrapper", `["recipe[apache2]"]`,
+			`{"error":[{"message":"Run list contains invalid items: no such cookbook recipe[apache2].","non_existent_cookbooks":["recipe[apache2]"],"cookbooks_with_no_versions":[]}]}`},
+		{"role wrapper", `["role[web]"]`,
+			`{"error":[{"message":"Run list contains invalid items: no such cookbook role[web].","non_existent_cookbooks":["role[web]"],"cookbooks_with_no_versions":[]}]}`},
+		{"several missing, in run list order", `["zed::server","apache2","alpha@1.0.0","zed"]`,
+			`{"error":[{"message":"Run list contains invalid items: no such cookbooks zed, alpha.","non_existent_cookbooks":["zed","alpha"],"cookbooks_with_no_versions":[]}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := doAt(t, "2", "POST", solve, `{"run_list":`+tc.runList+`}`)
+			if resp.StatusCode != http.StatusPreconditionFailed {
+				t.Fatalf("status = %d, want 412: %s", resp.StatusCode, body)
+			}
+			if got := strings.TrimSpace(body); got != tc.want {
+				t.Fatalf("body =\n  %s\nwant\n  %s", got, tc.want)
+			}
+		})
+	}
+
+	resp, body := doAt(t, "2", "POST", solve, `{"run_list":["apache2::default"]}`)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"apache2"`) {
+		t.Fatalf("bare qualified recipe = %d: %s", resp.StatusCode, body)
+	}
+}
+
+// TestDepsolverVersionedItems covers name@version items: erchef pins the
+// cookbook to exactly that version, and a pin (or an environment constraint)
+// that matches no version is a 412 naming the solution constraint as
+// dep_selector prints it (chef_wm_depsolver:invalid_constraints_message).
+func TestDepsolverVersionedItems(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	seedCookbook(t, base, "apache2", "1.0.0")
+	seedCookbook(t, base, "apache2", "2.0.0")
+	seedCookbook(t, base, "nginx", "1.0.0")
+	doAt(t, "2", "POST", base+"/environments", `{"name":"prod","cookbook_versions":{"nginx":"> 5.0.0"}}`)
+	solve := base + "/environments/_default/cookbook_versions"
+
+	resp, body := doAt(t, "2", "POST", solve, `{"run_list":["apache2::default@1.0.0"]}`)
+	var solved map[string]map[string]any
+	_ = json.Unmarshal([]byte(body), &solved)
+	if resp.StatusCode != http.StatusOK || solved["apache2"]["version"] != "1.0.0" {
+		t.Fatalf("pinned solve = %d, want apache2 1.0.0: %s", resp.StatusCode, body)
+	}
+
+	cases := []struct {
+		name, url, runList, want string
+	}{
+		{"pin matches no version", solve, `["apache2@3.0.0"]`,
+			`{"error":[{"message":"Run list contains invalid items: no versions match the constraints on cookbook (apache2 = 3.0.0).","non_existent_cookbooks":[],"cookbooks_with_no_versions":["(apache2 = 3.0.0)"]}]}`},
+		{"environment excludes every version", base + "/environments/prod/cookbook_versions", `["apache2","nginx","apache2@9.0.0"]`,
+			`{"error":[{"message":"Run list contains invalid items: no versions match the constraints on cookbooks (nginx >= 0.0.0), (apache2 = 9.0.0).","non_existent_cookbooks":[],"cookbooks_with_no_versions":["(nginx >= 0.0.0)","(apache2 = 9.0.0)"]}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := doAt(t, "2", "POST", tc.url, `{"run_list":`+tc.runList+`}`)
+			if resp.StatusCode != http.StatusPreconditionFailed {
+				t.Fatalf("status = %d, want 412: %s", resp.StatusCode, body)
+			}
+			if got := strings.TrimSpace(body); got != tc.want {
+				t.Fatalf("body =\n  %s\nwant\n  %s", got, tc.want)
+			}
+		})
 	}
 }
