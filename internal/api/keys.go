@@ -297,6 +297,9 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		// validateKeyFields leaves exactly one source: a public_key, or a
 		// true create_key asking the server for a new pair.
 		pub, hasPub := body["public_key"].(string)
+		if hasPub && a.refuseSameNameKey(w, segment, name, pub) {
+			return
+		}
 		if !hasPub {
 			key, err := auth.GenerateKey()
 			if err != nil {
@@ -370,6 +373,9 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 		if !stored && keyName != defaultKeyName {
 			writeError(w, http.StatusNotFound, "Cannot find key "+keyName)
+			return
+		}
+		if !createKey && a.refuseSameNameKey(w, segment, name, str(body["public_key"])) {
 			return
 		}
 		privateKey := ""

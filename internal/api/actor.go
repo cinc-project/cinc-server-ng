@@ -65,6 +65,9 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, invalidPublicKeyMessage)
 			return
 		}
+		if a.refuseSameNameKey(w, segment, name, bodyPublicKey(obj)) {
+			return
+		}
 		// From API v1 on, a new actor gets a key only when the request asks for
 		// one: create_key generates a pair, a public_key is stored as given, and
 		// with neither the actor is created with no key at all, as erchef does
@@ -511,6 +514,20 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 				return
 			}
 			pub, privateKey = string(pubPEM), string(auth.EncodePrivateKeyPEM(key))
+		} else if a.refuseSameNameKey(w, segment, newName, pub) {
+			return
+		}
+		// A rename takes the actor's keys to the new name, where they must
+		// not be another same-named actor's (see samename_keys.go).
+		if rename {
+			held, err := actorKeyPEMs(org, segment, name)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if a.refuseSameNameKey(w, segment, newName, held...) {
+				return
+			}
 		}
 		switch {
 		case rename && segment == "clients":
