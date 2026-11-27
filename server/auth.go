@@ -12,6 +12,7 @@ import (
 
 	"github.com/cinc-project/cinc-server-ng/internal/api"
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -247,14 +248,17 @@ func (s *Server) parseActorRecord(org *store.Org, collection, name string) (pubs
 	if !found {
 		return nil, false, false, nil
 	}
-	var rec struct {
-		PublicKey string `json:"public_key"`
-		Admin     bool   `json:"admin"`
-	}
-	if err := json.Unmarshal(raw, &rec); err != nil {
+	// Read each member by its exact name, never by struct-tag decoding:
+	// encoding/json matches names case-insensitively, so a record holding
+	// "Admin" or "PUBLIC_KEY" (ordinary profile data an actor may write into
+	// its own record) would otherwise be read as the superuser flag or a key.
+	rec, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		return nil, false, false, nil
 	}
-	pems, err := api.SigningKeys(org, collection, name, rec.PublicKey, s.opts.Now())
+	publicKey, _ := rec["public_key"].(string)
+	admin = rec["admin"] == true
+	pems, err := api.SigningKeys(org, collection, name, publicKey, s.opts.Now())
 	if err != nil {
 		return nil, false, false, err
 	}
@@ -266,7 +270,7 @@ func (s *Server) parseActorRecord(org *store.Org, collection, name string) (pubs
 	if len(pubs) == 0 {
 		return nil, false, false, nil
 	}
-	return pubs, rec.Admin, true, nil
+	return pubs, admin, true, nil
 }
 
 // checkSkew rejects timestamps outside the allowed clock-skew window.
