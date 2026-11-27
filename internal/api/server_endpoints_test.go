@@ -307,80 +307,6 @@ func TestAPIVersionHeader(t *testing.T) {
 	}
 }
 
-func TestServerAPIVersionEndpoint(t *testing.T) {
-	srv, _ := newTestAPI(t)
-
-	// With no header, request/response default to the minimum.
-	_, body := do(t, "GET", srv.URL+"/server_api_version", "")
-	var v struct {
-		MinVersion      int `json:"min_api_version"`
-		MaxVersion      int `json:"max_api_version"`
-		RequestVersion  int `json:"request_version"`
-		ResponseVersion int `json:"response_version"`
-	}
-	if err := json.Unmarshal([]byte(body), &v); err != nil {
-		t.Fatalf("server_api_version body not JSON: %v (%s)", err, body)
-	}
-	if v.MinVersion != 0 || v.MaxVersion != 2 {
-		t.Fatalf("bounds = %d..%d, want 0..2 (%s)", v.MinVersion, v.MaxVersion, body)
-	}
-	if v.RequestVersion != 0 || v.ResponseVersion != 0 {
-		t.Fatalf("default request/response = %d/%d, want 0/0 (%s)", v.RequestVersion, v.ResponseVersion, body)
-	}
-
-	// A requested in-range version is reflected.
-	req, _ := http.NewRequest("GET", srv.URL+"/server_api_version", nil)
-	req.Header.Set("X-Ops-Server-API-Version", "2")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-		t.Fatal(err)
-	}
-	if v.RequestVersion != 2 || v.ResponseVersion != 2 {
-		t.Fatalf("request/response with header 2 = %d/%d, want 2/2", v.RequestVersion, v.ResponseVersion)
-	}
-}
-
-func TestAPIVersionNonNumericRejected(t *testing.T) {
-	srv, _ := newTestAPI(t)
-	req, _ := http.NewRequest("GET", srv.URL+"/organizations/acme/nodes", nil)
-	req.Header.Set("X-Ops-Server-API-Version", "banana")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	// A non-numeric version is a malformed request (400), distinct from a
-	// well-formed but unsupported version (406, see TestAPIVersionTooLowRejected).
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("non-numeric version = %d, want 400; body %s", resp.StatusCode, body)
-	}
-	var e struct {
-		Error []string `json:"error"`
-	}
-	if json.Unmarshal(body, &e) != nil || len(e.Error) == 0 {
-		t.Fatalf("expected JSON error array, got %s", body)
-	}
-}
-
-func TestAPIVersionTooLowRejected(t *testing.T) {
-	srv, _ := newTestAPI(t)
-	req, _ := http.NewRequest("GET", srv.URL+"/organizations/acme/nodes", nil)
-	req.Header.Set("X-Ops-Server-API-Version", "-1")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotAcceptable {
-		t.Fatalf("too-low version = %d, want 406", resp.StatusCode)
-	}
-}
-
 func TestAPIVersionNegotiatedEcho(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	req, _ := http.NewRequest("GET", srv.URL+"/organizations/acme/nodes", nil)
@@ -399,5 +325,130 @@ func TestAPIVersionNegotiatedEcho(t *testing.T) {
 	}
 	if neg.RequestVersion != "1" || neg.ResponseVersion != "1" {
 		t.Fatalf("negotiated echo = req %q resp %q, want 1/1", neg.RequestVersion, neg.ResponseVersion)
+	}
+	// oc_chef_wm_base:build_api_info_header_body: members in this order, every
+	// value a string.
+	want := `{"min_version":"0","max_version":"2","request_version":"1","response_version":"1"}`
+	if got := resp.Header.Get("X-Ops-Server-API-Version"); got != want {
+		t.Fatalf("version header = %s, want %s", got, want)
+	}
+}
+
+func TestServerAPIVersionEndpoint(t *testing.T) {
+	srv, _ := newTestAPI(t)
+
+	// oc_chef_wm_server_api_version:version_body is the range and nothing
+	// else, whatever version the request asked for.
+	const want = `{"min_api_version":0,"max_api_version":2}`
+	resp, body := do(t, "GET", srv.URL+"/server_api_version", "")
+	if resp.StatusCode != http.StatusOK || strings.TrimSpace(body) != want {
+		t.Fatalf("server_api_version = %d %s", resp.StatusCode, body)
+	}
+	resp, body = doAt(t, "2", "GET", srv.URL+"/server_api_version", "")
+	if resp.StatusCode != http.StatusOK || strings.TrimSpace(body) != want {
+		t.Fatalf("server_api_version at 2 = %d %s", resp.StatusCode, body)
+	}
+}
+
+// TestAPIVersionNotAcceptable pins oc_chef_wm_base:
+// invalid_server_api_version_response and add_api_info_header: a version that
+// is not an integer, or one out of range, is a 406 with the same body, and the
+// negotiation header reports the requested version (-1 when it is not an
+// integer) and a response version of -1.
+func TestAPIVersionNotAcceptable(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	for _, tc := range []struct {
+		version, request string
+	}{
+		{"banana", "-1"},
+		{"1.5", "-1"},
+		{"99", "99"},
+		{"-1", "-1"},
+		{"+3", "3"},
+		{"99999999999999999999", "99999999999999999999"},
+	} {
+		resp, body := doAt(t, tc.version, "GET", srv.URL+"/organizations/acme/nodes", "")
+		if resp.StatusCode != http.StatusNotAcceptable {
+			t.Fatalf("version %q = %d, want 406; body %s", tc.version, resp.StatusCode, body)
+		}
+		wantBody := `{"error":"invalid-x-ops-server-api-version","message":"Specified version ` + tc.version +
+			` not supported","min_version":0,"max_version":2}`
+		if strings.TrimSpace(body) != wantBody {
+			t.Fatalf("version %q body = %s, want %s", tc.version, body, wantBody)
+		}
+		wantHeader := `{"min_version":"0","max_version":"2","request_version":"` + tc.request + `","response_version":"-1"}`
+		if got := resp.Header.Get("X-Ops-Server-API-Version"); got != wantHeader {
+			t.Fatalf("version %q header = %s, want %s", tc.version, got, wantHeader)
+		}
+	}
+}
+
+// TestCanonicalInteger pins the integer erchef's list_to_integer reads from a
+// version header, printed as integer_to_list prints it, without arbitrary-
+// precision arithmetic: the header is unauthenticated and may be a megabyte.
+func TestCanonicalInteger(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{"0", "0", true},
+		{"2", "2", true},
+		{"+3", "3", true},
+		{"007", "7", true},
+		{"-007", "-7", true},
+		{"-0", "0", true},
+		{"+000", "0", true},
+		{"99999999999999999999", "99999999999999999999", true},
+		{"", "", false},
+		{"+", "", false},
+		{"-", "", false},
+		{"1.5", "", false},
+		{" 1", "", false},
+		{"1 ", "", false},
+		{"+-1", "", false},
+		{"0x1", "", false},
+		{"١", "", false}, // a non-ASCII digit
+	} {
+		got, ok := canonicalInteger(tc.in)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("canonicalInteger(%q) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+
+	// Linear in the input: a megabyte of digits, the most net/http accepts in
+	// headers, must not take quadratic time.
+	huge := "1" + strings.Repeat("0", 1<<20)
+	if got, ok := canonicalInteger(huge); !ok || got != huge {
+		t.Fatalf("canonicalInteger(1e%d) failed", 1<<20)
+	}
+}
+
+// TestAPIVersionLeadingZeros: "002" is the integer 2, which is supported.
+func TestAPIVersionLeadingZeros(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	resp, body := doAt(t, "002", "GET", srv.URL+"/server_api_version", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("version 002 = %d %s", resp.StatusCode, body)
+	}
+	want := `{"min_version":"0","max_version":"2","request_version":"2","response_version":"2"}`
+	if got := resp.Header.Get("X-Ops-Server-API-Version"); got != want {
+		t.Fatalf("version 002 header = %s, want %s", got, want)
+	}
+}
+
+// TestAPIVersionEmptyHeaderNotAcceptable: a header sent with no value is not
+// an absent one. erchef's list_to_integer("") fails, so it is a 406.
+func TestAPIVersionEmptyHeaderNotAcceptable(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	req, _ := http.NewRequest("GET", srv.URL+"/organizations/acme/nodes", nil)
+	req.Header["X-Ops-Server-Api-Version"] = []string{""}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotAcceptable {
+		t.Fatalf("empty version = %d, want 406; body %s", resp.StatusCode, body)
 	}
 }

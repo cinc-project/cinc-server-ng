@@ -46,7 +46,7 @@ var accepted = []Accepted{
 	},
 	{
 		Step:  "server api version",
-		Field: "*",
+		Field: "max_api_version",
 		Reason: "the supported API version range is a property of each implementation " +
 			"rather than a compatibility requirement; clients negotiate against it.",
 	},

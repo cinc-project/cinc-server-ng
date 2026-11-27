@@ -147,7 +147,7 @@ func (a *API) Handler() http.Handler {
 	if a.enforceACL {
 		h = a.authzMiddleware(h)
 	}
-	h = withoutTrailingSlash(withAPIVersion(h))
+	h = withoutTrailingSlash(WithAPIVersion(h))
 	if a.externalURL != "" {
 		h = withExternalURL(a.externalURL, h)
 	}

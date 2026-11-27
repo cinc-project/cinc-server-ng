@@ -96,9 +96,9 @@ func (a *API) pingStore(ctx context.Context) string {
 }
 
 // SystemPaths are request paths served without authentication.
+// /server_api_version is not one: erchef signs it like any API route.
 var SystemPaths = map[string]bool{
-	"/_status":            true,
-	"/server_api_version": true,
+	"/_status": true,
 }
 
 // Drain marks the server as shutting down: from now on /_status answers 503,
