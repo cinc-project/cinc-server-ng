@@ -13,6 +13,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"time"
@@ -95,6 +96,15 @@ func (s *Store) org(name string) *Org {
 // Backend returns the underlying Backend, for callers (e.g. the server) that need
 // to close it or pass it to a transaction.
 func (s *Store) Backend() Backend { return s.backend }
+
+// Ping checks the backend is reachable (see Pinger). A backend with nothing to
+// check reports nil.
+func (s *Store) Ping(ctx context.Context) error {
+	if p, ok := s.backend.(Pinger); ok {
+		return p.Ping(ctx)
+	}
+	return nil
+}
 
 // Close releases the underlying backend's resources (e.g. the SQLite handle).
 func (s *Store) Close() error { return s.backend.Close() }

@@ -111,8 +111,15 @@ server's clock synchronized.
 ### 3. Health checks and draining
 
 - Health check: `GET /_status`. No authentication. Returns `200` with
-  `{"status":"pong",...}` when serving, and `503` with `{"status":"draining"}`
-  while shutting down.
+  `{"status":"pong",...}` when serving, `500` with `{"status":"fail",...}` when
+  the store does not answer a ping within 400 ms (for example a closed or
+  unreadable SQLite database), and `503` with `{"status":"draining"}` while
+  shutting down. The body has Chef Infra Server's shape: `upstreams` reports
+  `chef_sql` (the store backend), `chef_solr` (the in-process search index) and
+  `oc_chef_authz` (in-process authorization) as `pong` or `fail`; `keygen` is
+  all zeros, since keys are generated per request rather than from a
+  pre-generated pool; `indexing.mode` is `inline`, since writes update the
+  search index before the request returns.
 - `--shutdown-delay` (default `0`): on `SIGTERM` or `SIGINT`, the server first
   drains. `/_status` starts failing so the load balancer takes it out of
   rotation, every other request is still served, and each connection is closed
