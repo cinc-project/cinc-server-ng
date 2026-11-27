@@ -506,6 +506,18 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if segment == "users" {
+			// erchef answers a user update with the user's URI, plus a
+			// generated private key, and not the user
+			// (oc_chef_wm_named_user:finalize_update_body, kept for
+			// opscode-account's clients). Clients echo the object.
+			resp := map[string]any{"uri": objectURL(r, orgSegment(r), segment, name)}
+			if privateKey != "" {
+				resp["private_key"] = privateKey
+			}
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
 		if privateKey != "" {
 			// The private key is returned once and never stored.
 			obj["private_key"] = privateKey
