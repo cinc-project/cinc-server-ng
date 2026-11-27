@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -286,6 +287,63 @@ func preservePrivilege(r *http.Request, org *store.Org, segment, name string, ob
 	return nil
 }
 
+// validatorField is a client's validator flag (see isValidatorClient).
+const validatorField = "validator"
+
+// preserveValidatorFlag keeps a client update from changing the client's
+// validator flag unless the caller is an org admin or the superuser.
+//
+// An update that omits the flag keeps the stored one, as erchef's
+// chef_client:set_values_from_current_client does. erchef lets anyone with
+// update on a client set the flag, and every client holds update on itself,
+// so there a client may clear or set its own. Here that is refused: under
+// enforcement the stored value is carried forward for anyone outside the org's
+// admins group, who may still set and clear it as on erchef. The flag decides
+// which clients a creator holds nothing on (writeCreatorACL) and who may not
+// create a validator, so it is not the client's to change. Without enforcement
+// or an authenticated actor every caller may change it, as every caller may
+// change everything else.
+func (a *API) preserveValidatorFlag(r *http.Request, org *store.Org, name string, obj map[string]any) error {
+	// Read as isValidatorClient reads it, so the value carried forward is the
+	// one the flag checks see.
+	var stored any
+	raw, ok, err := org.Get("clients", name)
+	if err != nil {
+		return err
+	}
+	if ok {
+		if doc, err := chefjson.DecodeObject(raw); err == nil {
+			stored = doc[validatorField]
+		}
+	}
+	if _, ok := obj[validatorField]; !ok {
+		if stored != nil {
+			obj[validatorField] = stored
+		}
+		return nil
+	}
+	if !a.enforceACL {
+		return nil
+	}
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.IsGlobalAdmin {
+		return nil
+	}
+	groups, err := a.actorGroups(org, actor)
+	if err != nil {
+		return err
+	}
+	if groups["admins"] {
+		return nil
+	}
+	if stored == nil {
+		delete(obj, validatorField)
+		return nil
+	}
+	obj[validatorField] = stored
+	return nil
+}
+
 // storedField returns one field of an actor's stored record, or nil when the
 // actor or the field is absent.
 func storedField(org *store.Org, segment, name, field string) (any, error) {
@@ -540,6 +598,12 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		if err := preservePrivilege(r, org, segment, name, obj); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if segment == "clients" {
+			if err := a.preserveValidatorFlag(r, org, name, obj); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		status := http.StatusOK
 		var raw []byte

@@ -111,13 +111,26 @@ func writeCreatorACL(org *store.Org, typ, name string, creator Actor) error {
 	return org.Put("acls", aclKey(typ, name), mustEncode(acl))
 }
 
-// isValidatorClient reports whether name is a client of org whose record is
-// flagged validator, which is how erchef recognizes a validator
-// (#chef_client{validator = true}), whatever its name.
+// isValidatorClient reports whether name is a client of org that acts as a
+// validator: its record is flagged validator, which is how erchef recognizes
+// one (#chef_client{validator = true}) whatever its name, or it is the org's
+// validator, "<org>-validator".
+//
+// The name is there because it is what lets the org's validator create clients
+// here: erchef lets a validator create clients because of its flag and keeps
+// it out of the clients container's ACL, while this server grants that create
+// to the name (validatorClientsACL). Were the exemption keyed off the flag
+// alone, the org's validator with its flag cleared would keep the create the
+// container grants its name and be granted, as creator, every client it
+// registered from then on. The org's validator cannot be renamed (scopedPut),
+// so the name stays bound to it.
 func isValidatorClient(org *store.Org, name string) (bool, error) {
 	raw, ok, err := org.Get("clients", name)
 	if err != nil || !ok {
 		return false, err
+	}
+	if name == org.Name()+"-validator" {
+		return true, nil
 	}
 	doc, err := chefjson.DecodeObject(raw)
 	if err != nil {
