@@ -205,7 +205,7 @@ func TestActorPutReplacesPublicKeyWhenProvided(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
 
-	const newKey = "-----BEGIN PUBLIC KEY-----\nREPLACED\n-----END PUBLIC KEY-----\n"
+	newKey := testPublicKeyPEM(t)
 	body, _ := json.Marshal(map[string]any{"name": "web01", "public_key": newKey})
 	if resp, b := do(t, "PUT", srv.URL+"/organizations/acme/clients/web01", string(body)); resp.StatusCode != http.StatusOK {
 		t.Fatalf("put = %d: %s", resp.StatusCode, b)

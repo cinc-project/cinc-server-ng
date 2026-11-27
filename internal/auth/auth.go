@@ -91,7 +91,14 @@ func VerifyRequest(method, path string, body []byte, h http.Header, pub *rsa.Pub
 // decoded path: Mixlib clients sign the path they send
 // (Chef::HTTP::Authenticator passes `url.path`), and erchef verifies against
 // the raw request path.
+//
+// A key outside the bounds CheckPublicKey enforces is refused before any RSA
+// arithmetic: ParsePublicKey already refuses one, but a key can also reach
+// here parsed some other way.
 func Verify(method, path string, body []byte, p *Parsed, serverAPIVersion string, pub *rsa.PublicKey) error {
+	if err := CheckPublicKey(pub); err != nil {
+		return fmt.Errorf("auth: signature verification failed: %w", err)
+	}
 	signingString := canonicalString(method, path, body, p, serverAPIVersion)
 
 	switch p.Version {
@@ -230,10 +237,17 @@ func joinSignature(h http.Header) ([]byte, error) {
 // PKCS#1 v1.5 type-1 padding, recovering the message that was signed with
 // OpenSSL's private_encrypt (used by Mixlib auth versions 1.0 and 1.1). Go's
 // standard library has no public_decrypt, so this is implemented directly.
+//
+// The key must be within CheckPublicKey's bounds, and the signature exactly as
+// long as the modulus, as RSA_private_encrypt always makes it (and as
+// rsa.VerifyPKCS1v15 requires for 1.3), before any exponentiation.
 func rsaPublicDecrypt(pub *rsa.PublicKey, sig []byte) ([]byte, error) {
+	if err := CheckPublicKey(pub); err != nil {
+		return nil, err
+	}
 	k := (pub.N.BitLen() + 7) / 8
-	if len(sig) > k || len(sig) == 0 {
-		return nil, errors.New("signature length out of range")
+	if len(sig) != k {
+		return nil, errors.New("signature length does not match the key")
 	}
 	c := new(big.Int).SetBytes(sig)
 	if c.Cmp(pub.N) >= 0 {

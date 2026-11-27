@@ -517,6 +517,11 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			// erchef reads only a top-level public_key, which is refused
 			// above; a nested one is not a key change at v1 either.
 			delete(obj, "chef_key")
+		} else if pub := bodyPublicKey(obj); pub != "" && !validPublicKey(pub) {
+			// At v0 the body may replace the default key, which is checked
+			// as on create (chef_key_base:validate_public_key_fields).
+			writeError(w, http.StatusBadRequest, invalidPublicKeyMessage)
+			return
 		}
 		// create_key is a request, never part of the actor.
 		delete(obj, "create_key")
