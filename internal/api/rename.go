@@ -228,24 +228,36 @@ func renameInviter(org *store.Org, client bool, oldName, newName string) error {
 
 // moveActorKeys moves an actor's stored keys to its new name. dropDefault
 // leaves the "default" key behind to be deleted, as a renamed client's is.
+//
+// Keys authenticate by actor name, so none may stay under the old name (a
+// later actor of that name would inherit it) and none may already wait under
+// the new one (the renamed actor would gain it): rows left at either name by
+// anything else are deleted.
 func moveActorKeys(org *store.Org, segment, oldName, newName string, dropDefault bool) error {
 	from, to := keysColl(segment, oldName), keysColl(segment, newName)
+	if err := deleteActorKeys(org, segment, newName); err != nil {
+		return err
+	}
 	names, err := org.Keys(from)
 	if err != nil {
 		return err
 	}
 	for _, kn := range names {
 		if dropDefault && kn == defaultKeyName {
-			if _, _, err := org.Delete(from, kn); err != nil {
-				return err
-			}
 			continue
 		}
-		if err := moveKey(org, from, kn, to); err != nil {
+		raw, ok, err := org.Get(from, kn)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if err := org.Put(to, kn, raw); err != nil {
 			return err
 		}
 	}
-	return nil
+	return deleteActorKeys(org, segment, oldName)
 }
 
 // renameClient moves client oldName of org to newName, storing doc as its

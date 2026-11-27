@@ -376,3 +376,110 @@ func TestRenameOrganizationRefused(t *testing.T) {
 	expectStatus(t, "acme still there", signed(t, srv, "GET", srv.URL()+"/organizations/acme", ""), 200)
 	expectStatus(t, "no org other", signed(t, srv, "GET", srv.URL()+"/organizations/other", ""), 404)
 }
+
+// storedKeyNames lists the key rows stored for an actor, straight from the
+// store, so keys left behind under a name no endpoint shows are still seen.
+func storedKeyNames(t *testing.T, srv *Server, org, segment, actor string) []string {
+	t.Helper()
+	space := srv.Store().Global()
+	if org != "" {
+		o, ok, err := srv.Store().Org(org)
+		if err != nil || !ok {
+			t.Fatalf("org %s: %v", org, err)
+		}
+		space = o
+	}
+	names, err := space.Keys(segment + "_keys:" + actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return names
+}
+
+// A rename moves every key but a client's default to the new name, and
+// leaves none under the old one: a key left there would authenticate whoever
+// is later created under that name.
+func TestRenameMovesKeys(t *testing.T) {
+	renameBackends(t, func(t *testing.T, opts Options) {
+		srv := startServer(t, opts)
+		base := srv.URL() + "/organizations/acme"
+		probe := base + "/nodes"
+		const second = `{"name":"second","create_key":true,"expiration_date":"infinity"}`
+
+		// A client with its default key and a second one.
+		createClientAndKey(t, srv, base, "web01")
+		clientSecond := addKey(t, srv, base+"/clients/web01/keys", second)
+		wantAuth(t, "baseline client second key", statusOf(t, signedAs(t, "web01", clientSecond, "GET", probe, "")), 200)
+		expectStatus(t, "rename client", signed(t, srv, "PUT", base+"/clients/web01", `{"name":"web02"}`), 201)
+		wantAuth(t, "second key as web02", statusOf(t, signedAs(t, "web02", clientSecond, "GET", probe, "")), 200)
+		if names := storedKeyNames(t, srv, "acme", "clients", "web01"); len(names) != 0 {
+			t.Errorf("keys left under web01: %v", names)
+		}
+		if names := storedKeyNames(t, srv, "acme", "clients", "web02"); !slices.Equal(names, []string{"second"}) {
+			t.Errorf("web02's keys = %v, want [second]", names)
+		}
+		createClientAndKey(t, srv, base, "web01")
+		wantAuth(t, "old second key as new web01", statusOf(t, signedAs(t, "web01", clientSecond, "GET", probe, "")), 401)
+
+		// A user with its default key and a second one: both move.
+		bobKey := []byte(createUser(t, srv, `{"name":"bob"}`))
+		userSecond := addKey(t, srv, srv.URL()+"/users/bob/keys", second)
+		bobURL := srv.URL() + "/users/bob"
+		wantAuth(t, "baseline user default key", statusOf(t, signedAs(t, "bob", bobKey, "GET", bobURL, "")), 200)
+		wantAuth(t, "baseline user second key", statusOf(t, signedAs(t, "bob", userSecond, "GET", bobURL, "")), 200)
+		expectStatus(t, "rename user", signed(t, srv, "PUT", bobURL,
+			validUserBody(t, `{"username":"robert","email":"bob@example.test"}`)), 201)
+		robertURL := srv.URL() + "/users/robert"
+		wantAuth(t, "default key as robert", statusOf(t, signedAs(t, "robert", bobKey, "GET", robertURL, "")), 200)
+		wantAuth(t, "second key as robert", statusOf(t, signedAs(t, "robert", userSecond, "GET", robertURL, "")), 200)
+		if names := storedKeyNames(t, srv, "", "users", "bob"); len(names) != 0 {
+			t.Errorf("keys left under bob: %v", names)
+		}
+		createUser(t, srv, `{"name":"bob"}`)
+		wantAuth(t, "old default key as new bob", statusOf(t, signedAs(t, "bob", bobKey, "GET", bobURL, "")), 401)
+		wantAuth(t, "old second key as new bob", statusOf(t, signedAs(t, "bob", userSecond, "GET", bobURL, "")), 401)
+	})
+}
+
+// The name a group is renamed to is always checked, whichever of "id" and
+// "groupname" the body carries. erchef checks "id" when present and then
+// renames to "groupname" unchecked; here both are checked.
+func TestRenameGroupChecksDestination(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}, EnforceACL: true})
+	base := srv.URL() + "/organizations/acme"
+	expectStatus(t, "create ops", signed(t, srv, "POST", base+"/groups", `{"groupname":"ops"}`), 201)
+	for _, b := range []string{`{"id":"ok","groupname":"a/b"}`, `{"id":"a/b","groupname":"ok"}`} {
+		body := expectStatus(t, "PUT "+b, signed(t, srv, "PUT", base+"/groups/ops", b), 400)
+		if string(body) != `{"error":["Invalid group name."]}` {
+			t.Errorf("PUT %s body = %s", b, body)
+		}
+	}
+	expectStatus(t, "ops still there", signed(t, srv, "GET", base+"/groups/ops", ""), 200)
+	expectStatus(t, "no group ok", signed(t, srv, "GET", base+"/groups/ok", ""), 404)
+}
+
+// The org's default groups and its validator client are found by name here
+// (erchef finds them by authz id), so renaming one is refused: a deliberate
+// difference from erchef.
+func TestRenameRefusesNamedByCode(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}, EnforceACL: true})
+	base := srv.URL() + "/organizations/acme"
+	for _, g := range []string{"admins", "billing-admins", "clients", "users", "public_key_read_access"} {
+		body := expectStatus(t, "rename "+g, signed(t, srv, "PUT", base+"/groups/"+g, `{"groupname":"renamed"}`), 400)
+		if want := `{"error":["Cannot rename the default group '` + g + `'"]}`; string(body) != want {
+			t.Errorf("rename %s body = %s, want %s", g, body, want)
+		}
+		expectStatus(t, g+" still there", signed(t, srv, "GET", base+"/groups/"+g, ""), 200)
+	}
+	// An update that keeps the name still works.
+	expectStatus(t, "update admins in place", signed(t, srv, "PUT", base+"/groups/admins", `{"groupname":"admins"}`), 200)
+
+	body := expectStatus(t, "rename validator", signed(t, srv, "PUT", base+"/clients/acme-validator",
+		`{"name":"other-validator","validator":true}`), 400)
+	if want := `{"error":["Cannot rename the validator client 'acme-validator'"]}`; string(body) != want {
+		t.Errorf("rename validator body = %s, want %s", body, want)
+	}
+	expectStatus(t, "validator still there", signed(t, srv, "GET", base+"/clients/acme-validator", ""), 200)
+	wantAuth(t, "validator still registers", statusOf(t, signedAs(t, "acme-validator", srv.ValidatorKey("acme"), "POST", base+"/clients",
+		`{"name":"web09","create_key":true}`)), 201)
+}

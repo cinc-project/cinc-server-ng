@@ -468,6 +468,16 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			obj["username"] = newName
 		}
 		rename := newName != name
+		// Deliberately unlike erchef, which refers to the validator by authz
+		// id: here code finds it by the name "<org>-validator". A new client
+		// gets the clients container's ACL less that name (creationACL), so a
+		// renamed validator, which the container still grants create, would
+		// be written into the ACL of every client created afterwards; and the
+		// org ACL upgrade (UpgradeOrgACLs) matches the validator by name.
+		if rename && segment == "clients" && name == org.Name()+"-validator" {
+			writeError(w, http.StatusBadRequest, "Cannot rename the validator client '"+name+"'")
+			return
+		}
 		if rename {
 			if _, ok, err := org.Get(segment, newName); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())

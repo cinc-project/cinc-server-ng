@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 
 	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -188,12 +189,16 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	// erchef checks "id", or else "groupname", as on create, and renames the
-	// group to "groupname" (oc_chef_wm_named_group:auth_info,
-	// oc_chef_group:update_from_ejson).
-	if v, ok := obj["id"]; ok || obj["groupname"] != nil {
-		if !ok {
-			v = obj["groupname"]
+	// erchef checks "id", or else "groupname", against the name rule as on
+	// create (oc_chef_wm_named_group:auth_info), then renames the group to
+	// "groupname" (oc_chef_group:update_from_ejson). With both present, the
+	// name it renames to goes unchecked; here each one present is checked,
+	// so the destination always is. erchef refuses no disagreement between
+	// the two ("id" names nothing on update), and neither does this.
+	for _, field := range []string{"id", "groupname"} {
+		v, ok := obj[field]
+		if !ok || (field == "groupname" && v == nil) {
+			continue
 		}
 		if s, isString := v.(string); !isString || !groupNameRE.MatchString(s) {
 			writeError(w, http.StatusBadRequest, "Invalid group name.")
@@ -203,6 +208,15 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	newName := name
 	if v, ok := obj["groupname"].(string); ok {
 		newName = v
+	}
+	// Deliberately unlike erchef, which refers to the org's default groups by
+	// authz id: here association, client registration, the org membership
+	// gate and the org's ACL policy find them by name, so a renamed default
+	// group would be replaced by a fresh, empty one of the old name while
+	// the renamed one kept its grants.
+	if newName != name && slices.Contains(defaultGroups, name) {
+		writeError(w, http.StatusBadRequest, "Cannot rename the default group '"+name+"'")
+		return
 	}
 	// Read-modify-write: a revocation landing between the read and the write
 	// would be undone (see groupmembers.go). The group is checked again under
