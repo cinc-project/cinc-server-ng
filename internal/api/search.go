@@ -414,6 +414,10 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid partial search body")
 			return
 		}
+		if msg := checkPartialSearchBody(partial); msg != "" {
+			writeError(w, http.StatusRequestEntityTooLarge, msg)
+			return
+		}
 	}
 
 	// Match-all needs no index at all: every stored document qualifies, so read
@@ -467,30 +471,7 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]any, 0, len(window))
-	for _, m := range window {
-		// Re-fetch the merged view for this row only (a flatten-cache hit, since
-		// collectMatches flattened every match); the full result set is not merged.
-		merged, _, _ := a.searchDoc(idx.collection, m.id, m.raw, idx.mergeAttrs)
-		data := map[string]any{}
-		for key, path := range partial {
-			if len(path) == 0 {
-				data[key] = nil // empty projection: no value for this key
-				continue
-			}
-			data[key] = traversePath(merged, path)
-		}
-		out = append(out, map[string]any{
-			"url":  idx.urlFor(r, org.Name(), m.id),
-			"data": data,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"total": total,
-		"start": start,
-		"rows":  out,
-	})
+	a.writePartialSearch(w, r, org, idx, partial, total, start, window)
 }
 
 // nodeSearchDoc produces the searchable view of a node: its attribute
