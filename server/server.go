@@ -637,6 +637,10 @@ func New(opts Options) (*Server, error) {
 	if !opts.DisableAuth {
 		handler = s.authMiddleware(handler)
 	}
+	// erchef judges the API version header in service_available, before the
+	// signature: an unacceptable version is a 406 even unsigned, and a 401
+	// carries the negotiation header too.
+	handler = api.WithAPIVersion(handler)
 	// Measure outside authentication, so requests rejected before they reach a
 	// route are counted too — a flood of bad credentials is worth seeing.
 	handler = apiInstance.Instrument(handler)
