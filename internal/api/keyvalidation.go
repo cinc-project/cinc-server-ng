@@ -44,7 +44,9 @@ func validKeyName(s string) bool {
 
 // validPublicKey reports whether s is a PEM public key erchef accepts
 // (chef_key_base:valid_public_key): a "PUBLIC KEY" or "RSA PUBLIC KEY" block
-// that parses.
+// that parses. Parsing also refuses an RSA key outside auth.CheckPublicKey's
+// modulus and exponent bounds, which could never be used to verify a request
+// and would make every request naming its owner expensive to refuse.
 func validPublicKey(s string) bool {
 	if !strings.HasPrefix(s, "-----BEGIN PUBLIC KEY") && !strings.HasPrefix(s, "-----BEGIN RSA PUBLIC KEY") {
 		return false
