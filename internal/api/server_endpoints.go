@@ -2,9 +2,9 @@ package api
 
 import (
 	"encoding/json"
-	"math/big"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -203,12 +203,11 @@ func WithAPIVersion(next http.Handler) http.Handler {
 			return
 		}
 		raw := values[0]
-		// big.Int in base 10 accepts what list_to_integer does: an optional
-		// sign and decimal digits, of any size.
-		n, isInt := new(big.Int).SetString(raw, 10)
-		if isInt && n.IsInt64() && n.Int64() >= apiVersionMin && n.Int64() <= apiVersionMax {
-			v := n.String()
-			setVersionHeader(w, v, v)
+		n, isInt := canonicalInteger(raw)
+		// A supported version is a single digit; anything longer is out of
+		// range, however many digits it has.
+		if v, err := strconv.Atoi(n); isInt && len(n) == 1 && err == nil && v >= apiVersionMin && v <= apiVersionMax {
+			setVersionHeader(w, n, n)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -216,7 +215,7 @@ func WithAPIVersion(next http.Handler) http.Handler {
 		// an integer, -1 when it is not one, and a response version of -1.
 		requested := "-1"
 		if isInt {
-			requested = n.String()
+			requested = n
 		}
 		setVersionHeader(w, requested, "-1")
 		writeJSON(w, http.StatusNotAcceptable, struct {
@@ -226,6 +225,37 @@ func WithAPIVersion(next http.Handler) http.Handler {
 			Max     int    `json:"max_version"`
 		}{"invalid-x-ops-server-api-version", "Specified version " + raw + " not supported", apiVersionMin, apiVersionMax})
 	})
+}
+
+// canonicalInteger reads s as erchef's list_to_integer does (an optional sign,
+// then one or more ASCII decimal digits, of any size) and returns it as
+// integer_to_list prints it: no "+", no leading zeros, and "0" for negative
+// zero. It runs in linear time without arbitrary-precision arithmetic, which
+// is quadratic in the length: the header it reads is checked before the
+// request's signature, and net/http accepts a megabyte of headers.
+func canonicalInteger(s string) (string, bool) {
+	neg := false
+	digits := s
+	if digits != "" && (digits[0] == '+' || digits[0] == '-') {
+		neg = digits[0] == '-'
+		digits = digits[1:]
+	}
+	if digits == "" {
+		return "", false
+	}
+	for i := 0; i < len(digits); i++ {
+		if digits[i] < '0' || digits[i] > '9' {
+			return "", false
+		}
+	}
+	digits = strings.TrimLeft(digits, "0")
+	if digits == "" {
+		return "0", true
+	}
+	if neg {
+		return "-" + digits, true
+	}
+	return digits, true
 }
 
 // requestAPIVersion is the server API version a request asked for;

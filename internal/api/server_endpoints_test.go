@@ -383,6 +383,59 @@ func TestAPIVersionNotAcceptable(t *testing.T) {
 	}
 }
 
+// TestCanonicalInteger pins the integer erchef's list_to_integer reads from a
+// version header, printed as integer_to_list prints it, without arbitrary-
+// precision arithmetic: the header is unauthenticated and may be a megabyte.
+func TestCanonicalInteger(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{"0", "0", true},
+		{"2", "2", true},
+		{"+3", "3", true},
+		{"007", "7", true},
+		{"-007", "-7", true},
+		{"-0", "0", true},
+		{"+000", "0", true},
+		{"99999999999999999999", "99999999999999999999", true},
+		{"", "", false},
+		{"+", "", false},
+		{"-", "", false},
+		{"1.5", "", false},
+		{" 1", "", false},
+		{"1 ", "", false},
+		{"+-1", "", false},
+		{"0x1", "", false},
+		{"١", "", false}, // a non-ASCII digit
+	} {
+		got, ok := canonicalInteger(tc.in)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("canonicalInteger(%q) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+
+	// Linear in the input: a megabyte of digits, the most net/http accepts in
+	// headers, must not take quadratic time.
+	huge := "1" + strings.Repeat("0", 1<<20)
+	if got, ok := canonicalInteger(huge); !ok || got != huge {
+		t.Fatalf("canonicalInteger(1e%d) failed", 1<<20)
+	}
+}
+
+// TestAPIVersionLeadingZeros: "002" is the integer 2, which is supported.
+func TestAPIVersionLeadingZeros(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	resp, body := doAt(t, "002", "GET", srv.URL+"/server_api_version", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("version 002 = %d %s", resp.StatusCode, body)
+	}
+	want := `{"min_version":"0","max_version":"2","request_version":"2","response_version":"2"}`
+	if got := resp.Header.Get("X-Ops-Server-API-Version"); got != want {
+		t.Fatalf("version 002 header = %s, want %s", got, want)
+	}
+}
+
 // TestAPIVersionEmptyHeaderNotAcceptable: a header sent with no value is not
 // an absent one. erchef's list_to_integer("") fails, so it is a 406.
 func TestAPIVersionEmptyHeaderNotAcceptable(t *testing.T) {
