@@ -45,17 +45,30 @@ func validateObjectBody(segment, urlName string, raw []byte) string {
 	}
 	switch segment {
 	case "nodes":
-		return validateNodeName(urlName, doc)
+		return validateNode(urlName, doc)
 	case "roles":
 		return validateRole(urlName, doc)
 	}
 	return validateEnvironment(doc)
 }
 
-// validateNodeName is the name half of chef_node:validate_json_node: the name
-// must match node_name, and on an update the body may omit it (the URL
-// supplies it) but may not name a different node. The rest of chef_node's
-// constraints are not checked here.
+// validateNode is the name and run_list part of chef_node:validate_json_node:
+// the name must match node_name, and on an update the body may omit it (the
+// URL supplies it) but may not name a different node; run_list, when present,
+// must satisfy run_list_spec. A present run_list of null is refused:
+// insert_autofill_fields fills in [] only for a missing key. The rest of
+// chef_node's constraints are not checked here.
+func validateNode(urlName string, doc map[string]any) string {
+	if msg := validateNodeName(urlName, doc); msg != "" {
+		return msg
+	}
+	if runList, ok := doc["run_list"]; ok && !validRunList(runList) {
+		return "Field 'run_list' is not a valid run list"
+	}
+	return ""
+}
+
+// validateNodeName checks a node body's name against node_name and the URL.
 func validateNodeName(urlName string, doc map[string]any) string {
 	name, hasName := doc["name"]
 	if urlName != "" {
