@@ -214,7 +214,7 @@ func TestRepoLoadedClientTakesContainerACL(t *testing.T) {
 	// Baseline: bob is a member who can read the client's keys.
 	mustStatus(t, signedAs(t, "bob", bob, "GET", base+"/clients/web01/keys", ""), http.StatusOK)
 
-	mustStatus(t, signedAs(t, "bob", bob, "POST", base+"/clients/web01/keys", `{"name":"bobs","create_key":true}`), http.StatusForbidden)
+	mustStatus(t, signedAs(t, "bob", bob, "POST", base+"/clients/web01/keys", `{"name":"bobs","create_key":true,"expiration_date":"infinity"}`), http.StatusForbidden)
 	acl := granularACL(t, srv, base+"/clients/web01/_acl")
 	for _, perm := range []string{"create", "read", "update", "delete", "grant"} {
 		if !slices.Equal(acl[perm]["clients"], []string{"web01"}) {
@@ -311,14 +311,14 @@ func TestLegacyObjectACLsUpgradedOnStart(t *testing.T) {
 	// edited one, which names bob. (The bare one already reports its
 	// container's ACL, the fallback for an object with none stored.)
 	for _, c := range []string{"legacy", "edited"} {
-		mustStatus(t, signedAs(t, "bob", bob, "POST", base+"/clients/"+c+"/keys", `{"name":"k1","create_key":true}`), http.StatusCreated)
+		mustStatus(t, signedAs(t, "bob", bob, "POST", base+"/clients/"+c+"/keys", `{"name":"k1","create_key":true,"expiration_date":"infinity"}`), http.StatusCreated)
 	}
 	stopServer(t, srv1)
 
 	srv2 := startServer(t, opts)
 	base = srv2.URL() + "/organizations/acme"
 	for _, c := range []string{"legacy", "bare"} {
-		mustStatus(t, signedAs(t, "bob", bob, "POST", base+"/clients/"+c+"/keys", `{"name":"k2","create_key":true}`), http.StatusForbidden)
+		mustStatus(t, signedAs(t, "bob", bob, "POST", base+"/clients/"+c+"/keys", `{"name":"k2","create_key":true,"expiration_date":"infinity"}`), http.StatusForbidden)
 		acl := granularACL(t, srv2, base+"/clients/"+c+"/_acl")
 		if !slices.Contains(acl["update"]["clients"], c) {
 			t.Errorf("%s update clients = %v, want itself", c, acl["update"]["clients"])
@@ -327,7 +327,7 @@ func TestLegacyObjectACLsUpgradedOnStart(t *testing.T) {
 	if acl := granularACL(t, srv2, base+"/clients/legacy/_acl"); !slices.Equal(acl["grant"]["users"], []string{"pivotal"}) {
 		t.Errorf("legacy grant users = %v, want its creator kept", acl["grant"]["users"])
 	}
-	mustStatus(t, signedAs(t, "bob", bob, "POST", base+"/clients/edited/keys", `{"name":"k2","create_key":true}`), http.StatusCreated)
+	mustStatus(t, signedAs(t, "bob", bob, "POST", base+"/clients/edited/keys", `{"name":"k2","create_key":true,"expiration_date":"infinity"}`), http.StatusCreated)
 	org2, _, _ := srv2.Store().Org("acme")
 	if raw, _, _ := org2.Get("acls", "clients/edited"); string(raw) != edited {
 		t.Errorf("edited ACL rewritten:\n got %s\nwant %s", raw, edited)

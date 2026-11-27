@@ -42,7 +42,7 @@ func TestClientKeyLifecycle(t *testing.T) {
 
 	// Add a second key with no public_key; the server generates one and returns
 	// the private key exactly once.
-	resp, body = do(t, "POST", base+"/clients/web01/keys", `{"name":"key2","expiration_date":"infinity"}`)
+	resp, body = do(t, "POST", base+"/clients/web01/keys", `{"name":"key2","create_key":true,"expiration_date":"infinity"}`)
 	if resp.StatusCode != 201 {
 		t.Fatalf("add key = %d: %s", resp.StatusCode, body)
 	}
@@ -80,8 +80,8 @@ func TestClientKeyAddDuplicate(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 	do(t, "POST", base+"/clients", `{"name":"web01"}`)
-	do(t, "POST", base+"/clients/web01/keys", `{"name":"key2"}`)
-	resp, _ := do(t, "POST", base+"/clients/web01/keys", `{"name":"key2"}`)
+	do(t, "POST", base+"/clients/web01/keys", `{"name":"key2","create_key":true,"expiration_date":"infinity"}`)
+	resp, _ := do(t, "POST", base+"/clients/web01/keys", `{"name":"key2","create_key":true,"expiration_date":"infinity"}`)
 	if resp.StatusCode != 409 {
 		t.Fatalf("duplicate key = %d, want 409", resp.StatusCode)
 	}
@@ -122,7 +122,7 @@ func TestKeyPutCreateKeyRegenerates(t *testing.T) {
 			base := srv.URL + "/organizations/acme/clients/web01/keys"
 			do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
 			if keyName != "default" {
-				do(t, "POST", base, `{"name":"rotating","expiration_date":"infinity"}`)
+				do(t, "POST", base, `{"name":"rotating","create_key":true,"expiration_date":"infinity"}`)
 			}
 			_, raw := do(t, "GET", base+"/"+keyName, "")
 			var before map[string]any
@@ -173,7 +173,7 @@ func TestKeyPutCreateKeyWithPublicKeyIsRejected(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme/clients/web01/keys"
 	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
-	do(t, "POST", base, `{"name":"rotating","expiration_date":"infinity"}`)
+	do(t, "POST", base, `{"name":"rotating","create_key":true,"expiration_date":"infinity"}`)
 	_, before := do(t, "GET", base+"/rotating", "")
 
 	key, _ := auth.GenerateKey()
@@ -193,7 +193,7 @@ func TestKeyPutCreateKeyFalseIsNotStored(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme/clients/web01/keys"
 	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
-	do(t, "POST", base, `{"name":"rotating","expiration_date":"infinity"}`)
+	do(t, "POST", base, `{"name":"rotating","create_key":true,"expiration_date":"infinity"}`)
 	_, raw := do(t, "GET", base+"/rotating", "")
 	var before map[string]any
 	json.Unmarshal([]byte(raw), &before)
@@ -276,7 +276,7 @@ func TestKeyPutKeepsOmittedFields(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"
 	do(t, "POST", base+"/clients", `{"name":"web01"}`)
-	do(t, "POST", base+"/clients/web01/keys", `{"name":"partial","expiration_date":"infinity"}`)
+	do(t, "POST", base+"/clients/web01/keys", `{"name":"partial","create_key":true,"expiration_date":"infinity"}`)
 	before := getKeyDoc(t, base+"/clients/web01/keys/partial")
 
 	resp, body := do(t, "PUT", base+"/clients/web01/keys/partial", `{"expiration_date":"2041-01-01T00:00:00Z"}`)
@@ -315,7 +315,7 @@ func TestKeyPutRenames(t *testing.T) {
 			do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
 			do(t, "POST", srv.URL+"/users", userBody(`{"name":"alice"}`))
 			keys := srv.URL + tc.base
-			do(t, "POST", keys, `{"name":"old-name","expiration_date":"infinity"}`)
+			do(t, "POST", keys, `{"name":"old-name","create_key":true,"expiration_date":"infinity"}`)
 			before := getKeyDoc(t, keys+"/old-name")
 
 			resp, body := do(t, "PUT", keys+"/old-name", `{"name":"new-name"}`)
@@ -347,8 +347,8 @@ func TestKeyPutRenameConflicts(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme/clients/web01/keys"
 	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
-	do(t, "POST", base, `{"name":"a","expiration_date":"infinity"}`)
-	do(t, "POST", base, `{"name":"b","expiration_date":"infinity"}`)
+	do(t, "POST", base, `{"name":"a","create_key":true,"expiration_date":"infinity"}`)
+	do(t, "POST", base, `{"name":"b","create_key":true,"expiration_date":"infinity"}`)
 	a, b := getKeyDoc(t, base+"/a"), getKeyDoc(t, base+"/b")
 
 	for _, target := range []string{"b", "default"} {
@@ -373,7 +373,7 @@ func TestKeyPutRenameRejectsUnsafeNames(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme/clients/web01/keys"
 	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
-	do(t, "POST", base, `{"name":"a","expiration_date":"infinity"}`)
+	do(t, "POST", base, `{"name":"a","create_key":true,"expiration_date":"infinity"}`)
 	before := getKeyDoc(t, base+"/a")
 
 	for _, name := range []string{
@@ -512,6 +512,23 @@ func TestAddKeyRejectsInvalidFields(t *testing.T) {
 			{map[string]any{"name": "junk3", "create_key": true, "expiration_date": "next tuesday"}, badDateMessage},
 			{map[string]any{"name": "junk4", "create_key": true, "expiration_date": "2099-02-28T01:00:00"}, badDateMessage},
 			{map[string]any{"name": "junk5", "create_key": true, "expiration_date": "2099-02-30T01:00:00Z"}, badDateMessage},
+			// chef_key:parse_binary_json(_, create) requires name and
+			// expiration_date, and chef_key_base:validate_public_key_fields
+			// exactly one of public_key and a true create_key.
+			{map[string]any{"create_key": true, "expiration_date": "infinity"}, "Field 'name' missing"},
+			{map[string]any{"name": "", "create_key": true, "expiration_date": "infinity"}, "Field 'name' invalid"},
+			{map[string]any{"name": nil, "create_key": true, "expiration_date": "infinity"}, "Field 'name' invalid"},
+			{map[string]any{"name": "nodate", "create_key": true}, "Field 'expiration_date' missing"},
+			{map[string]any{"name": "nodate2", "public_key": testPublicKeyPEM(t)}, "Field 'expiration_date' missing"},
+			{map[string]any{"name": "emptydate", "create_key": true, "expiration_date": ""}, badDateMessage},
+			{map[string]any{"name": "numdate", "create_key": true, "expiration_date": 5}, "Field 'expiration_date' invalid"},
+			{map[string]any{"name": "nokey", "expiration_date": "infinity"}, createOrPubkeyMissing},
+			{map[string]any{"name": "falsekey", "create_key": false, "expiration_date": "infinity"}, createOrPubkeyMissing},
+			{map[string]any{"name": "both", "create_key": true, "public_key": testPublicKeyPEM(t), "expiration_date": "infinity"}, "You must specify either create_key or public_key, but not both"},
+			{map[string]any{"name": "strkey", "create_key": "yes", "expiration_date": "infinity"}, "Field 'create_key' invalid"},
+			{map[string]any{"name": "emptypub", "public_key": "", "expiration_date": "infinity"}, "Public Key must be a valid key."},
+			{map[string]any{"name": "nullpub", "public_key": nil, "expiration_date": "infinity"}, "Field 'public_key' invalid"},
+			{map[string]any{"name": "priv", "private_key": true, "expiration_date": "infinity"}, "Please use create_key: true instead of private_key: true"},
 		}
 		for _, c := range cases {
 			body, _ := json.Marshal(c.body)
@@ -531,6 +548,50 @@ func TestAddKeyRejectsInvalidFields(t *testing.T) {
 		if resp, out := do(t, "POST", srv.URL+owner+"/keys", string(good)); resp.StatusCode != 201 {
 			t.Errorf("valid key for %s = %d %s, want 201", owner, resp.StatusCode, out)
 		}
+		// A false create_key beside a public_key is the public_key alone.
+		good, _ = json.Marshal(map[string]any{"name": "pub-nocreate", "public_key": testPublicKeyPEM(t), "create_key": false, "expiration_date": "infinity"})
+		if resp, out := do(t, "POST", srv.URL+owner+"/keys", string(good)); resp.StatusCode != 201 || strings.Contains(out, "private_key") {
+			t.Errorf("public_key with create_key false for %s = %d %s, want 201 without private_key", owner, resp.StatusCode, out)
+		}
+	}
+}
+
+// createOrPubkeyMissing is erchef's answer for a key body with neither a
+// public_key nor a true create_key (create_or_pubkey_missing).
+const createOrPubkeyMissing = "You must either provide a valid value for 'public_key', or specify 'create_key': true"
+
+// On PUT every field is optional (chef_key:parse_binary_json(_, update)), but
+// the body must carry at least one of them, and the key fields are checked as
+// on POST: create_key and public_key are still exclusive, and an empty value
+// is a value, not an absent field.
+func TestPutKeyRequiresAFieldAndOneKeySource(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme/clients/web01"
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+	do(t, "POST", base+"/keys", `{"name":"key2","create_key":true,"expiration_date":"infinity"}`)
+	_, before := do(t, "GET", base+"/keys/key2", "")
+
+	pub, _ := json.Marshal(testPublicKeyPEM(t))
+	atLeastOne := `{"error":"At least one of 'name', 'expiration_date', or 'public_key' must be specified"}`
+	for _, c := range []struct{ body, want string }{
+		{`{}`, atLeastOne},
+		{`{"other":1}`, atLeastOne},
+		// private_key is not one of the fields the presence check counts.
+		{`{"private_key":true}`, atLeastOne},
+		{`{"create_key":true,"public_key":` + string(pub) + `}`, `{"error":["You must specify either create_key or public_key, but not both"]}`},
+		{`{"name":"key2","private_key":true}`, `{"error":["Please use create_key: true instead of private_key: true"]}`},
+		{`{"create_key":"yes"}`, `{"error":["Field 'create_key' invalid"]}`},
+		{`{"expiration_date":""}`, `{"error":["` + badDateMessage + `"]}`},
+		{`{"public_key":""}`, `{"error":["Public Key must be a valid key."]}`},
+		{`{"name":""}`, `{"error":["Field 'name' invalid"]}`},
+	} {
+		resp, out := do(t, "PUT", base+"/keys/key2", c.body)
+		if resp.StatusCode != 400 || strings.TrimSpace(out) != c.want {
+			t.Errorf("PUT keys/key2 %s = %d %s, want 400 %s", c.body, resp.StatusCode, out, c.want)
+		}
+	}
+	if _, after := do(t, "GET", base+"/keys/key2", ""); after != before {
+		t.Errorf("a refused PUT changed key2:\nbefore %s\nafter  %s", before, after)
 	}
 }
 
