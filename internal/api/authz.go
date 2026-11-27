@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 
 	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -188,6 +189,35 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// erchef checks "id", or else "groupname", against the name rule as on
+	// create (oc_chef_wm_named_group:auth_info), then renames the group to
+	// "groupname" (oc_chef_group:update_from_ejson). With both present, the
+	// name it renames to goes unchecked; here each one present is checked,
+	// so the destination always is. erchef refuses no disagreement between
+	// the two ("id" names nothing on update), and neither does this.
+	for _, field := range []string{"id", "groupname"} {
+		v, ok := obj[field]
+		if !ok || (field == "groupname" && v == nil) {
+			continue
+		}
+		if s, isString := v.(string); !isString || !groupNameRE.MatchString(s) {
+			writeError(w, http.StatusBadRequest, "Invalid group name.")
+			return
+		}
+	}
+	newName := name
+	if v, ok := obj["groupname"].(string); ok {
+		newName = v
+	}
+	// Deliberately unlike erchef, which refers to the org's default groups by
+	// authz id: here association, client registration, the org membership
+	// gate and the org's ACL policy find them by name, so a renamed default
+	// group would be replaced by a fresh, empty one of the old name while
+	// the renamed one kept its grants.
+	if newName != name && slices.Contains(defaultGroups, name) {
+		writeError(w, http.StatusBadRequest, "Cannot rename the default group '"+name+"'")
+		return
+	}
 	// Read-modify-write: a revocation landing between the read and the write
 	// would be undone (see groupmembers.go). The group is checked again under
 	// the lock, so a concurrent delete is not undone either.
@@ -219,6 +249,25 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if newName != name {
+		if _, taken, err := groupDocWithMembers(org, newName); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if taken {
+			writeGroupConflict(w)
+			return
+		}
+		err := a.renameGroup(r, org, name, newName, groupJSON(newName, "", users, clients, groups))
+		if errors.Is(err, store.ErrConflict) {
+			writeGroupConflict(w)
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRaw(w, renamedLocation(w, objectURL(r, r.PathValue("org"), "groups", newName)), raw)
+		return
+	}
 	// The document now records the whole membership, so the rows it absorbed,
 	// and those of a replaced kind, go.
 	if err := clearMembers(org, name); err != nil {
@@ -230,6 +279,13 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
+}
+
+// writeGroupConflict is erchef's 409 for a group update that renames onto a
+// taken name: oc_chef_wm_named_group:conflict_message, whose error is a string
+// rather than the usual list.
+func writeGroupConflict(w http.ResponseWriter) {
+	writeStringError(w, http.StatusConflict, "Group already exists")
 }
 
 // groupUpdateMembers returns the member kinds a group update replaces, each

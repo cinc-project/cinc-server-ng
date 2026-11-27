@@ -149,6 +149,15 @@ separate actors: a request authenticates as whichever one's key verifies, a
 grant to one never applies to the other, and a merged-form `PUT` naming a client
 that is also a member user is refused with `422` until the split form says which.
 ACLs stored by older versions are converted to this typed form at startup.
+A `PUT` whose body names a client, user or group other than its path renames
+it, answering `201` with a `Location` (`409` if the name is taken), as erchef
+does; an organization cannot be renamed. Unlike Chef Infra Server, the org's
+default groups and its `<org>-validator` client cannot be renamed either
+(`400`), since cinc-server-ng finds them by name. The renamed object keeps its ACL, its
+group memberships and every ACL entry naming it (and a user its keys, org
+memberships and invitations), and the old name keeps nothing, so an object
+later created under it starts fresh. As on Chef Infra Server, a renamed client
+loses its default key until one is added.
 
 ## Use as a binary
 
