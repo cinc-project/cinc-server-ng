@@ -99,7 +99,7 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight requests when stopping before cutting them off")
 	fs.Int64Var(&f.maxRequestSize, "max-request-size", server.DefaultMaxBodyBytes, "largest API request body, in bytes, accepted (413 above it, as opscode_erchef['max_request_size']); negative for no limit")
 	fs.Int64Var(&f.maxFileSize, "max-file-size", server.DefaultMaxFileStoreBytes, "largest cookbook file, in bytes, accepted at the file store (413 above it); negative for no limit")
-	fs.StringVar(&f.bootstrapUser, "bootstrap-user", "", "create this user at startup as the first console admin: a password user in server-admins and a member and admin of every --orgs org. Its password comes from --bootstrap-password-file or CINC_SERVER_NG_BOOTSTRAP_PASSWORD. If the user already exists (a restart on --storage sqlite), its password and profile are left unchanged and only its memberships are ensured")
+	fs.StringVar(&f.bootstrapUser, "bootstrap-user", "", "create this user at startup as the first console admin: a password user in server-admins and a member and admin of every --orgs org. Its password comes from --bootstrap-password-file or CINC_SERVER_NG_BOOTSTRAP_PASSWORD. If the user already exists (a restart on --storage sqlite), its password and profile are left unchanged and only its memberships are ensured, and only if it is the user the bootstrap created")
 	fs.StringVar(&f.bootstrapPasswordFile, "bootstrap-password-file", "", "file holding the --bootstrap-user password (one trailing newline is dropped); takes precedence over CINC_SERVER_NG_BOOTSTRAP_PASSWORD")
 	fs.StringVar(&f.bootstrapEmail, "bootstrap-email", "", "email address for --bootstrap-user (default \"<user>@localhost.localdomain\")")
 	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
@@ -235,7 +235,9 @@ func run(args []string, out io.Writer) error {
 	if f.externalURL != "" {
 		fmt.Fprintf(out, "  external url: %s\n", f.externalURL)
 	}
-	if f.bootstrapUser != "" {
+	if w := srv.BootstrapWarning(); w != "" {
+		fmt.Fprintf(out, "  WARNING: %s\n", w)
+	} else if f.bootstrapUser != "" {
 		fmt.Fprintf(out, "  bootstrap user: %s (server-admin, admin of %s)\n", f.bootstrapUser, f.orgsCSV)
 	}
 

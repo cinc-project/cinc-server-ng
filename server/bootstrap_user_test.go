@@ -153,3 +153,101 @@ func TestBootstrapUserPasswordIsHashed(t *testing.T) {
 		t.Errorf("stored password %q is not a hash", stored)
 	}
 }
+
+// assertNotAdmin fails if name is a server admin or in an acme admin group.
+func assertNotAdmin(t *testing.T, srv *Server, name string) {
+	t.Helper()
+	if admins := serverAdmins(t, srv); slices.Contains(admins, name) {
+		t.Errorf("server-admins = %v, want no %s", admins, name)
+	}
+	for _, g := range []string{"users", "admins"} {
+		if users := groupUsers(t, srv, "acme", g); slices.Contains(users, name) {
+			t.Errorf("acme %s group = %v, want no %s", g, users, name)
+		}
+	}
+}
+
+// Restarts re-grant the bootstrap user's memberships only to the user the
+// bootstrap created. Once that user is deleted or renamed away, anyone can
+// take the name (a user may rename itself), and must not become a server
+// admin at the next restart for it.
+func TestBootstrapUserNotRegrantedToSquatter(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		vacate  func(t *testing.T, srv *Server)
+		renamed string // where the bootstrap user went, if anywhere
+	}{
+		{"deleted", func(t *testing.T, srv *Server) {
+			expectStatus(t, "delete alice", signed(t, srv, "DELETE", srv.URL()+"/users/alice", ""), 200)
+		}, ""},
+		{"renamed", func(t *testing.T, srv *Server) {
+			expectStatus(t, "rename alice", signed(t, srv, "PUT", srv.URL()+"/users/alice",
+				validUserBody(t, `{"username":"alicia","email":"alice@example.test"}`)), 201)
+		}, "alicia"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := Options{
+				Orgs: []string{"acme"}, EnforceACL: true, Storage: "sqlite", DB: filepath.Join(t.TempDir(), "x.db"),
+				BootstrapUser: "alice", BootstrapPassword: "s3cret-pw",
+			}
+			srv := startServer(t, opts)
+			if w := srv.BootstrapWarning(); w != "" {
+				t.Errorf("first start BootstrapWarning = %q, want none", w)
+			}
+			tc.vacate(t, srv)
+			key := []byte(createUser(t, srv, `{"name":"mallory"}`))
+			expectStatus(t, "mallory takes alice's name", signedAs(t, "mallory", key, "PUT", srv.URL()+"/users/mallory",
+				validUserBody(t, `{"username":"alice","email":"mallory@example.test"}`)), 201)
+			assertNotAdmin(t, srv, "alice")
+			stopServer(t, srv)
+
+			srv = startServer(t, opts)
+			assertNotAdmin(t, srv, "alice")
+			if w := srv.BootstrapWarning(); !strings.Contains(w, `"alice"`) {
+				t.Errorf("BootstrapWarning = %q, want one naming alice", w)
+			}
+			if tc.renamed != "" && !slices.Contains(serverAdmins(t, srv), tc.renamed) {
+				t.Errorf("the renamed bootstrap user %s lost server-admins", tc.renamed)
+			}
+		})
+	}
+}
+
+// A store written by a version that kept no record of the bootstrap user:
+// an existing user of the name is adopted only if it is already a server
+// admin, which the earlier bootstrap made it, and is then recognized on
+// later restarts.
+func TestBootstrapUserUpgradedStore(t *testing.T) {
+	for _, admin := range []bool{true, false} {
+		t.Run(map[bool]string{true: "server admin", false: "not server admin"}[admin], func(t *testing.T) {
+			opts := Options{Orgs: []string{"acme"}, EnforceACL: true, Storage: "sqlite", DB: filepath.Join(t.TempDir(), "x.db")}
+			srv := startServer(t, opts)
+			createUser(t, srv, `{"name":"alice"}`)
+			if admin {
+				expectStatus(t, "alice server-admin", signed(t, srv, "PUT", srv.URL()+"/_cinc/server_admins/alice", ""), 201)
+			}
+			stopServer(t, srv)
+
+			opts.BootstrapUser, opts.BootstrapPassword = "alice", "s3cret-pw"
+			for range 2 {
+				srv = startServer(t, opts)
+				if admin {
+					if w := srv.BootstrapWarning(); w != "" {
+						t.Errorf("BootstrapWarning = %q, want none", w)
+					}
+					for _, g := range []string{"users", "admins"} {
+						if users := groupUsers(t, srv, "acme", g); !slices.Contains(users, "alice") {
+							t.Errorf("acme %s group = %v, want alice", g, users)
+						}
+					}
+				} else {
+					assertNotAdmin(t, srv, "alice")
+					if w := srv.BootstrapWarning(); !strings.Contains(w, `"alice"`) {
+						t.Errorf("BootstrapWarning = %q, want one naming alice", w)
+					}
+				}
+				stopServer(t, srv)
+			}
+		})
+	}
+}
