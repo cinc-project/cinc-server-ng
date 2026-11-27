@@ -89,12 +89,18 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				serverError(w, err)
 				return
 			}
-			if len(candidates) == 0 {
-				unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"' via the web UI. Ensure the user exists.")
+			// erchef's select_user_or_webui_key: web requests are user based,
+			// so of a same-named user and client the user is the actor
+			// (resolveAuth lists it first). erchef takes whichever requestor
+			// comes first, so a name only a client can sign with (no user, or
+			// a user with no unexpired key, which erchef's keys_by_name leaves
+			// out too) would run as the client. A user can rename itself onto
+			// a client's name and drop its keys, so that is refused here, with
+			// erchef's answer for a requestor it cannot find.
+			if len(candidates) == 0 || candidates[0].actor.IsClient {
+				unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"'. Ensure that your node_name and client key are correct.")
 				return
 			}
-			// erchef's select_user_or_webui_key: web requests are user based,
-			// so of a same-named user and client the user is the actor.
 			actor := candidates[0].actor
 			actor.ViaWebUI = true
 			r = r.WithContext(api.WithActor(r.Context(), actor))
