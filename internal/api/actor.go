@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
 	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
@@ -41,6 +42,7 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
+		dropCaseVariants(obj, keyField)
 		name, _ := obj["name"].(string)
 		if name == "" {
 			// users may use "username" as the identity field
@@ -274,6 +276,9 @@ func preservePrivilege(r *http.Request, org *store.Org, segment, name string, ob
 	if segment != "users" {
 		return nil
 	}
+	// A member named like the flag in another case is not the flag; drop it,
+	// so nothing that reads the record loosely can take it for one.
+	dropCaseVariants(obj, adminField)
 	actor, ok := actorFromContext(r.Context())
 	if !ok || actor.IsGlobalAdmin {
 		return nil
@@ -357,11 +362,30 @@ func storedField(org *store.Org, segment, name, field string) (any, error) {
 	if !ok {
 		return nil, nil
 	}
-	var prev map[string]any
-	if json.Unmarshal(raw, &prev) != nil {
+	// Exact names, first member wins: the reading the authentication layer
+	// gives the same record (server/auth.go).
+	prev, err := chefjson.DecodeObject(raw)
+	if err != nil {
 		return nil, nil
 	}
 	return prev[field], nil
+}
+
+// keyField is the member of an actor record that holds its default public key,
+// which the authentication layer reads back to verify the actor's requests.
+const keyField = "public_key"
+
+// dropCaseVariants removes every member of obj whose name equals field apart
+// from case. The record's own field is read by its exact name, as erchef reads
+// it, so a variant is inert; it is dropped from request bodies anyway, so a
+// security field can never be stored under a name a case-insensitive reader
+// would take for it.
+func dropCaseVariants(obj map[string]any, field string) {
+	for k := range obj {
+		if k != field && strings.EqualFold(k, field) {
+			delete(obj, k)
+		}
+	}
 }
 
 func (a *API) scopedList(segment string, scope scopeFunc) http.HandlerFunc {
@@ -484,6 +508,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
+		dropCaseVariants(obj, keyField)
 		if requestAPIVersion(r) >= 1 {
 			if msg := updateKeyFieldsError(obj); msg != "" {
 				writeError(w, http.StatusBadRequest, msg)

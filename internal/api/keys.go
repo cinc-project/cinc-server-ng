@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/auth"
+	"github.com/cinc-project/cinc-server-ng/internal/chefjson"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -65,11 +66,21 @@ func SigningKeys(org *store.Org, segment, name, actorPublicKey string, now time.
 		if keyName == defaultKeyName {
 			storedDefault = true
 		}
-		var k storedKey
-		if json.Unmarshal(raw, &k) != nil || k.PublicKey == "" || keyExpired(k.ExpirationDate, now) {
+		// Exact names, as parseActorRecord reads the actor record: a
+		// struct-tag decode would match them in any case.
+		row, err := chefjson.DecodeObject(raw)
+		if err != nil {
 			return true
 		}
-		keys = append(keys, k.PublicKey)
+		pub, _ := row["public_key"].(string)
+		expiration, isString := row["expiration_date"].(string)
+		if _, present := row["expiration_date"]; present && !isString {
+			return true
+		}
+		if pub == "" || keyExpired(expiration, now) {
+			return true
+		}
+		keys = append(keys, pub)
 		return true
 	})
 	if err != nil {

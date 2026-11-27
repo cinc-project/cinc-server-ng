@@ -179,6 +179,7 @@ func dropServerAdmin(global *store.Org, name string) error {
 // update. Creating users is no longer the superuser's alone: server-admins may,
 // and a member must not be able to create a superuser.
 func dropRequestedPrivilege(r *http.Request, obj map[string]any) {
+	dropCaseVariants(obj, adminField)
 	if actor, ok := actorFromContext(r.Context()); ok && !actor.IsGlobalAdmin {
 		delete(obj, adminField)
 	}
