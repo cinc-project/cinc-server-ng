@@ -173,7 +173,7 @@ func (a *API) getObject(segment string) http.HandlerFunc {
 			return
 		}
 		if !ok {
-			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
+			writeError(w, http.StatusNotFound, notFoundMessage(segment, name))
 			return
 		}
 		writeRaw(w, http.StatusOK, raw)
@@ -187,7 +187,7 @@ func (a *API) putObject(segment string) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		if !exists(w, r, org, segment, name, "Cannot find "+segment+" "+name) {
+		if !exists(w, r, org, segment, name, notFoundMessage(segment, name)) {
 			return
 		}
 		raw, _, err := decodeNamedBody(r)
@@ -243,7 +243,7 @@ func (a *API) deleteObject(segment string) http.HandlerFunc {
 			return
 		}
 		if !ok {
-			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
+			writeError(w, http.StatusNotFound, notFoundMessage(segment, name))
 			return
 		}
 		if err := deleteACL(org, segment, name); err != nil {

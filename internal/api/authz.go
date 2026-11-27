@@ -95,7 +95,7 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
+		writeError(w, http.StatusNotFound, notFoundMessage("groups", name))
 		return
 	}
 	writeRaw(w, http.StatusOK, doc)
@@ -176,7 +176,7 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	if !exists(w, r, org, "groups", name, "Cannot find groups "+name) {
+	if !exists(w, r, org, "groups", name, notFoundMessage("groups", name)) {
 		return
 	}
 	raw, err := chefjson.Normalize(r.Body)
@@ -223,7 +223,7 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	// the lock, so a concurrent delete is not undone either.
 	a.membership.Lock()
 	defer a.membership.Unlock()
-	if !exists(w, r, org, "groups", name, "Cannot find groups "+name) {
+	if !exists(w, r, org, "groups", name, notFoundMessage("groups", name)) {
 		return
 	}
 	users, clients, groups, err := groupMembership(org, name)
@@ -328,7 +328,7 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	} else if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
+		writeError(w, http.StatusNotFound, notFoundMessage("groups", name))
 		return
 	}
 	// References go before the group itself, so a failure part-way leaves a
@@ -351,7 +351,7 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find groups "+name)
+		writeError(w, http.StatusNotFound, notFoundMessage("groups", name))
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)

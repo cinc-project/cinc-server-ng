@@ -466,7 +466,7 @@ func (a *API) scopedGet(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		if !ok {
-			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+r.PathValue("name"))
+			writeError(w, http.StatusNotFound, notFoundMessage(segment, r.PathValue("name")))
 			return
 		}
 		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), actorView(r, raw)))
@@ -500,7 +500,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		if !exists(w, r, org, segment, name, "Cannot find "+segment+" "+name) {
+		if !exists(w, r, org, segment, name, notFoundMessage(segment, name)) {
 			return
 		}
 		var obj map[string]any
@@ -795,7 +795,7 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		} else if !ok {
-			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
+			writeError(w, http.StatusNotFound, notFoundMessage(segment, name))
 			return
 		}
 		// Everything that names the actor goes before the actor itself. ACLs,
@@ -836,7 +836,7 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		if !ok {
-			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
+			writeError(w, http.StatusNotFound, notFoundMessage(segment, name))
 			return
 		}
 		writeRaw(w, http.StatusOK, enveloped(segment, orgSegment(r), actorView(r, raw)))

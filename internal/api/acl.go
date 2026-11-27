@@ -301,7 +301,7 @@ func aclObjectFound(w http.ResponseWriter, org *store.Org, typ, name string) boo
 		return false
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find "+typ+" "+name)
+		writeError(w, http.StatusNotFound, aclNotFoundMessage(typ, name))
 		return false
 	}
 	return true
