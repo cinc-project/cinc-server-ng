@@ -77,8 +77,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// the webui key and run as that user. This mirrors Chef Infra Server's
 		// webui-key mechanism, which a console uses to honor each user's ACLs.
 		if strings.EqualFold(r.Header.Get("X-Ops-Request-Source"), "web") {
-			// The actor is resolved before the body is read, as on the signed
-			// path below: a name that runs as no one is refused unread.
+			// The actor is resolved before the body is read: a name that runs
+			// as no one is refused unread. (The signed path below reads the
+			// body for an unknown name too; see authFailed.)
 			candidates, err := s.resolveAuth(r.URL.EscapedPath(), parsed.UserID)
 			if err != nil {
 				serverError(w, err)
@@ -93,7 +94,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			// a client's name and drop its keys, so that is refused here, with
 			// erchef's answer for a requestor it cannot find.
 			if len(candidates) == 0 || candidates[0].actor.IsClient {
-				unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"'. Ensure that your node_name and client key are correct.")
+				s.authFailed(w, r, parsed.UserID, "web UI request names no user that can sign")
 				return
 			}
 			body, ok := readSignedBody(w, r)
@@ -101,7 +102,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				return
 			}
 			if err := auth.Verify(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"), s.webuiPub); err != nil {
-				unauthorized(w, "Invalid webui signature for request source 'web'")
+				s.authFailed(w, r, parsed.UserID, "web UI signature did not verify against the webui key")
 				return
 			}
 			actor := candidates[0].actor
@@ -121,14 +122,18 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			serverError(w, err)
 			return
 		}
-		if len(candidates) == 0 {
-			unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"'. Ensure that your node_name and client key are correct.")
-			return
-		}
-		// The actor is known, so the body is worth reading: its hash is part of
-		// the signature.
+		// The body is read, and a signature checked, whether or not anyone
+		// answers to the name: see authFailed for why.
 		body, ok := readSignedBody(w, r)
 		if !ok {
+			return
+		}
+		if len(candidates) == 0 {
+			// A stand-in verification, so that an unknown name costs about
+			// what a known one with a bad signature does. Its result is
+			// ignored: nobody answers to the name, whatever key signed.
+			verifiesWithAny(r, body, parsed, []*rsa.PublicKey{s.webuiPub})
+			s.authFailed(w, r, parsed.UserID, "no such actor, or it has no unexpired key")
 			return
 		}
 		var actor api.Actor
@@ -140,7 +145,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			}
 		}
 		if !verified {
-			unauthorized(w, "Invalid signature for user or client '"+parsed.UserID+"'")
+			s.authFailed(w, r, parsed.UserID, "signature did not verify against any of the actor's keys")
 			return
 		}
 
@@ -297,6 +302,27 @@ func (s *Server) checkSkew(timestamp string) error {
 type skewError struct{ msg string }
 
 func (e skewError) Error() string { return e.msg }
+
+// authFailed refuses a request whose signature could not be tied to an actor.
+//
+// Every such failure answers with one message, erchef's for a requestor it
+// cannot find, whether the name is unknown, names an actor whose keys have all
+// expired, names a client on a web-UI request, or names a real actor whose key
+// did not verify. erchef says "Invalid signature for user or client" in the
+// last case, which tells anyone who can reach the server, without any
+// credential, which user and client names exist. cinc-server-ng deliberately
+// differs from erchef here (differential/known.go). The message echoes only
+// the name the caller sent; the specific reason goes to the server's log.
+//
+// Timing: an unknown name still has its body read and one signature checked
+// (against the webui key, standing in), so it does about the work of a known
+// name with one key. What remains is small: the store reads differ, and a
+// known actor with several keys has each of them tried.
+func (s *Server) authFailed(w http.ResponseWriter, r *http.Request, name, reason string) {
+	s.opts.Logger.Info("authentication failed",
+		"actor", name, "method", r.Method, "path", r.URL.Path, "reason", reason)
+	unauthorized(w, "Failed to authenticate as '"+name+"'. Ensure that your node_name and client key are correct.")
+}
 
 func unauthorized(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")

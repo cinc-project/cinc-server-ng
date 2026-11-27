@@ -65,14 +65,14 @@ func TestRequestRefusedFromHeadersIsNotRead(t *testing.T) {
 	srv := startServer(t, Options{Orgs: []string{"acme"}})
 	const url = "/organizations/acme/nodes"
 
+	// An unknown actor is not here: its body is read (up to the cap) and a
+	// signature checked, as for a known actor with a bad signature, so the
+	// two cannot be told apart by how the server answers (authFailed). That
+	// costs nothing an attacker could not already cause by naming the
+	// bootstrap admin, which always exists.
 	cases := map[string]func() *http.Request{
 		"no signature headers": func() *http.Request {
 			return httptest.NewRequest("POST", url, nil)
-		},
-		"unknown actor": func() *http.Request {
-			req := signedEmpty(t, srv, "POST", url)
-			req.Header.Set("X-Ops-Userid", "nobody")
-			return req
 		},
 		"clock skew": func() *http.Request {
 			req := httptest.NewRequest("POST", url, nil)
