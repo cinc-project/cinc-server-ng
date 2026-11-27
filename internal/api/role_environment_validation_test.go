@@ -48,6 +48,9 @@ func TestRoleValidation(t *testing.T) {
 		{"run list bad version", `{"name":"r","run_list":["recipe[foo@1]"]}`, "Field 'run_list' is not a valid run list"},
 		{"run list role with cookbook", `{"name":"r","run_list":["role[foo::bar]"]}`, "Field 'run_list' is not a valid run list"},
 		{"run list not an array", `{"name":"r","run_list":"recipe[foo]"}`, "Field 'run_list' is not a valid run list"},
+		{"run list null", `{"name":"r","run_list":null}`, "Field 'run_list' is not a valid run list"},
+		{"env_run_lists null", `{"name":"r","env_run_lists":null}`, "Field 'env_run_lists' contains invalid run lists"},
+		{"env_run_lists value null", `{"name":"r","env_run_lists":{"prod":null}}`, "Field 'env_run_lists' contains invalid run lists"},
 		{"env_run_lists not an object", `{"name":"r","env_run_lists":"This is clearly wrong"}`, "Field 'env_run_lists' contains invalid run lists"},
 		{"env_run_lists bad item", `{"name":"r","env_run_lists":{"preprod":["recipe[blah]"],"prod":[123]}}`, "Field 'env_run_lists' contains invalid run lists"},
 		{"env_run_lists not a list", `{"name":"r","env_run_lists":{"prod":"recipe[blah]"}}`, "Field 'env_run_lists' contains invalid run lists"},
@@ -81,6 +84,61 @@ func TestRoleValidation(t *testing.T) {
 				t.Errorf("role after a refused update = %s, want %s", got, orig)
 			}
 		})
+	}
+}
+
+// TestNodeRunListValidation holds node create and update to chef_node's
+// run_list constraint (chef_json_validator:run_list_spec): an array of valid
+// run list items. null is not defaulted to [] (insert_autofill_fields only
+// fills a missing key), so it is refused like any other non-array.
+func TestNodeRunListValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"null", `{"name":"n","run_list":null}`},
+		{"not an array", `{"name":"n","run_list":"recipe[foo]"}`},
+		{"object", `{"name":"n","run_list":{}}`},
+		{"number item", `{"name":"n","run_list":[123]}`},
+		{"null item", `{"name":"n","run_list":[null]}`},
+		{"bad item", `{"name":"n","run_list":["not a run list item!"]}`},
+		{"recipe[", `{"name":"n","run_list":["recipe["]}`},
+		{"role with cookbook", `{"name":"n","run_list":["role[foo::bar]"]}`},
+	}
+	const want = "Field 'run_list' is not a valid run list"
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv, _ := newTestAPI(t)
+			base := srv.URL + "/organizations/acme"
+			resp, body := do(t, "POST", base+"/nodes", c.body)
+			wantError(t, "POST /nodes", resp, body, want)
+			if resp, body := do(t, "GET", base+"/nodes", ""); body != "{}" {
+				t.Errorf("nodes after a refused create = %d %s, want none", resp.StatusCode, body)
+			}
+		})
+		t.Run("update "+c.name, func(t *testing.T) {
+			srv, _ := newTestAPI(t)
+			base := srv.URL + "/organizations/acme"
+			if resp, body := do(t, "POST", base+"/nodes", `{"name":"n","run_list":["recipe[web]"]}`); resp.StatusCode != http.StatusCreated {
+				t.Fatalf("create = %d: %s", resp.StatusCode, body)
+			}
+			_, before := do(t, "GET", base+"/nodes/n", "")
+			resp, body := do(t, "PUT", base+"/nodes/n", c.body)
+			wantError(t, "PUT /nodes/n", resp, body, want)
+			if _, got := do(t, "GET", base+"/nodes/n", ""); got != before {
+				t.Errorf("node after a refused update = %s, want %s", got, before)
+			}
+		})
+	}
+
+	// A missing run_list is still accepted (erchef fills it with []).
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	if resp, body := do(t, "POST", base+"/nodes", `{"name":"bare"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create without a run_list = %d: %s", resp.StatusCode, body)
+	}
+	if resp, body := do(t, "PUT", base+"/nodes/bare", `{"name":"bare","run_list":["web","role[db]"]}`); resp.StatusCode != http.StatusOK {
+		t.Errorf("update with a valid run_list = %d: %s", resp.StatusCode, body)
 	}
 }
 
