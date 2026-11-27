@@ -274,6 +274,9 @@ type Server struct {
 	api           *api.API
 	url           string
 	certs         *certLoader // nil unless serving TLS
+	// bootstrapWarning says why the bootstrap user was not granted its
+	// memberships at startup, or is empty.
+	bootstrapWarning string
 }
 
 // upgradeOrgACLs brings every org in st to erchef's org ACL policy (see
@@ -583,11 +586,15 @@ func New(opts Options) (*Server, error) {
 	}
 
 	// After the orgs (it joins each) and any state load (which may already
-	// define the user).
+	// define the user). A store that was fresh this startup holds only what
+	// the operator loaded into it, so a user of the name there is trusted.
+	var bootstrapWarning string
 	if bootstrapUser != nil {
-		if _, err := bootstrapUser.Apply(st, opts.Orgs); err != nil {
+		res, err := bootstrapUser.Apply(st, opts.Orgs, adminFresh)
+		if err != nil {
 			return nil, err
 		}
+		bootstrapWarning = res.Refused
 	}
 
 	// The cookbook file store cannot use Mixlib signing (clients transfer file
@@ -625,6 +632,8 @@ func New(opts Options) (*Server, error) {
 		webuiPub:      webuiPub,
 		fileStoreKey:  fileStoreKey,
 		certs:         certs,
+
+		bootstrapWarning: bootstrapWarning,
 	}
 	apiInstance := api.New(st,
 		api.WithACLEnforcement(opts.EnforceACL),
@@ -748,6 +757,11 @@ func (s *Server) AdminKey() []byte { return s.adminKey }
 
 // AdminName returns the bootstrap admin user name.
 func (s *Server) AdminName() string { return s.opts.AdminName }
+
+// BootstrapWarning says why the configured bootstrap user (BootstrapUser) was
+// not made an admin at startup: a user of that name exists that the bootstrap
+// did not create. It is empty when the user was created or granted as usual.
+func (s *Server) BootstrapWarning() string { return s.bootstrapWarning }
 
 // ValidatorKey returns the PEM-encoded private key for an organization's
 // "<org>-validator" client, or nil if the org was not created at bootstrap.

@@ -206,7 +206,9 @@ cinc-server-ng --storage sqlite --db /data/cinc.db --orgs myorg \
 database the user is left as it is (its password and profile may have been
 changed since), and only its memberships are ensured, including in any org newly
 added to `--orgs`. `--init` applies it too, so a pre-baked database can ship with
-its console admin.
+its console admin. The memberships go only to the user the bootstrap created: if
+that user was deleted or renamed and someone else has since taken the name, the
+server starts without granting them anything and prints a warning.
 
 Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
 `roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`,

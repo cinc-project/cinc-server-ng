@@ -70,7 +70,7 @@ Almost every test runs on the memory backend. These differ under `--storage sqli
 
 - **`Range` slice identity.** The memory backend passes the stored slice; SQLite scans a fresh slice per row, per call. Anything caching on pointer identity silently never hits.
 - **`Range` ordering.** SQLite is `ORDER BY key`; the memory backend is map iteration order. Sort if you depend on order.
-- **`Tx` isolation.** SQLite is a real transaction; the memory backend snapshots and restores whole maps on rollback, and is not isolated against concurrent writers.
+- **`Tx` isolation.** SQLite is a real transaction that holds other writers back until it ends. The memory backend buffers a transaction's writes in an overlay (`memtx.go`) and applies them under the lock at commit, so rollback discards only its own writes; but other writers keep going while it is open, its reads see their commits (no snapshot), and the commit fails with `ErrConflict` if another writer changed (or created) an object the transaction writes after it read it. A caller that reads, rewrites and commits must expect that `ErrConflict` and may retry (`renameTx`).
 - **Blob and object bytes are copies** on both, but only SQLite pays a real read per `Get` — read amplification shows up in `store.Counts()`.
 
 When a change touches a store read path, ask what it does on both, and reach for `sqlite.Open(t.TempDir()+"/x.db")` in the test if the answer differs.

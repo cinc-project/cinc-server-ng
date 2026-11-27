@@ -1,7 +1,6 @@
 package store
 
 import (
-	"maps"
 	"sort"
 	"sync"
 )
@@ -57,17 +56,23 @@ func (m *memoryBackend) view(org, coll, key string) ([]byte, bool, error) {
 // set stores a defensive copy of val and stamps its metadata: an existing key
 // keeps its creation time. Caller holds the write lock.
 func (m *memoryBackend) set(org, coll, key string, val []byte, st Stamp) {
+	md := Meta{CreatedAt: st.At, UpdatedAt: st.At, UpdatedBy: st.By}
+	if _, existed := m.data[org][coll][key]; existed {
+		md.CreatedAt = m.meta[org][coll][key].CreatedAt
+	}
+	m.store(org, coll, key, clone(val), md)
+}
+
+// store keeps val, which the caller hands over, as org/coll/key with metadata
+// md. Caller holds the write lock.
+func (m *memoryBackend) store(org, coll, key string, val []byte, md Meta) {
 	if m.data[org] == nil {
 		m.data[org] = map[string]map[string][]byte{}
 	}
 	if m.data[org][coll] == nil {
 		m.data[org][coll] = map[string][]byte{}
 	}
-	md := Meta{CreatedAt: st.At, UpdatedAt: st.At, UpdatedBy: st.By}
-	if _, existed := m.data[org][coll][key]; existed {
-		md.CreatedAt = m.meta[org][coll][key].CreatedAt
-	}
-	m.data[org][coll][key] = clone(val)
+	m.data[org][coll][key] = val
 	m.putMeta(org, coll, key, md)
 }
 
@@ -239,47 +244,15 @@ func (m *memoryBackend) HasOrg(name string) (bool, error) {
 	return m.orgs[name], nil
 }
 
-// Tx runs fn against this backend, taking a snapshot first and restoring it if fn
-// returns an error, so the transaction's writes are discarded on rollback and kept
-// on commit. The snapshot shares the immutable value slices (set always writes a
-// fresh slice), so it is cheap. Rollback is not isolated against other goroutines
-// writing concurrently during the transaction — fine for the bootstrap use it
-// serves (org create/delete); the SQLite backend provides true isolation.
+// Tx runs fn against a transaction over this backend (see memTx): fn's writes
+// land together if it returns nil, and are discarded if it returns an error,
+// leaving everything other writers did meanwhile in place.
 func (m *memoryBackend) Tx(fn func(tx Backend) error) error {
-	m.mu.Lock()
-	snapData := cloneOrgData(m.data)
-	snapMeta := cloneOrgData(m.meta)
-	snapBlobs := cloneBlobData(m.blobs)
-	snapOrgs := maps.Clone(m.orgs)
-	m.mu.Unlock()
-
-	if err := fn(m); err != nil {
-		m.mu.Lock()
-		m.data, m.meta, m.blobs, m.orgs = snapData, snapMeta, snapBlobs, snapOrgs
-		m.mu.Unlock()
+	tx := newMemTx(m)
+	if err := fn(tx); err != nil {
 		return err
 	}
-	return nil
-}
-
-func cloneOrgData[V any](src map[string]map[string]map[string]V) map[string]map[string]map[string]V {
-	dst := make(map[string]map[string]map[string]V, len(src))
-	for org, colls := range src {
-		dc := make(map[string]map[string]V, len(colls))
-		for coll, keys := range colls {
-			dc[coll] = maps.Clone(keys) // value slices are immutable; safe to share
-		}
-		dst[org] = dc
-	}
-	return dst
-}
-
-func cloneBlobData(src map[string]map[string][]byte) map[string]map[string][]byte {
-	dst := make(map[string]map[string][]byte, len(src))
-	for org, blobs := range src {
-		dst[org] = maps.Clone(blobs)
-	}
-	return dst
+	return tx.commit()
 }
 
 func (m *memoryBackend) Close() error { return nil }

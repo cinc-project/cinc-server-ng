@@ -2,10 +2,12 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -482,4 +484,65 @@ func TestRenameRefusesNamedByCode(t *testing.T) {
 	expectStatus(t, "validator still there", signed(t, srv, "GET", base+"/clients/acme-validator", ""), 200)
 	wantAuth(t, "validator still registers", statusOf(t, signedAs(t, "acme-validator", srv.ValidatorKey("acme"), "POST", base+"/clients",
 		`{"name":"web09","create_key":true}`)), 201)
+}
+
+// Racing renames onto one name: exactly one wins, the rest are 409, and the
+// losers' failed moves take nothing else with them. A failed move once rolled
+// the memory store back to a snapshot taken before it began, discarding every
+// write any other request had committed meanwhile.
+func TestRenameRaceKeepsOtherWrites(t *testing.T) {
+	renameBackends(t, func(t *testing.T, opts Options) {
+		srv := startServer(t, opts)
+		base := srv.URL() + "/organizations/acme"
+		const renamers, nodes = 8, 40
+		var reqs []*http.Request
+		for i := range renamers {
+			name := fmt.Sprintf("u%d", i)
+			key := []byte(createUser(t, srv, `{"name":"`+name+`"}`))
+			reqs = append(reqs, signedAs(t, name, key, "PUT", srv.URL()+"/users/"+name,
+				validUserBody(t, `{"username":"taken","email":"`+name+`@example.test"}`)))
+		}
+		var nodeReqs []*http.Request
+		for i := range nodes {
+			nodeReqs = append(nodeReqs, signed(t, srv, "POST", base+"/nodes", fmt.Sprintf(`{"name":"n%d"}`, i)))
+		}
+
+		codes := make([]int, renamers+nodes)
+		var wg sync.WaitGroup
+		for i, req := range append(reqs, nodeReqs...) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				codes[i] = resp.StatusCode
+			}()
+		}
+		wg.Wait()
+
+		won := 0
+		for i, code := range codes[:renamers] {
+			switch code {
+			case http.StatusCreated:
+				won++
+			case http.StatusConflict:
+			default:
+				t.Errorf("rename u%d = %d, want 201 or 409", i, code)
+			}
+		}
+		if won != 1 {
+			t.Errorf("%d renames won, want exactly 1: %v", won, codes[:renamers])
+		}
+		for i, code := range codes[renamers:] {
+			if code != http.StatusCreated {
+				t.Errorf("create n%d = %d, want 201", i, code)
+				continue
+			}
+			expectStatus(t, fmt.Sprintf("GET n%d", i), signed(t, srv, "GET", fmt.Sprintf("%s/nodes/n%d", base, i), ""), 200)
+		}
+	})
 }

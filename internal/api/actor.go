@@ -653,12 +653,19 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			// The move rewrites group membership, so it is ordered against
 			// revocations like any membership write (see groupmembers.go).
 			a.membership.Lock()
-			var err error
-			if segment == "users" {
+			// Recheck under the lock: a racing rename onto the same name
+			// passed the check above too, and the loser should be refused
+			// here rather than by a failed transaction.
+			_, taken, err := org.Get(segment, newName)
+			switch {
+			case err != nil:
+			case taken:
+				err = store.ErrConflict
+			case segment == "users":
 				// The password is stored under the new name, in the move.
 				raw = mustEncode(withoutPassword(obj))
 				err = a.renameUser(r, name, newName, raw, obj)
-			} else {
+			default:
 				raw = mustEncode(obj)
 				err = a.renameClient(r, org, name, newName, raw)
 			}
