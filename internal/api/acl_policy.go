@@ -176,14 +176,20 @@ func UpgradeOrgACLs(org *store.Org) error {
 // permission on each client it registered, which let anyone with the validator
 // key add a key to those clients; erchef creates them as the authz superuser
 // and the validator holds nothing on them. A validator is a client flagged
-// validator, as in isValidatorClient. A validator's own ACL keeps it, and ACLs
+// validator or the org's validator by name, as in isValidatorClient, so the
+// org's validator is taken off even if its flag was cleared. A validator's own ACL keeps it, and ACLs
 // of other object types are left alone. It is idempotent, and on a store with
 // nothing to convert it reads the clients and acls collections once and writes
 // nothing. It must run after UpgradeACLActors, which types the clients lists
 // it edits.
 func UpgradeValidatorClientACLs(org *store.Org) error {
 	var validators []string
+	orgValidator := org.Name() + "-validator"
 	if err := org.Range("clients", func(key string, raw []byte) bool {
+		if key == orgValidator {
+			validators = append(validators, key)
+			return true
+		}
 		if !bytes.Contains(raw, []byte(`"validator"`)) {
 			return true
 		}

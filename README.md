@@ -95,7 +95,9 @@ of any kind (node, role, environment, client, data bag, cookbook, cookbook
 artifact, policy, policy group or group) starts from its container's ACL (so
 narrowing a container narrows what is created in it afterwards), its creator
 is granted full control of it (except a validator, which holds nothing on the
-clients it registers and cannot create another validator), a new container
+clients it registers and cannot create another validator; unlike Chef Infra
+Server, only an org admin or the superuser may change a client's `validator`
+flag, and `<org>-validator` counts as a validator whatever its flag), a new container
 holds only its creator, a new group starts with no members (they are added
 with a `PUT`), a registered client holds its own record and keys, joins the
 org's `clients` group and can create and manage its own node, and the
