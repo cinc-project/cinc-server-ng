@@ -243,6 +243,18 @@ func (a *API) deletePolicyRevision(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// A policy exists only while it has revisions; with its last one gone, its
+	// ACL goes too, or the next policy created under the name would inherit it
+	// (as deleteVersionedACL does for a cookbook's last version).
+	if revs, err := org.Keys(policyRevColl(name)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if len(revs) == 0 {
+		if err := deleteACL(org, "policies", name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	writeRaw(w, http.StatusOK, raw)
 }
 

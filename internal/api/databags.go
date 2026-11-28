@@ -73,6 +73,18 @@ func (a *API) createDataBag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Field 'name' invalid")
 		return
 	}
+	// Item rows are keyed by the bag's name alone. One written while an
+	// earlier bag of this name was being deleted would otherwise appear in
+	// the new bag, so any left over goes before the bag exists.
+	if _, ok, err := org.Get(dataBagsColl, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if !ok {
+		if err := deleteDataBagItems(org, name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	if err := org.Create(dataBagsColl, name, mustEncode(map[string]any{"name": name})); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Data bag already exists")
 		return
@@ -93,6 +105,27 @@ func (a *API) deleteDataBag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bag := r.PathValue("bag")
+	if _, ok, err := org.Get(dataBagsColl, bag); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, notFoundMessage(dataBagsColl, bag))
+		return
+	}
+	// Everything that names the bag goes before the bag itself, as for actors
+	// and groups: items and the ACL are keyed by the bag's name alone, and
+	// while the record stands the name cannot be created again over them. A
+	// failure part-way leaves a bag that still exists, whose delete can simply
+	// be retried.
+	if err := deleteDataBagItems(org, bag); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Items share the bag's ACL, so the bag's is the only one to drop.
+	if err := deleteACL(org, "data", bag); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	raw, ok, err := org.Delete(dataBagsColl, bag)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -100,24 +133,6 @@ func (a *API) deleteDataBag(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		writeError(w, http.StatusNotFound, notFoundMessage(dataBagsColl, bag))
-		return
-	}
-	// Remove the bag's items too.
-	items := dataBagItemsColl(bag)
-	ids, err := org.Keys(items)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	for _, id := range ids {
-		if _, _, err := org.Delete(items, id); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	// Items share the bag's ACL, so the bag's is the only one to drop.
-	if err := deleteACL(org, "data", bag); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	var doc map[string]any
@@ -128,6 +143,21 @@ func (a *API) deleteDataBag(w http.ResponseWriter, r *http.Request) {
 	doc["chef_type"] = chefTypeDataBag
 	doc["json_class"] = jsonClassDataBag
 	writeJSON(w, http.StatusOK, doc)
+}
+
+// deleteDataBagItems removes every item row stored under a bag's name.
+func deleteDataBagItems(org *store.Org, bag string) error {
+	items := dataBagItemsColl(bag)
+	ids, err := org.Keys(items)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, _, err := org.Delete(items, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // bagExists reports whether the named bag exists, writing a 404 carrying msg
