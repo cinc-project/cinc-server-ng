@@ -115,7 +115,17 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		if pub != "" {
 			obj["public_key"] = pub
 		} else if !v1 || createKey {
-			key, err := auth.GenerateKey()
+			// Generating the pair is the expensive part, so a name already
+			// taken is refused first, with the answer the create would give.
+			// The create checks again: this only spares the work.
+			if _, exists, err := org.View(segment, name); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			} else if exists {
+				writeError(w, http.StatusConflict, "Object already exists")
+				return
+			}
+			key, err := a.newKey(r.Context())
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "key generation failed")
 				return
@@ -633,7 +643,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		pub := bodyPublicKey(obj)
 		var privateKey string
 		if regenerate {
-			key, err := a.generateKey()
+			key, err := a.newKey(r.Context())
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "key generation failed")
 				return

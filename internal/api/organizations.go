@@ -171,7 +171,7 @@ func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key, err := auth.GenerateKey()
+	key, err := a.newKey(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
