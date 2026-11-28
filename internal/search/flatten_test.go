@@ -3,6 +3,8 @@ package search
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -110,6 +112,55 @@ func TestFlattenIndexesNumberLiterals(t *testing.T) {
 	for key, want := range map[string]string{"one": "1.0", "big": "12345678901234567890", "tiny": "0.000001"} {
 		if got := fields[key]; !slices.Equal(got, []string{want}) {
 			t.Errorf("fields[%q] = %v, want [%s]", key, got, want)
+		}
+	}
+}
+
+// deepDoc builds {"a":{"a":...{"l0":"v","l1":"v",...}}} nested depth levels
+// deep with the given number of leaves at the bottom.
+func deepDoc(depth, leaves int) map[string]any {
+	bottom := map[string]any{}
+	for i := range leaves {
+		bottom["l"+strconv.Itoa(i)] = "v"
+	}
+	doc := bottom
+	for range depth {
+		doc = map[string]any{"a": doc}
+	}
+	return map[string]any{"name": "deep", "automatic": doc}
+}
+
+// TestFlattenBoundsDeepDocuments pins the fix for a node body nested
+// thousands of levels deep: every suffix of every leaf's path would cost
+// leaves x depth^2 bytes, so past the per-document budget the document is
+// indexed under each leaf's own key only.
+func TestFlattenBoundsDeepDocuments(t *testing.T) {
+	fields := Flatten(deepDoc(5000, 2000))
+
+	var keyBytes, entries int
+	for k, v := range fields {
+		keyBytes += len(k)
+		entries += len(v)
+	}
+	if keyBytes > maxFlattenBytes || entries > 10000 {
+		t.Fatalf("deep document produced %d key bytes and %d entries", keyBytes, entries)
+	}
+	if !slices.Contains(fields["name"], "deep") {
+		t.Errorf("name not indexed: %v", fields["name"])
+	}
+	if !slices.Contains(fields["l7"], "v") {
+		t.Errorf("leaf key not indexed: %v", fields["l7"])
+	}
+}
+
+// TestFlattenKeepsSuffixesUnderBudget pins that an ordinary deep-ish document
+// still gets every suffix of every path.
+func TestFlattenKeepsSuffixesUnderBudget(t *testing.T) {
+	fields := Flatten(deepDoc(40, 50))
+	full := strings.Repeat("a_", 40) + "l3"
+	for _, k := range []string{full, "a_a_l3", "l3", "automatic_" + full} {
+		if !slices.Contains(fields[k], "v") {
+			t.Errorf("fields[%.40q...] missing", k)
 		}
 	}
 }
