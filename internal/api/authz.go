@@ -125,8 +125,8 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid group name.")
 		return
 	}
-	a.membership.Lock()
-	defer a.membership.Unlock()
+	unlock := a.membership.Lock(org.Name())
+	defer unlock()
 	// Rows left by an earlier group of this name go, but only once the name
 	// is known to be free: a conflicting create must not strip an existing
 	// group of the members its rows hold.
@@ -221,8 +221,8 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	// Read-modify-write: a revocation landing between the read and the write
 	// would be undone (see groupmembers.go). The group is checked again under
 	// the lock, so a concurrent delete is not undone either.
-	a.membership.Lock()
-	defer a.membership.Unlock()
+	unlock := a.membership.Lock(org.Name())
+	defer unlock()
 	if !exists(w, r, org, "groups", name, notFoundMessage("groups", name)) {
 		return
 	}
@@ -322,8 +322,8 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	a.membership.Lock()
-	defer a.membership.Unlock()
+	unlock := a.membership.Lock(org.Name())
+	defer unlock()
 	if _, ok, err := org.Get("groups", name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -402,12 +402,19 @@ func removeFromACLs(org *store.Org, kind, name string) error {
 // find. A group here stores names, so keeping an unresolved one would make
 // whatever is later created under that name a member from the start.
 func (a *API) knownGroupMembers(org *store.Org, users, clients, groups []string) (u, c, g []string, err error) {
+	// A repeated name is looked up once: the caller holds the membership
+	// lock, and the body sets how many names there are.
 	keep := func(space *store.Org, coll string, names []string) ([]string, error) {
 		out := make([]string, 0, len(names))
+		known := make(map[string]bool, len(names))
 		for _, n := range names {
-			_, ok, err := space.Get(coll, n)
-			if err != nil {
-				return nil, err
+			ok, seen := known[n]
+			if !seen {
+				var err error
+				if _, ok, err = space.Get(coll, n); err != nil {
+					return nil, err
+				}
+				known[n] = ok
 			}
 			if ok {
 				out = append(out, n)

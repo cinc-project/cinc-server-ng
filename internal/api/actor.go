@@ -150,8 +150,8 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// Shared, from creating the actor through its membership row, so a
 		// concurrent delete of the actor cannot run in between and leave the
 		// row behind (see groupmembers.go).
-		a.membership.RLock()
-		defer a.membership.RUnlock()
+		unlock := a.membership.RLock(org.Name())
+		defer unlock()
 		// Keys authenticate by actor name, so key rows left under this name
 		// with no actor (by an older version, or a state directory) would
 		// pass to the new actor. Deleting an actor removes its keys, and a
@@ -698,7 +698,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		if rename {
 			// The move rewrites group membership, so it is ordered against
 			// revocations like any membership write (see groupmembers.go).
-			a.membership.Lock()
+			unlock := a.membership.Lock(org.Name())
 			// Recheck under the lock: a racing rename onto the same name
 			// passed the check above too, and the loser should be refused
 			// here rather than by a failed transaction.
@@ -721,7 +721,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 				raw = mustEncode(obj)
 				err = a.renameClient(r, org, name, newName, raw)
 			}
-			a.membership.Unlock()
+			unlock()
 			if errors.Is(err, store.ErrConflict) {
 				writeRenameConflict(w, segment, newName)
 				return
@@ -758,9 +758,9 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			// writes, so a delete of the actor landing since the check at the
 			// top (a regenerated key takes a while) is not undone by
 			// re-creating its record.
-			a.membership.RLock()
+			unlock := a.membership.RLock(org.Name())
 			ok, err := func() (bool, error) {
-				defer a.membership.RUnlock()
+				defer unlock()
 				if _, ok, err := org.Get(segment, name); err != nil || !ok {
 					return ok, err
 				}
@@ -879,8 +879,8 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 		// A revocation: held from the group cleanup through deleting the
 		// record, so no group write or new membership row can name the actor
 		// in between (see groupmembers.go).
-		a.membership.Lock()
-		defer a.membership.Unlock()
+		unlock := a.membership.Lock(org.Name())
+		defer unlock()
 		if _, ok, err := org.Get(segment, name); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
