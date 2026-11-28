@@ -26,9 +26,8 @@ import (
 // retract exactly what that document previously contributed.
 type term struct{ field, value string }
 
-// collIndex is the inverted index for one collection of one organization.
-// Callers hold mu for the whole of a plan, so the postings view it hands to the
-// planner needs no locking of its own.
+// collIndex is the inverted index for one collection of one organization. The
+// postings view takes mu for each lookup it makes on the planner's behalf.
 type collIndex struct {
 	mu        sync.RWMutex
 	merge     bool // node-style attribute precedence merge before flattening
@@ -130,9 +129,16 @@ func (c *collIndex) retract(id string) {
 // lock.
 func (c *collIndex) size() int { return len(c.all) }
 
-// postingsView adapts a collIndex to the planner. The caller holds the index's
-// read lock for the duration of a plan, so these methods do no locking; each
-// returns a fresh set, as the planner requires.
+// postingsView adapts a collIndex to the planner. Each method holds the index's
+// read lock for its own lookup only, not for the whole plan: the index is
+// maintained by observers running on the writing goroutine, so a plan of many
+// terms held under one lock would stall every write to the collection for all
+// of them. Each method returns a fresh set, as the planner requires, so nothing
+// it returns is touched after the lock is released.
+//
+// A plan's lookups can therefore see the index at different moments, with
+// writes landing between them. Each lookup is consistent on its own, and a
+// search is no more a snapshot than Solr's eventually-committed index is.
 type postingsView struct{ c *collIndex }
 
 func copySet(src map[string]struct{}) search.DocIDs {
@@ -143,17 +149,27 @@ func copySet(src map[string]struct{}) search.DocIDs {
 	return out
 }
 
-func (p postingsView) All() search.DocIDs { return copySet(p.c.all) }
+func (p postingsView) All() search.DocIDs {
+	p.c.mu.RLock()
+	defer p.c.mu.RUnlock()
+	return copySet(p.c.all)
+}
 
 func (p postingsView) Exact(field, value string) search.DocIDs {
+	p.c.mu.RLock()
+	defer p.c.mu.RUnlock()
 	return copySet(p.c.postings[field][value])
 }
 
 func (p postingsView) Exists(field string) search.DocIDs {
+	p.c.mu.RLock()
+	defer p.c.mu.RUnlock()
 	return copySet(p.c.fieldDocs[field])
 }
 
 func (p postingsView) Match(field string, pred func(string) bool) search.DocIDs {
+	p.c.mu.RLock()
+	defer p.c.mu.RUnlock()
 	out := search.DocIDs{}
 	for value, ids := range p.c.postings[field] {
 		if pred(value) {
@@ -166,6 +182,8 @@ func (p postingsView) Match(field string, pred func(string) bool) search.DocIDs 
 }
 
 func (p postingsView) MatchAny(pred func(string) bool) search.DocIDs {
+	p.c.mu.RLock()
+	defer p.c.mu.RUnlock()
 	out := search.DocIDs{}
 	for _, byValue := range p.c.postings {
 		for value, ids := range byValue {

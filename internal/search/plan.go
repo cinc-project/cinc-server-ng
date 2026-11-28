@@ -51,7 +51,7 @@ func Plan(q Query, p Postings) (DocIDs, bool) {
 		if t.field == "" {
 			return p.MatchAny(t.matchVal), true
 		}
-		if t.re == nil {
+		if t.glob == nil {
 			return p.Exact(t.field, t.value), true
 		}
 		return p.Match(t.field, t.matchVal), true

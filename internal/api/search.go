@@ -555,8 +555,8 @@ func (a *API) findMatches(org *store.Org, idx searchIndex, query search.Query) (
 	if err != nil {
 		return nil, err
 	}
-	ci.mu.RLock()
 	ids, planned := search.Plan(query, postingsView{ci})
+	ci.mu.RLock()
 	indexed := ci.size()
 	ci.mu.RUnlock()
 	if !planned {

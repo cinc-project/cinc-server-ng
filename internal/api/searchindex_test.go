@@ -43,8 +43,6 @@ func TestSearchIndexTracksWrites(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ci.mu.RLock()
-		defer ci.mu.RUnlock()
 		set, ok := planForTest(q, postingsView{ci})
 		if !ok {
 			t.Fatalf("query %q not plannable", query)
