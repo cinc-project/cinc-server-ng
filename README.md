@@ -106,8 +106,8 @@ ACLs on each container, group and the org itself follow erchef's org creation po
 plain client can read the nodes, roles, environments, cookbooks, data bags and
 policies it converges from, but not list the org's clients or groups). Making
 a new object of any kind, including a new cookbook, cookbook artifact, policy
-or policy group, takes create on its container, and pushing a policy to a group
-is checked on both the policy and the group. Uploading cookbook files (creating
+or policy group, takes create on its container, and pushing, reading or
+removing a policy in a group is checked on both the policy and the group. Uploading cookbook files (creating
 and committing a sandbox) takes create on the `sandboxes` container, which by
 default only admins and users hold, so a client (the validator included)
 cannot store files. Unlike Chef Infra Server, only the superuser may delete one
