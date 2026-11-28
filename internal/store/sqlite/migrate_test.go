@@ -190,6 +190,7 @@ CREATE TABLE blobs (org TEXT NOT NULL, checksum TEXT NOT NULL, content BLOB NOT 
 CREATE TABLE orgs (name TEXT PRIMARY KEY);
 CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);
 INSERT INTO schema_migrations(version) VALUES(1);
+INSERT INTO orgs(name) VALUES('acme');
 INSERT INTO objects(org,collection,key,body) VALUES('acme','nodes','web','{}');`); err != nil {
 		t.Fatal(err)
 	}

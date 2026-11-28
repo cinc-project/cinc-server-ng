@@ -21,6 +21,9 @@ func TestReadsNotBlockedByOpenWriteTx(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { b.Close() })
+	if err := b.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := b.Put("acme", "nodes", "seed", []byte(`{"v":1}`), store.Stamp{}); err != nil {
 		t.Fatal(err)

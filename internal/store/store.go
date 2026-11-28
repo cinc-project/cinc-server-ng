@@ -24,6 +24,9 @@ var (
 	ErrConflict = errors.New("store: already exists")
 	// ErrNotFound is returned when a requested object does not exist.
 	ErrNotFound = errors.New("store: not found")
+	// ErrOrgNotFound is returned by a write into an organization that does
+	// not exist (or no longer does).
+	ErrOrgNotFound = errors.New("store: organization not found")
 )
 
 // Store holds every organization's data plus a global space for server-level
@@ -117,9 +120,16 @@ func (s *Store) Global() *Org {
 
 // CreateOrg creates a new, empty organization. It returns ErrConflict if an
 // organization with the same name already exists.
+//
+// The new organization starts empty, whatever was ever stored under its name:
+// the backend discards any such rows, and derived indexes are told to drop
+// anything they hold for it, with the same org-wide event a deletion sends.
 func (s *Store) CreateOrg(name string) (*Org, error) {
 	if err := s.backend.CreateOrg(name); err != nil {
 		return nil, err
+	}
+	if s.events != nil {
+		s.events.emit(Event{Org: name, Deleted: true})
 	}
 	return s.org(name), nil
 }

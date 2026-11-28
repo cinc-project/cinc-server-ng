@@ -29,6 +29,9 @@ func TestPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := b.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
 	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`), store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}

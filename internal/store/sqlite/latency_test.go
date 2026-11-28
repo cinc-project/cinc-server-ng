@@ -43,6 +43,9 @@ func benchWriteLatency(b *testing.B, opts ...sqlite.Option) {
 		b.Fatal(err)
 	}
 	defer be.Close()
+	if err := be.CreateOrg("acme"); err != nil {
+		b.Fatal(err)
+	}
 
 	body := nodeBody("node0")
 	samples := make([][]time.Duration, writers)

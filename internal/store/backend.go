@@ -8,10 +8,14 @@ import "context"
 // server-global space (the users/organizations collections), mirroring
 // Store.Global().
 //
-// Object reads and writes operate on any (org, coll, key) regardless of whether
-// CreateOrg was called for that org; CreateOrg/DeleteOrg/ListOrgs/HasOrg track the
-// set of *named* organizations (the global space is never listed). DeleteOrg drops
-// every object and blob belonging to the org. Create and CreateOrg return
+// CreateOrg/DeleteOrg/ListOrgs/HasOrg track the set of *named* organizations
+// (the global space is never listed). Writes that store something (Put, Create,
+// PutBlob) are accepted only into the global space or a named organization, and
+// otherwise fail with ErrOrgNotFound, checked atomically with the write: a
+// request that found an org before it was deleted cannot leave rows under the
+// name afterwards. Reads and deletes take any org. DeleteOrg drops every object
+// and blob belonging to the org, and CreateOrg starts the org empty, discarding
+// anything held under the name in the same step. Create and CreateOrg return
 // ErrConflict when the target key or org already exists.
 //
 // A Backend must be safe for concurrent use by multiple goroutines.

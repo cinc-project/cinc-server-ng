@@ -33,13 +33,13 @@ func (r *recorder) snapshot() []store.Event {
 
 func TestWatchReportsWrites(t *testing.T) {
 	st := store.New()
-	var rec recorder
-	st.Watch(rec.observe)
-
 	org, err := st.CreateOrg("acme")
 	if err != nil {
 		t.Fatal(err)
 	}
+	var rec recorder
+	st.Watch(rec.observe)
+
 	if err := org.Put("nodes", "web01", []byte(`{"name":"web01"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -160,10 +160,10 @@ func TestWatchDropsRolledBackWrites(t *testing.T) {
 // both do).
 func TestWatchSupportsMultipleObservers(t *testing.T) {
 	st := store.New()
+	org, _ := st.CreateOrg("acme")
 	var a, b recorder
 	st.Watch(a.observe)
 	st.Watch(b.observe)
-	org, _ := st.CreateOrg("acme")
 	if err := org.Put("nodes", "web01", []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
