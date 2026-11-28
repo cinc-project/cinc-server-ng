@@ -52,15 +52,22 @@ func validateObjectBody(segment, urlName string, raw []byte) string {
 	return validateEnvironment(doc)
 }
 
-// validateNode is the name and run_list part of chef_node:validate_json_node:
-// the name must match node_name, and on an update the body may omit it (the
-// URL supplies it) but may not name a different node; run_list, when present,
-// must satisfy run_list_spec. A present run_list of null is refused:
-// insert_autofill_fields fills in [] only for a missing key. The rest of
+// validateNode is the name, chef_environment and run_list part of
+// chef_node:validate_json_node: the name must match node_name, and on an update
+// the body may omit it (the URL supplies it) but may not name a different node;
+// chef_environment, when present, must be a string matching environment_name;
+// run_list, when present, must satisfy run_list_spec. A present
+// chef_environment or run_list of null is refused: insert_autofill_fields fills
+// in "_default" and [] only for a missing key. The rest of
 // chef_node's constraints are not checked here.
 func validateNode(urlName string, doc map[string]any) string {
 	if msg := validateNodeName(urlName, doc); msg != "" {
 		return msg
+	}
+	if env, ok := doc["chef_environment"]; ok {
+		if s, isStr := env.(string); !isStr || !environmentNameRE.MatchString(s) {
+			return "Field 'chef_environment' invalid"
+		}
 	}
 	if runList, ok := doc["run_list"]; ok && !validRunList(runList) {
 		return "Field 'run_list' is not a valid run list"

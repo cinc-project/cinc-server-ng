@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -245,5 +246,74 @@ func TestEnvironmentValidationAccepts(t *testing.T) {
 		if resp, got := do(t, "POST", base+"/environments", body); resp.StatusCode != http.StatusCreated {
 			t.Errorf("create %s = %d: %s", body, resp.StatusCode, got)
 		}
+	}
+}
+
+// TestNodeChefEnvironmentValidation holds node create and update to chef_node's
+// chef_environment constraint: a string matching environment_name. As with
+// run_list, null is refused rather than defaulted (only a missing key becomes
+// "_default").
+func TestNodeChefEnvironmentValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"null", `{"name":"n","chef_environment":null}`},
+		{"number", `{"name":"n","chef_environment":1}`},
+		{"object", `{"name":"n","chef_environment":{}}`},
+		{"array", `{"name":"n","chef_environment":["prod"]}`},
+		{"bad name", `{"name":"n","chef_environment":"no spaces"}`},
+		{"empty", `{"name":"n","chef_environment":""}`},
+	}
+	const want = "Field 'chef_environment' invalid"
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv, _ := newTestAPI(t)
+			base := srv.URL + "/organizations/acme"
+			resp, body := do(t, "POST", base+"/nodes", c.body)
+			wantError(t, "POST /nodes", resp, body, want)
+		})
+		t.Run("update "+c.name, func(t *testing.T) {
+			srv, _ := newTestAPI(t)
+			base := srv.URL + "/organizations/acme"
+			if resp, body := do(t, "POST", base+"/nodes", `{"name":"n","chef_environment":"prod"}`); resp.StatusCode != http.StatusCreated {
+				t.Fatalf("create = %d: %s", resp.StatusCode, body)
+			}
+			resp, body := do(t, "PUT", base+"/nodes/n", c.body)
+			wantError(t, "PUT /nodes/n", resp, body, want)
+		})
+	}
+
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	for _, body := range []string{`{"name":"bare"}`, `{"name":"p","chef_environment":"prod-1.x_y"}`} {
+		if resp, b := do(t, "POST", base+"/nodes", body); resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create %s = %d: %s", body, resp.StatusCode, b)
+		}
+	}
+}
+
+// TestEnvNodesSkipsUnreadableEnvironment pins that one node stored with a
+// non-string chef_environment (from before validation, or loaded from disk)
+// does not fail the environment's node listing for the whole org.
+func TestEnvNodesSkipsUnreadableEnvironment(t *testing.T) {
+	srv, st := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	for _, body := range []string{`{"name":"prod"}`, `{"name":"web","chef_environment":"prod"}`} {
+		path := "/nodes"
+		if body == `{"name":"prod"}` {
+			path = "/environments"
+		}
+		if resp, b := do(t, "POST", base+path, body); resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create %s = %d: %s", body, resp.StatusCode, b)
+		}
+	}
+	org, _, _ := st.Org("acme")
+	if err := org.Put("nodes", "bad", []byte(`{"name":"bad","chef_environment":{}}`)); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := do(t, "GET", base+"/environments/prod/nodes", "")
+	if resp.StatusCode != http.StatusOK || strings.TrimSpace(body) != `{"web":"`+base+`/nodes/web"}` {
+		t.Fatalf("GET /environments/prod/nodes = %d %s", resp.StatusCode, body)
 	}
 }
