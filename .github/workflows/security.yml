@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0 # full history so PR scans are diff-aware
       - uses: mondoohq/actions/xgrep@09a474d3d0da5e11449067957244f156a36bed62 # v14.0.0
         with:
