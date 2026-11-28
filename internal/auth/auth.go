@@ -95,34 +95,117 @@ func VerifyRequest(method, path string, body []byte, h http.Header, pub *rsa.Pub
 // A key outside the bounds CheckPublicKey enforces is refused before any RSA
 // arithmetic: ParsePublicKey already refuses one, but a key can also reach
 // here parsed some other way.
+//
+// To try one request against several keys, Prepare it once instead.
 func Verify(method, path string, body []byte, p *Parsed, serverAPIVersion string, pub *rsa.PublicKey) error {
 	if err := CheckPublicKey(pub); err != nil {
 		return fmt.Errorf("auth: signature verification failed: %w", err)
 	}
-	signingString := canonicalString(method, path, body, p, serverAPIVersion)
+	prep, err := Prepare(method, path, body, p, serverAPIVersion)
+	if err != nil {
+		return err
+	}
+	return prep.verify(pub)
+}
 
+// Prepared is a request's signing input, built once: the canonical string,
+// with the body hashed into it, and for 1.3 the digest that is signed. Trying
+// it against a key repeats only the RSA step, so what a request costs to check
+// against an actor with many keys does not grow with its body.
+type Prepared struct {
+	version       string
+	signingString []byte
+	sum           [sha256.Size]byte // 1.3 only
+	signature     []byte
+}
+
+// Prepare builds the signing input for a parsed request, with arguments as
+// for Verify. It reads body once and does not keep it.
+func Prepare(method, path string, body []byte, p *Parsed, serverAPIVersion string) (*Prepared, error) {
 	switch p.Version {
+	case "1.0", "1.1", "1.3":
+	default:
+		return nil, fmt.Errorf("auth: unsupported signing version %q", p.Version)
+	}
+	prep := &Prepared{
+		version:       p.Version,
+		signingString: []byte(canonicalString(method, path, body, p, serverAPIVersion)),
+		signature:     p.Signature,
+	}
+	if p.Version == "1.3" {
+		prep.sum = sha256.Sum256(prep.signingString)
+	}
+	return prep, nil
+}
+
+// Verify checks the prepared request's signature against pub, refusing a key
+// outside CheckPublicKey's bounds before any RSA arithmetic.
+func (v *Prepared) Verify(pub *rsa.PublicKey) error {
+	if err := CheckPublicKey(pub); err != nil {
+		return fmt.Errorf("auth: signature verification failed: %w", err)
+	}
+	return v.verify(pub)
+}
+
+// VerifyAny reports whether the signature verifies against any of pubs, tried
+// in order, as erchef tries each of a requestor's unexpired keys. A key
+// outside CheckPublicKey's bounds is passed over, and the same public key
+// listed more than once (under several key names, say) is tried once.
+func (v *Prepared) VerifyAny(pubs []*rsa.PublicKey) bool {
+	for _, pub := range distinctKeys(pubs) {
+		if v.verify(pub) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// verify is Verify for a key already within CheckPublicKey's bounds.
+func (v *Prepared) verify(pub *rsa.PublicKey) error {
+	switch v.version {
 	case "1.0", "1.1":
 		// v1.0/1.1 sign by RSA private_encrypt of the raw signing string.
 		// Verification recovers the string via the public key and compares.
-		recovered, err := rsaPublicDecrypt(pub, p.Signature)
+		recovered, err := rsaPublicDecrypt(pub, v.signature)
 		if err != nil {
 			return fmt.Errorf("auth: signature verification failed: %w", err)
 		}
-		if subtle.ConstantTimeCompare(recovered, []byte(signingString)) != 1 {
+		if subtle.ConstantTimeCompare(recovered, v.signingString) != 1 {
 			return errors.New("auth: signature does not match request")
 		}
 		return nil
 	case "1.3":
 		// v1.3 uses RSASSA-PKCS1-v1.5 over SHA256 of the signing string.
-		sum := sha256.Sum256([]byte(signingString))
-		if err := rsa.VerifyPKCS1v15(pub, crypto.SHA256, sum[:], p.Signature); err != nil {
+		if err := rsa.VerifyPKCS1v15(pub, crypto.SHA256, v.sum[:], v.signature); err != nil {
 			return fmt.Errorf("auth: signature verification failed: %w", err)
 		}
 		return nil
 	default:
-		return fmt.Errorf("auth: unsupported signing version %q", p.Version)
+		return fmt.Errorf("auth: unsupported signing version %q", v.version)
 	}
+}
+
+// distinctKeys returns the keys of pubs within CheckPublicKey's bounds, in
+// order, each public key (modulus and exponent) once.
+func distinctKeys(pubs []*rsa.PublicKey) []*rsa.PublicKey {
+	type id struct {
+		n string
+		e int
+	}
+	out := make([]*rsa.PublicKey, 0, len(pubs))
+	seen := make(map[id]struct{}, len(pubs))
+	for _, pub := range pubs {
+		if CheckPublicKey(pub) != nil {
+			continue
+		}
+		k := id{string(pub.N.Bytes()), pub.E}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, pub)
+	}
+	return out
 }
 
 // canonicalString builds the Mixlib signing string for the given version.
