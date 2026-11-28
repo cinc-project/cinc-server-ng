@@ -54,12 +54,15 @@ func TestClassifyPolicyfileWriteRoutes(t *testing.T) {
 		// The first revision creates the policy.
 		{"POST", "/organizations/acme/policies/base/revisions", authzCheck{aclType: "policies", aclName: "base", perm: "update", createIn: "policies"}},
 		{"DELETE", "/organizations/acme/policies/base/revisions/abc123", authzCheck{aclType: "policies", aclName: "base", perm: "delete"}},
-		// Deploying a policy to a group is an update of that group and of the
-		// policy, or creates either.
-		{"GET", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "read"}},
+		// A policy in a group is checked on the group and on the policy:
+		// deploying is an update of both (or creates either), reading needs
+		// read on both, removing needs delete on both.
+		{"GET", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "read",
+			also: &authzCheck{aclType: "policies", aclName: "base", perm: "read"}}},
 		{"PUT", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "update", createIn: "policy_groups",
 			also: &authzCheck{aclType: "policies", aclName: "base", perm: "update", createIn: "policies"}}},
-		{"DELETE", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "update"}},
+		{"DELETE", "/organizations/acme/policy_groups/prod/policies/base", authzCheck{aclType: "policy_groups", aclName: "prod", perm: "delete",
+			also: &authzCheck{aclType: "policies", aclName: "base", perm: "delete"}}},
 	}
 	for _, c := range cases {
 		got, ok := classifyRequest(c.method, c.path)

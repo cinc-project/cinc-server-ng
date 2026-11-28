@@ -558,8 +558,10 @@ func classifySubResource(method, seg string, rest []string) (*authzCheck, bool) 
 			perm = "delete"
 		}
 	case seg == "policy_groups" && sub == "policies":
-		// Removing a policy from a group edits the group, not the policy.
 		perm = "update"
+		if method == http.MethodDelete {
+			perm = "delete"
+		}
 	default:
 		return nil, false
 	}
@@ -577,6 +579,11 @@ func classifySubResource(method, seg string, rest []string) (*authzCheck, bool) 
 		// each (oc_chef_wm_policy_group_policy_rev:prereq_object_permission).
 		check.createIn = "policy_groups"
 		check.also = &authzCheck{aclType: "policies", aclName: rest[3], perm: "update", createIn: "policies"}
+	case seg == "policy_groups" && sub == "policies" && len(rest) >= 4:
+		// Reading or removing a policy in a group is checked on the policy as
+		// well, for the same permission (policy_permissions_objects), so the
+		// group's ACL does not open up a revision the policy's ACL withholds.
+		check.also = &authzCheck{aclType: "policies", aclName: rest[3], perm: perm}
 	}
 	return check, true
 }
