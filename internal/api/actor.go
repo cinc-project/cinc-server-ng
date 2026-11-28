@@ -152,19 +152,25 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// row behind (see groupmembers.go).
 		a.membership.RLock()
 		defer a.membership.RUnlock()
-		if password == nil {
+		if password == nil && segment != "users" {
 			// The common case (every client registration): a single write.
 			err = org.Create(segment, name, raw)
 		} else {
-			// The password is stored in the create's transaction: a create
-			// refused because the actor exists must not replace that actor's
-			// password.
+			// A user's password is written in the create's transaction: a
+			// create refused because the user exists must not replace that
+			// user's password. A user created without one (externally
+			// authenticated) clears any row left under its name, which would
+			// otherwise let a former holder of the name log in as it.
 			err = a.store.Tx(func(tx *store.Store) error {
 				scoped, err := txScope(tx, org)
 				if err != nil {
 					return err
 				}
 				if err := scoped.As(actorID(r)).Create(segment, name, raw); err != nil {
+					return err
+				}
+				if password == nil {
+					_, _, err := scoped.Delete(PasswordsCollection, name)
 					return err
 				}
 				return scoped.Put(PasswordsCollection, name, password)
@@ -852,9 +858,15 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 		case "users":
 			// Its org memberships, group memberships, pending invitations,
 			// every ACL entry naming it, and its server-admins membership.
+			// Its password goes too, or the next user given the name without
+			// one of its own would accept it.
 			cleanup = append(cleanup,
 				func() error { return a.removeUserFromOrgs(name) },
-				func() error { return dropServerAdmin(a.store.Global(), name) })
+				func() error { return dropServerAdmin(a.store.Global(), name) },
+				func() error {
+					_, _, err := a.store.Global().Delete(PasswordsCollection, name)
+					return err
+				})
 		case "clients":
 			// Registration put it in the org's "clients" group, and ACLs may
 			// name it. Only its client entries go: a user of the same name is

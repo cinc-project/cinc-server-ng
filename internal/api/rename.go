@@ -88,6 +88,19 @@ func moveKey(org *store.Org, coll, oldKey, newKey string) error {
 	return err
 }
 
+// movePassword moves a user's password row to its new name. A user without
+// one (externally authenticated) must not pick up a row left under the new
+// name, so that row is dropped.
+func movePassword(global *store.Org, oldName, newName string) error {
+	if _, ok, err := global.Get(PasswordsCollection, oldName); err != nil {
+		return err
+	} else if !ok {
+		_, _, err := global.Delete(PasswordsCollection, newName)
+		return err
+	}
+	return moveKey(global, PasswordsCollection, oldName, newName)
+}
+
 // moveACL moves an object's stored ACL to its new name. Without one, the
 // renamed object falls back as the old one did, and a stale ACL under the new
 // name (there should be none) is dropped so it cannot take effect.
@@ -340,7 +353,7 @@ func (a *API) renameUser(r *http.Request, oldName, newName string, doc []byte, o
 		for _, step := range []func() error{
 			func() error { return moveACL(global, "users", oldName, newName) },
 			func() error { return renameInACLs(global, memberUsers, oldName, newName) },
-			func() error { return moveKey(global, PasswordsCollection, oldName, newName) },
+			func() error { return movePassword(global, oldName, newName) },
 			func() error { return moveKey(global, serverAdminsColl, oldName, newName) },
 			func() error { return moveActorKeys(global, "users", oldName, newName, false) },
 		} {
