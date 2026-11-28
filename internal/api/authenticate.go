@@ -21,18 +21,31 @@ const PasswordsCollection = "passwords"
 // out-of-band password store as a hash, so it is neither persisted in nor
 // returned with the actor record. It reports whether a password was present.
 func StashPassword(org *store.Org, name string, obj map[string]any) (bool, error) {
-	if pw, ok := obj["password"].(string); ok {
-		h, err := HashPassword(pw)
-		if err != nil {
-			return false, err
-		}
-		if err := org.Put(PasswordsCollection, name, h); err != nil {
-			return false, err
-		}
-		delete(obj, "password")
-		return true, nil
+	h, err := takePassword(obj)
+	if err != nil || h == nil {
+		return false, err
 	}
-	return false, nil
+	if err := org.Put(PasswordsCollection, name, h); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// takePassword removes a "password" field from an actor object and returns its
+// hash, or nil when the object carries none. The caller stores the hash, in
+// the same write as the actor record, so a write that is refused (such as a
+// create naming an actor that exists) leaves the stored password alone.
+func takePassword(obj map[string]any) ([]byte, error) {
+	pw, ok := obj["password"].(string)
+	if !ok {
+		return nil, nil
+	}
+	h, err := HashPassword(pw)
+	if err != nil {
+		return nil, err
+	}
+	delete(obj, "password")
+	return h, nil
 }
 
 func (a *API) registerAuthenticateRoutes(mux *recordingMux) {
