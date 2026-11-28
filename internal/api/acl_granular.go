@@ -96,20 +96,6 @@ func wantsGranular(r *http.Request) bool {
 	return r.URL.Query().Get("detail") == "granular"
 }
 
-// actorKinds reports whether name is a global user and whether it is a client
-// of members (never, for a nil members).
-func (a *API) actorKinds(members *store.Org, name string) (isUser, isClient bool, err error) {
-	if _, isUser, err = a.store.Global().Get("users", name); err != nil {
-		return false, false, err
-	}
-	if members != nil {
-		if _, isClient, err = members.Get("clients", name); err != nil {
-			return false, false, err
-		}
-	}
-	return isUser, isClient, nil
-}
-
 // isSplitACE reports whether an ACE uses the users/clients form.
 func isSplitACE(ace map[string]any) bool {
 	_, users := ace["users"]
@@ -146,6 +132,10 @@ type aceRefusal struct {
 // members is the org its names resolve in, or nil for a global user's ACL,
 // whose actors are users only and whose groups are not checked. A non-nil
 // refusal is the answer to give instead.
+//
+// Each list is resolved with existingNames, so the store reads a PUT costs are
+// bounded by what the store holds, not by how many names (or repeats of one)
+// the body lists. Refusals still name every unknown entry as it was listed.
 func (a *API) resolveACE(members *store.Org, ace map[string]any) (map[string]any, *aceRefusal, error) {
 	var users, clients []string
 	if isSplitACE(ace) {
@@ -162,13 +152,29 @@ func (a *API) resolveACE(members *store.Org, ace map[string]any) (map[string]any
 
 	var unknownActors, ambiguous []string
 	if !isSplitACE(ace) {
-		for _, name := range jsonStrings(ace["actors"]) {
-			isUser, isClient, err := a.actorKinds(members, name)
-			if err != nil {
+		actors := jsonStrings(ace["actors"])
+		isUser, err := existingNames(a.store.Global(), "users", actors)
+		if err != nil {
+			return nil, nil, err
+		}
+		isClient := map[string]bool{}
+		if members != nil {
+			if isClient, err = existingNames(members, "clients", actors); err != nil {
 				return nil, nil, err
 			}
+		}
+		seen := map[string]bool{}
+		for _, name := range actors {
+			if !isUser[name] && !isClient[name] {
+				unknownActors = append(unknownActors, name)
+				continue
+			}
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
 			switch {
-			case isUser && isClient:
+			case isUser[name] && isClient[name]:
 				// erchef's find_org_actors_by_name sees member users only: a
 				// global user outside the org does not compete with the client.
 				member, err := principalOrgMember(members, "user", name)
@@ -180,12 +186,10 @@ func (a *API) resolveACE(members *store.Org, ace map[string]any) (map[string]any
 				} else {
 					clients = append(clients, name)
 				}
-			case isClient:
+			case isClient[name]:
 				clients = append(clients, name)
-			case isUser:
-				users = append(users, name)
 			default:
-				unknownActors = append(unknownActors, name)
+				users = append(users, name)
 			}
 		}
 	}
@@ -193,12 +197,12 @@ func (a *API) resolveACE(members *store.Org, ace map[string]any) (map[string]any
 	groups := jsonStrings(ace["groups"])
 	var unknownGroups []string
 	if members != nil {
+		found, err := existingNames(members, "groups", groups)
+		if err != nil {
+			return nil, nil, err
+		}
 		for _, name := range groups {
-			_, ok, err := members.Get("groups", name)
-			if err != nil {
-				return nil, nil, err
-			}
-			if !ok {
+			if !found[name] {
 				unknownGroups = append(unknownGroups, name)
 			}
 		}
@@ -217,11 +221,11 @@ func (a *API) resolveACE(members *store.Org, ace map[string]any) (map[string]any
 		slices.Sort(ambiguous)
 		return nil, &aceRefusal{http.StatusUnprocessableEntity, []string{
 			"The following actor(s) exist as both clients and users within this organization: " +
-				strings.Join(slices.Compact(ambiguous), ", ") +
+				strings.Join(ambiguous, ", ") +
 				". To perform this update, supply separate 'clients' and 'users' fields in your request," +
 				" and use an empty array for the value of 'actors'."}}, nil
 	}
-	return typedACE(dedup(users), dedup(clients), groups), nil, nil
+	return typedACE(dedup(users), dedup(clients), dedup(groups)), nil, nil
 }
 
 // splitMembers resolves a split-form ACE's users (as global users) and clients
@@ -230,13 +234,13 @@ func (a *API) resolveACE(members *store.Org, ace map[string]any) (map[string]any
 // users before clients, as erchef's names_to_ids resolves them.
 func (a *API) splitMembers(members *store.Org, ace map[string]any) (users, clients []string, msg string, err error) {
 	users, clients = jsonStrings(ace["users"]), jsonStrings(ace["clients"])
+	isUser, err := existingNames(a.store.Global(), "users", users)
+	if err != nil {
+		return nil, nil, "", err
+	}
 	var missing []string
 	for _, name := range users {
-		isUser, _, err := a.actorKinds(nil, name)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		if !isUser {
+		if !isUser[name] {
 			missing = append(missing, name)
 		}
 	}
@@ -253,13 +257,15 @@ func (a *API) splitMembers(members *store.Org, ace map[string]any) (users, clien
 	if len(clients) > 0 && members == nil {
 		return nil, nil, "Clients can not be added to global ACL entries.", nil
 	}
-	for _, name := range clients {
-		_, isClient, err := a.actorKinds(members, name)
+	if len(clients) > 0 {
+		isClient, err := existingNames(members, "clients", clients)
 		if err != nil {
 			return nil, nil, "", err
 		}
-		if !isClient {
-			missing = append(missing, name)
+		for _, name := range clients {
+			if !isClient[name] {
+				missing = append(missing, name)
+			}
 		}
 	}
 	if len(missing) > 0 {
@@ -268,11 +274,48 @@ func (a *API) splitMembers(members *store.Org, ace map[string]any) (users, clien
 	return users, clients, "", nil
 }
 
+// keysLookupOver is how many distinct names existingNames reads one by one
+// before it reads the collection's keys instead.
+const keysLookupOver = 64
+
+// existingNames reports which of names exist in coll of o. Each distinct name
+// is read once, and past keysLookupOver distinct names the collection's keys
+// are read in one pass instead, so the cost is bounded by the collection, not
+// by the list. erchef resolves an ACE's names in one query for the same reason.
+func existingNames(o *store.Org, coll string, names []string) (map[string]bool, error) {
+	distinct := make(map[string]bool, min(len(names), keysLookupOver+1))
+	for _, n := range names {
+		distinct[n] = false
+	}
+	if len(distinct) > keysLookupOver {
+		keys, err := o.Keys(coll)
+		if err != nil {
+			return nil, err
+		}
+		for _, k := range keys {
+			if _, ok := distinct[k]; ok {
+				distinct[k] = true
+			}
+		}
+		return distinct, nil
+	}
+	for n := range distinct {
+		_, ok, err := o.Get(coll, n)
+		if err != nil {
+			return nil, err
+		}
+		distinct[n] = ok
+	}
+	return distinct, nil
+}
+
 // dedup drops repeated names, keeping first occurrences in order.
 func dedup(names []string) []string {
+	seen := make(map[string]bool, len(names))
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if !slices.Contains(out, n) {
+		if !seen[n] {
+			seen[n] = true
 			out = append(out, n)
 		}
 	}
