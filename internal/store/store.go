@@ -15,6 +15,7 @@ package store
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -34,18 +35,18 @@ var (
 // facade over a Backend.
 type Store struct {
 	backend Backend
-	// groupsGen advances whenever any organization's "groups" collection is
-	// written. The authorization layer caches a reverse index of group
-	// membership and uses this to know when to rebuild it. It lives here, at the
-	// single point every write passes through, rather than being bumped by each
-	// caller that happens to write a group — several packages do, and a missed
-	// call site would mean silently stale authorization.
+	// groupsGens holds, per organization, a counter that advances whenever
+	// that organization's "groups" collection is written. The authorization
+	// layer caches a reverse index of group membership per organization and
+	// uses its counter to know when to rebuild it. It lives here, at the single
+	// point every write passes through, rather than being bumped by each caller
+	// that happens to write a group — several packages do, and a missed call
+	// site would mean silently stale authorization.
 	//
-	// It is deliberately store-wide rather than per-organization: a group write
-	// in one org needlessly invalidates another's index, but group writes are
-	// rare (membership changes, not check-ins) and over-invalidation only costs
-	// a rebuild, while under-invalidation would be a correctness bug.
-	groupsGen *atomic.Uint64
+	// It is per organization so that a group write in one org, which any of
+	// its admins can make as often as they like, never invalidates another
+	// org's index.
+	groupsGens *genTable
 	// watch holds the registered write observers; events is where this Store's
 	// writes are delivered — the observers directly, or a transaction buffer
 	// that releases them on commit.
@@ -81,7 +82,7 @@ func New() *Store {
 func NewWithBackend(b Backend) *Store {
 	w := &watchers{}
 	return &Store{
-		backend: b, groupsGen: new(atomic.Uint64),
+		backend: b, groupsGens: &genTable{m: map[string]*atomic.Uint64{}},
 		watch: w, events: w, counts: &Counts{}, now: time.Now,
 	}
 }
@@ -93,7 +94,7 @@ func (s *Store) SetClock(now func() time.Time) { s.now = now }
 
 // org returns a handle on the named org (or the global space for "").
 func (s *Store) org(name string) *Org {
-	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events, counts: s.counts, now: s.now}
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGens.get(name), events: s.events, counts: s.counts, now: s.now}
 }
 
 // Backend returns the underlying Backend, for callers (e.g. the server) that need
@@ -176,12 +177,31 @@ func (s *Store) Tx(fn func(tx *Store) error) error {
 	// sees a write that was rolled back.
 	buf := &txBuffer{}
 	err := s.backend.Tx(func(b Backend) error {
-		return fn(&Store{backend: b, groupsGen: s.groupsGen, watch: s.watch, events: buf, counts: s.counts, now: s.now})
+		return fn(&Store{backend: b, groupsGens: s.groupsGens, watch: s.watch, events: buf, counts: s.counts, now: s.now})
 	})
 	if err == nil {
 		buf.flushTo(s.events)
 	}
 	return err
+}
+
+// genTable holds a groups generation counter per organization name. A
+// counter is never dropped, so it only ever advances, even across deleting
+// and re-creating an org of the same name.
+type genTable struct {
+	mu sync.Mutex
+	m  map[string]*atomic.Uint64
+}
+
+func (g *genTable) get(org string) *atomic.Uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	c, ok := g.m[org]
+	if !ok {
+		c = new(atomic.Uint64)
+		g.m[org] = c
+	}
+	return c
 }
 
 // Org is a handle to a single organization's collection of objects. The empty
@@ -257,8 +277,8 @@ func (o *Org) noteWrite(coll string) {
 	}
 }
 
-// GroupsGeneration reports a counter that advances whenever any organization's
-// groups are written. Sample it before reading groups; if it still matches
+// GroupsGeneration reports a counter that advances whenever this
+// organization's groups are written. Sample it before reading groups; if it still matches
 // after, whatever was derived from that read is current.
 func (o *Org) GroupsGeneration() uint64 {
 	if o.groupsGen == nil {
