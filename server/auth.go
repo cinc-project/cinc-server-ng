@@ -128,18 +128,28 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		if !ok {
 			return
 		}
+		// The signing string, body hash included, is built once for the
+		// request: an actor may hold any number of keys, and trying another
+		// costs only its RSA step, never another pass over the body.
+		prepared, err := auth.Prepare(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"))
+		if err != nil {
+			unauthorized(w, err.Error())
+			return
+		}
 		if len(candidates) == 0 {
 			// A stand-in verification, so that an unknown name costs about
 			// what a known one with a bad signature does. Its result is
 			// ignored: nobody answers to the name, whatever key signed.
-			verifiesWithAny(r, body, parsed, []*rsa.PublicKey{s.webuiPub})
+			prepared.VerifyAny([]*rsa.PublicKey{s.webuiPub})
 			s.authFailed(w, r, parsed.UserID, "no such actor, or it has no unexpired key")
 			return
 		}
 		var actor api.Actor
 		verified := false
 		for _, c := range candidates {
-			if verifiesWithAny(r, body, parsed, c.pubs) {
+			// Chef Infra Server tries each of the requestor's unexpired keys
+			// in turn; VerifyAny tries each distinct one.
+			if prepared.VerifyAny(c.pubs) {
 				actor, verified = c.actor, true
 				break
 			}
@@ -168,19 +178,6 @@ func wirePath(u *url.URL) string {
 		return u.RawPath
 	}
 	return u.EscapedPath()
-}
-
-// verifiesWithAny reports whether the request's signature verifies against any
-// of the actor's keys. Chef Infra Server tries each of the requestor's
-// unexpired keys in turn.
-func verifiesWithAny(r *http.Request, body []byte, parsed *auth.Parsed, pubs []*rsa.PublicKey) bool {
-	version := r.Header.Get("X-Ops-Server-API-Version")
-	for _, pub := range pubs {
-		if auth.Verify(r.Method, wirePath(r.URL), body, parsed, version, pub) == nil {
-			return true
-		}
-	}
-	return false
 }
 
 // authCandidate is an actor a request may be signed by, with its keys.
