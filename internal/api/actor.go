@@ -136,11 +136,12 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			}
 		}
 		// The private key is never persisted; the public key lives top-level on
-		// the stored actor, and a password is stashed out-of-band (for
+		// the stored actor, and a password is kept out-of-band (for
 		// authenticate_user). Strip the transient/nested fields.
 		delete(obj, "chef_key")
 		delete(obj, "private_key")
-		if _, err := StashPassword(org, name, obj); err != nil {
+		password, err := takePassword(obj)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -151,7 +152,25 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// row behind (see groupmembers.go).
 		a.membership.RLock()
 		defer a.membership.RUnlock()
-		if err := org.Create(segment, name, raw); errors.Is(err, store.ErrConflict) {
+		if password == nil {
+			// The common case (every client registration): a single write.
+			err = org.Create(segment, name, raw)
+		} else {
+			// The password is stored in the create's transaction: a create
+			// refused because the actor exists must not replace that actor's
+			// password.
+			err = a.store.Tx(func(tx *store.Store) error {
+				scoped, err := txScope(tx, org)
+				if err != nil {
+					return err
+				}
+				if err := scoped.As(actorID(r)).Create(segment, name, raw); err != nil {
+					return err
+				}
+				return scoped.Put(PasswordsCollection, name, password)
+			})
+		}
+		if errors.Is(err, store.ErrConflict) {
 			writeError(w, http.StatusConflict, "Object already exists")
 			return
 		} else if err != nil {
@@ -684,12 +703,30 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			}
 			status = renamedLocation(w, objectURL(r, orgSegment(r), segment, newName))
 		} else {
-			if _, err := StashPassword(org, name, obj); err != nil {
+			password, err := takePassword(obj)
+			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			raw = mustEncode(obj)
-			if err := org.Put(segment, name, raw); err != nil {
+			// The record and its password are written together, so an
+			// update that fails changes neither.
+			write := func() error { return org.Put(segment, name, raw) }
+			if password != nil {
+				write = func() error {
+					return a.store.Tx(func(tx *store.Store) error {
+						scoped, err := txScope(tx, org)
+						if err != nil {
+							return err
+						}
+						if err := scoped.As(actorID(r)).Put(segment, name, raw); err != nil {
+							return err
+						}
+						return scoped.Put(PasswordsCollection, name, password)
+					})
+				}
+			}
+			if err := write(); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
