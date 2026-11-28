@@ -366,10 +366,17 @@ func (o *Org) Blob(checksum string) ([]byte, bool, error) {
 	return o.backend.Blob(o.name, checksum)
 }
 
-// BlobView returns the blob stored under checksum. Like View it now returns an
-// owned copy; callers must treat it as read-only.
-func (o *Org) BlobView(checksum string) ([]byte, bool, error) {
-	return o.backend.Blob(o.name, checksum)
+// BlobView returns the blob stored under checksum for a caller that only reads
+// it, and a release func to call once the caller is done with the bytes (also
+// when ok is false). The result is read-only: a BlobViewer backend lends it or
+// shares it between concurrent readers rather than copying a file of up to the
+// file-store's size limit for each one.
+func (o *Org) BlobView(checksum string) (data []byte, release func(), ok bool, err error) {
+	if v, isViewer := o.backend.(BlobViewer); isViewer {
+		return v.ViewBlob(o.name, checksum)
+	}
+	data, ok, err = o.backend.Blob(o.name, checksum)
+	return data, func() {}, ok, err
 }
 
 // HasBlob reports whether a blob with the given checksum has been uploaded.

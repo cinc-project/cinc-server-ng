@@ -52,27 +52,29 @@ func TestBlobStore(t *testing.T) {
 	}
 }
 
-// TestBlobViewReturnsIndependentCopy documents BlobView's contract under the
-// pluggable backend: it returns an owned copy (no zero-copy fast path), so
-// mutating the result must not affect stored state.
-func TestBlobViewReturnsIndependentCopy(t *testing.T) {
+// TestBlobViewLendsStoredBlob pins that a file-store read does not copy the
+// blob on the memory backend: every view lends the stored bytes, so concurrent
+// downloads of a large file cost no memory beyond the stored copy.
+func TestBlobViewLendsStoredBlob(t *testing.T) {
 	st := New()
 	org, _ := st.CreateOrg("acme")
 	if err := org.PutBlob("abc123", []byte("file content\n")); err != nil {
 		t.Fatal(err)
 	}
 
-	got, ok, err := org.BlobView("abc123")
+	got, release, ok, err := org.BlobView("abc123")
 	if err != nil || !ok || string(got) != "file content\n" {
 		t.Fatalf("BlobView = %q, ok=%v err=%v", got, ok, err)
 	}
-	if _, ok, _ := org.BlobView("missing"); ok {
-		t.Fatal("BlobView of missing checksum should report false")
+	defer release()
+	again, release2, _, _ := org.BlobView("abc123")
+	defer release2()
+	if &got[0] != &again[0] {
+		t.Fatal("BlobView copied the stored blob; want it lent")
 	}
-
-	got[0] = 'X'
-	again, _, _ := org.BlobView("abc123")
-	if again[0] == 'X' {
-		t.Fatal("BlobView result aliased stored value")
+	if _, rel, ok, _ := org.BlobView("missing"); ok {
+		t.Fatal("BlobView of missing checksum should report false")
+	} else {
+		rel()
 	}
 }

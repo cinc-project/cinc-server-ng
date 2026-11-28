@@ -178,7 +178,8 @@ func (a *API) getFile(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	data, ok, err := org.BlobView(r.PathValue("checksum"))
+	data, release, ok, err := org.BlobView(r.PathValue("checksum"))
+	defer release()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
