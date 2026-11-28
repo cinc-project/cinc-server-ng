@@ -115,8 +115,8 @@ func (a *API) addServerAdmin(w http.ResponseWriter, r *http.Request) {
 	global := a.store.Global()
 	// Held against a concurrent delete of the user, so a membership is never
 	// written for a user that is already gone (see scopedDelete).
-	a.membership.Lock()
-	defer a.membership.Unlock()
+	unlock := a.membership.Lock("")
+	defer unlock()
 	if _, ok, err := global.Get("users", name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

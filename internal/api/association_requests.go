@@ -227,9 +227,10 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 
 	// Shared, from finding the invitation through the membership row, so a
 	// concurrent delete of the user (which drops its invitations) cannot run
-	// in between and leave the row behind (see groupmembers.go).
-	a.membership.RLock()
-	defer a.membership.RUnlock()
+	// in between and leave the row behind (see groupmembers.go). The org's
+	// own lock is taken once the invitation names it.
+	unlock := a.membership.RLock("")
+	defer unlock()
 	org, ok, err := a.findInvite(user, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -239,6 +240,8 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 		writeStringError(w, http.StatusNotFound, "Cannot find association request: "+id)
 		return
 	}
+	unlockOrg := a.membership.RLockOrg(org.Name())
+	defer unlockOrg()
 	org = org.As(actorID(r))
 	var body struct {
 		Response string `json:"response"`

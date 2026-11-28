@@ -321,8 +321,8 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		// The checks above may be stale by now (key generation takes a
 		// while), so they are made again where the write is ordered against
 		// deleting or renaming the actor.
-		a.membership.RLock()
-		defer a.membership.RUnlock()
+		unlock := a.membership.RLock(org.Name())
+		defer unlock()
 		if actor, ok = loadActor(w, org, segment, name); !ok {
 			return
 		}
@@ -416,8 +416,8 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 		// The checks above may be stale by now (key generation takes a
 		// while), so they are made again where the writes are ordered against
 		// deleting or renaming the actor.
-		a.membership.RLock()
-		defer a.membership.RUnlock()
+		unlock := a.membership.RLock(org.Name())
+		defer unlock()
 		actor, ok := loadActor(w, org, segment, name)
 		if !ok {
 			return
@@ -577,8 +577,8 @@ func (a *API) deleteKey(segment string, scope scopeFunc) http.HandlerFunc {
 		name, keyName := r.PathValue("name"), r.PathValue("key")
 		// Shared, from the existence check through the writes, so a delete
 		// of the actor cannot land in between and have its record re-created.
-		a.membership.RLock()
-		defer a.membership.RUnlock()
+		unlock := a.membership.RLock(org.Name())
+		defer unlock()
 		actor, ok := loadActor(w, org, segment, name)
 		if !ok {
 			return

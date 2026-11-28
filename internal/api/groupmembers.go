@@ -40,6 +40,10 @@ import (
 //     row write, so concurrent registrations still proceed in parallel and a
 //     fleet bootstrap stays linear.
 //
+// It is scoped to the org written (see membershipLock), so an exclusive
+// holder in one org never holds up another org; only revoking a user, which
+// spans every org, excludes all of them.
+//
 // The helpers below take no lock themselves; their callers hold it.
 
 // groupMembersColl holds incremental membership, one key per (group, kind,

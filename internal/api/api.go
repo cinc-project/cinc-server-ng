@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -60,7 +59,7 @@ type API struct {
 	generateKey func() (*rsa.PrivateKey, error)
 	// membership orders group-membership changes against revocations; see
 	// groupmembers.go.
-	membership sync.RWMutex
+	membership membershipLock
 }
 
 // Option configures an API at construction time.

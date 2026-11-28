@@ -186,8 +186,8 @@ func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
 		member = actor.Name
 		// Held from here through the membership rows, so a concurrent delete of
 		// the user cannot slip in between (see groupmembers.go).
-		a.membership.RLock()
-		defer a.membership.RUnlock()
+		unlock := a.membership.RLock(name)
+		defer unlock()
 		if _, ok, err := a.store.Global().Get("users", member); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
