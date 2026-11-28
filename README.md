@@ -187,6 +187,10 @@ Request bodies are capped as on Chef Infra Server, and one over its cap gets a
 uploaded to the file store. A negative value removes a cap. The server checks
 a request's signing headers, clock skew, declared length and actor before it
 reads the body, so a request it refuses from its headers costs no body read.
+A body must also arrive in time: `--body-timeout` (default `2m`) is the most an
+API request body may take, and the longest a cookbook file upload may go
+without sending data. `--max-connections` (default no limit) caps the
+connections held open at once. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 A fresh server has only the key-based superuser (`pivotal`), so nobody can log
 in to a web console such as

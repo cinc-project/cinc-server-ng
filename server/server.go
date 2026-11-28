@@ -82,6 +82,17 @@ type Options struct {
 	// Infra Server's only limit on cookbook files. Set a negative value to
 	// disable the limit.
 	MaxFileStoreBytes int64
+	// BodyTimeout bounds how long a client may take to send a request body.
+	// An API body, which is read whole before its signature is checked, must
+	// arrive within it in all; a cookbook file-store upload, which may be
+	// large and slow, is cut off only when it sends nothing for this long
+	// (nginx's client_body_timeout). Defaults to DefaultBodyTimeout; a
+	// negative value disables it.
+	BodyTimeout time.Duration
+	// MaxConnections caps how many client connections the server holds at
+	// once. A connection past it waits in the listen backlog until another
+	// closes. Zero or less means no cap.
+	MaxConnections int
 	// Logger receives server-side diagnostics, such as the specific reason a
 	// request failed to authenticate (the client is told only that it did).
 	// Defaults to slog.Default().
@@ -147,6 +158,12 @@ const (
 	DefaultMaxFileStoreBytes = 250 << 20
 )
 
+// DefaultBodyTimeout is BodyTimeout's default. A full-size API body
+// (DefaultMaxBodyBytes) arrives within it at about 130 kbit/s, and a
+// chef-client node save is usually a small fraction of that; a file-store
+// upload only has to keep sending.
+const DefaultBodyTimeout = 2 * time.Minute
+
 func (o *Options) withDefaults() {
 	if o.Addr == "" {
 		o.Addr = "127.0.0.1:0"
@@ -177,6 +194,9 @@ func (o *Options) withDefaults() {
 	}
 	if o.MaxFileStoreBytes == 0 {
 		o.MaxFileStoreBytes = DefaultMaxFileStoreBytes
+	}
+	if o.BodyTimeout == 0 {
+		o.BodyTimeout = DefaultBodyTimeout
 	}
 }
 
@@ -710,6 +730,9 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
+	if s.opts.MaxConnections > 0 {
+		ln = limitListener(ln, s.opts.MaxConnections)
+	}
 	s.listener = ln
 	s.url = "http://" + ln.Addr().String()
 	s.httpSrv = &http.Server{
@@ -821,9 +844,11 @@ func (s *Server) Store() *store.Store { return s.store }
 func (s *Server) Metrics() *metrics.Registry { return s.api.Metrics() }
 
 // readHeaderTimeout bounds how long a client may take to send its request
-// headers (the Slowloris defence). Real chef-client and knife send headers
-// immediately. Only the header phase is bounded: a ReadTimeout or WriteTimeout
-// would cap whole bodies and cut off large cookbook transfers on slow links.
+// headers (the Slowloris defence for the header phase; Options.BodyTimeout,
+// applied per request by limitBody, covers the body). Real chef-client and
+// knife send headers immediately. There is no ReadTimeout or WriteTimeout:
+// they would cap whole bodies and responses and cut off large cookbook
+// transfers on slow links.
 var readHeaderTimeout = 10 * time.Second
 
 // idleTimeout closes keep-alive connections that sit unused, so idle sockets

@@ -409,9 +409,14 @@ func (s *Server) bodyLimit(r *http.Request) int64 {
 
 // limitBody caps every request body, on every path, at bodyLimit, so that no
 // layer (auth, or a handler on an auth-exempt path) can read more than that
-// into memory. Reading past the cap fails with *http.MaxBytesError.
+// into memory. Reading past the cap fails with *http.MaxBytesError. It also
+// puts the body on Options.BodyTimeout's clock, ahead of authentication: an
+// API body must arrive whole within it, a file-store upload must not stall
+// for longer than it.
 func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _, fileStore := fileStoreRequest(r)
+		withBodyDeadline(w, r, s.opts.BodyTimeout, fileStore)
 		if limit := s.bodyLimit(r); limit > 0 && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
