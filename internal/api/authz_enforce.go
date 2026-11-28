@@ -59,6 +59,15 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	if !ok {
 		return r, false
 	}
+	// A request no route matches gets the router's 404 or 405, as webmachine
+	// decides both before is_authorized. Classifying it anyway would run an
+	// existence check for a request that is never served and answer 404 or
+	// 403 depending on whether the object is there: an oracle for anyone the
+	// membership gate (which also lets unrouted requests through) did not
+	// stop.
+	if !a.routeMatched(r) {
+		return r, true
+	}
 	check, ok := classifyRequest(r.Method, r.URL.EscapedPath())
 	if !ok {
 		// Nothing classified this request. For a read that means the route
@@ -306,16 +315,11 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	// ACL endpoints (/.../_acl[/{perm}]) require grant on the target object.
 	// The org's own ACL is at /organizations/{org}/organizations/_acl, erchef's
 	// path.
-	if i := slices.Index(rest, "_acl"); i >= 0 {
-		switch obj := rest[:i]; len(obj) {
-		case 1:
-			if obj[0] == "organizations" {
-				return &authzCheck{aclType: "organizations", aclName: org, perm: "grant"}, true
-			}
-		case 2:
-			return &authzCheck{aclType: obj[0], aclName: obj[1], perm: "grant", aclEndpoint: true}, true
+	if typ, name, ok := aclRouteTarget(rest); ok {
+		if typ == "organizations" {
+			return &authzCheck{aclType: "organizations", aclName: org, perm: "grant"}, true
 		}
-		return nil, false
+		return &authzCheck{aclType: typ, aclName: name, perm: "grant", aclEndpoint: true}, true
 	}
 
 	if len(rest) == 0 { // /organizations/{org}
@@ -351,6 +355,24 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 		return classifyGeneric(method, seg, rest, read)
 	}
 	return nil, false
+}
+
+// aclRouteTarget reports whether rest (the path after /organizations/{org})
+// has the shape of a registered ACL route (registerACLRoutes) and, if so, the
+// type and name of the object whose ACL it addresses ("organizations" for the
+// org's own). "_acl" counts only where those routes put it: anywhere else it
+// is an ordinary segment, such as the name of a node, data bag or cookbook
+// called "_acl", and the request is classified as the route it matches. A
+// type without ACL routes is never an ACL endpoint, so a path segment is
+// never looked up as an arbitrary store collection.
+func aclRouteTarget(rest []string) (typ, name string, ok bool) {
+	if (len(rest) == 2 || len(rest) == 3) && rest[0] == "organizations" && rest[1] == "_acl" {
+		return "organizations", "", true
+	}
+	if (len(rest) == 3 || len(rest) == 4) && rest[2] == "_acl" && slices.Contains(aclObjectTypes, rest[0]) {
+		return rest[0], rest[1], true
+	}
+	return "", "", false
 }
 
 // classifySandbox gates the cookbook-upload handshake. The file is stored
