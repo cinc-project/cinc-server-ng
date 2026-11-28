@@ -193,7 +193,7 @@ func TestClassifyOrganizationLifecycleRoutes(t *testing.T) {
 }
 
 // Listing organizations stays open: knife reads it during setup and it exposes
-// only names the caller can already discover via /users/{user}/organizations.
+// only names.
 func TestClassifyOrganizationListStaysOpen(t *testing.T) {
 	if got, ok := classifyRequest(http.MethodGet, "/organizations"); ok {
 		t.Errorf("GET /organizations: classified %+v, want allow-through", got)
