@@ -120,7 +120,24 @@ func (a *API) fileStoreURL(r *http.Request, org, checksum, op string) string {
 // cookbook from a manifest read at the start of the run.
 const fileStoreGrantTTL = time.Hour
 
+// refuseSignedFileStore refuses a file-store transfer that carries a signed
+// actor. The server authorizes the file store by the pre-signed grant in the
+// URL and attaches no actor when it does; a request that arrives with one was
+// authenticated as an ordinary signed request, so its grant was never checked.
+// That can only happen if the auth layer and the router disagreed about the
+// path, and the transfer must not go ahead on a signature alone.
+func refuseSignedFileStore(w http.ResponseWriter, r *http.Request) bool {
+	if _, ok := actorFromContext(r.Context()); !ok {
+		return false
+	}
+	writeError(w, http.StatusUnauthorized, "file store transfers are authorized by the pre-signed URL the server issued")
+	return true
+}
+
 func (a *API) putFile(w http.ResponseWriter, r *http.Request) {
+	if refuseSignedFileStore(w, r) {
+		return
+	}
 	org := a.org(w, r)
 	if org == nil {
 		return
@@ -154,6 +171,9 @@ func (a *API) putFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getFile(w http.ResponseWriter, r *http.Request) {
+	if refuseSignedFileStore(w, r) {
+		return
+	}
 	org := a.org(w, r)
 	if org == nil {
 		return

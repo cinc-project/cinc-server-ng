@@ -664,6 +664,11 @@ func New(opts Options) (*Server, error) {
 	// Cap the request body outermost, so the limit is in force before any layer
 	// (auth, or a handler on an auth-exempt path) reads the body.
 	handler = s.limitBody(handler)
+	// Trim a trailing slash before anything judges the path, so that the body
+	// cap, the auth layer's exemptions (/_status, /_stats with HTTP Basic, the
+	// pre-signed file store) and the router all decide on the same path. The
+	// signature is unaffected: Mixlib's canonical path drops a trailing slash.
+	handler = api.WithoutTrailingSlash(handler)
 	s.handler = handler
 	return s, nil
 }
