@@ -2,7 +2,6 @@ package search
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -22,6 +21,9 @@ type Query interface {
 // character literal (run_list:recipe\[base\], a\*b). Fuzzy (~), boosting (^),
 // and per-field grouping (field:(a OR b)) are not supported.
 func Parse(s string) (Query, error) {
+	if len(s) > maxQueryLength {
+		return nil, fmt.Errorf("search: query is longer than %d bytes", maxQueryLength)
+	}
 	toks, err := lex(s)
 	if err != nil {
 		return nil, err
@@ -36,6 +38,32 @@ func Parse(s string) (Query, error) {
 	}
 	return q, nil
 }
+
+// Limits on what one query may ask for. A search runs on behalf of any client
+// that can read an index, so each bounds a cost the caller would otherwise
+// choose; each is set well past anything knife or a chef-client recipe sends.
+const (
+	// maxQueryLength caps q before it is lexed, since lexing allocates a token
+	// per delimiter. A real Chef Infra Server sits behind nginx, whose default
+	// 8 KiB request-line buffer is the most any client has ever been able to
+	// send it as q; this is sixteen times that.
+	maxQueryLength = 128 << 10
+
+	// maxQueryDepth caps nesting of parentheses and NOT, each of which is a
+	// level of parser recursion (four frames per paren). Unbounded, about a
+	// megabyte of '(' overflows the goroutine stack, which is fatal to the
+	// whole process rather than a recoverable panic. Hand-written queries nest a
+	// few levels; generated ones (a host list, a role list) are flat.
+	maxQueryDepth = 256
+
+	// maxQueryClauses caps the leaf terms and negations in a query, each of
+	// which the planner resolves against the index separately. Solr refuses a
+	// boolean query of more than 1024 clauses (its default maxBooleanClauses),
+	// but counts per boolean query rather than across the whole tree, so this
+	// counts more generously than Solr: 4096 is as many one-letter terms as
+	// fit in the 8 KiB request line a real Chef Infra Server accepts.
+	maxQueryClauses = 4096
+)
 
 // --- AST ------------------------------------------------------------------
 
@@ -68,12 +96,12 @@ func (q notQ) Matches(f map[string][]string) bool { return !q.q.Matches(f) }
 type termQ struct {
 	field, value string
 	phrase       bool
-	// re is the compiled form of a wildcarded value, built once when the term is
-	// parsed and nil when the value has nothing to expand. matchVal runs once per
-	// value of every document a scan touches, so compiling there made the cost of
-	// a wildcard proportional to the size of the collection rather than to the
-	// pattern.
-	re *regexp.Regexp
+	// glob is the compiled form of a wildcarded value, built once when the term
+	// is parsed and nil when the value has nothing to expand. matchVal runs once
+	// per value of every document a scan touches, so compiling there made the
+	// cost of a wildcard proportional to the size of the collection rather than
+	// to the pattern.
+	glob *globMatcher
 }
 
 func (q termQ) Matches(f map[string][]string) bool {
@@ -96,10 +124,10 @@ func (q termQ) Matches(f map[string][]string) bool {
 }
 
 func (q termQ) matchVal(v string) bool {
-	if q.re == nil {
+	if q.glob == nil {
 		return v == q.value
 	}
-	return q.re.MatchString(v)
+	return q.glob.match(v)
 }
 
 // existsQ matches when a field is present with at least one value (field:*).
@@ -157,39 +185,6 @@ func parseFloat(s string) (float64, bool) {
 	return f, err == nil
 }
 
-func wildcardToRegexp(pattern string) *regexp.Regexp {
-	var b strings.Builder
-	b.WriteString("^")
-	escaped := false
-	for _, r := range pattern {
-		if escaped {
-			// A backslash-escaped character (the lexer leaves only \*, \?
-			// and \\ in a pattern) matches itself.
-			b.WriteString(regexp.QuoteMeta(string(r)))
-			escaped = false
-			continue
-		}
-		switch r {
-		case '\\':
-			escaped = true
-		case '*':
-			b.WriteString(".*")
-		case '?':
-			b.WriteString(".")
-		default:
-			b.WriteString(regexp.QuoteMeta(string(r)))
-		}
-	}
-	b.WriteString("$")
-	// Pattern is already lowercased by the parser; values are lowercased too.
-	//
-	// MustCompile is safe on any input: every character is either one of the two
-	// wildcards, which expand to a fixed metacharacter, or QuoteMeta'd. That
-	// matters more now that this runs at Parse time, on a caller-supplied query —
-	// FuzzParse holds Parse to never panicking.
-	return regexp.MustCompile(b.String())
-}
-
 // buildTerm constructs the right leaf query for a field:value pair, recognizing
 // *:* (match all), field:* (existence), and wildcards. value is the literal
 // term; glob is the same term with only its literal wildcard characters (and
@@ -207,7 +202,7 @@ func buildTerm(field, value, glob string, phrase bool) Query {
 	}
 	t := termQ{field: field, value: value, phrase: phrase}
 	if !phrase && hasWildcard(glob) {
-		t.re = wildcardToRegexp(glob)
+		t.glob = compileGlob(glob)
 	}
 	return t
 }
@@ -356,8 +351,29 @@ func lex(s string) ([]token, error) {
 // --- parser (precedence: NOT > AND > OR; juxtaposition is AND) -------------
 
 type parser struct {
-	toks []token
-	pos  int
+	toks    []token
+	pos     int
+	depth   int // current nesting of parens and NOT
+	clauses int // leaf terms and negations parsed so far
+}
+
+// enter records one more level of nesting, refusing to go past maxQueryDepth.
+// The caller pairs it with p.depth-- on the way out.
+func (p *parser) enter() error {
+	p.depth++
+	if p.depth > maxQueryDepth {
+		return fmt.Errorf("search: query nests more than %d levels deep", maxQueryDepth)
+	}
+	return nil
+}
+
+// clause counts one leaf term or negation against maxQueryClauses.
+func (p *parser) clause() error {
+	p.clauses++
+	if p.clauses > maxQueryClauses {
+		return fmt.Errorf("search: query has more than %d clauses", maxQueryClauses)
+	}
+	return nil
 }
 
 func (p *parser) peek() token { return p.toks[p.pos] }
@@ -415,7 +431,14 @@ func (p *parser) parseAnd() (Query, error) {
 func (p *parser) parseUnary() (Query, error) {
 	if p.peek().kind == tNot {
 		p.next()
+		if err := p.enter(); err != nil {
+			return nil, err
+		}
+		if err := p.clause(); err != nil {
+			return nil, err
+		}
 		q, err := p.parseUnary()
+		p.depth--
 		if err != nil {
 			return nil, err
 		}
@@ -428,7 +451,11 @@ func (p *parser) parsePrimary() (Query, error) {
 	switch t := p.peek(); t.kind {
 	case tLParen:
 		p.next()
+		if err := p.enter(); err != nil {
+			return nil, err
+		}
 		q, err := p.parseOr()
+		p.depth--
 		if err != nil {
 			return nil, err
 		}
@@ -439,6 +466,9 @@ func (p *parser) parsePrimary() (Query, error) {
 		return q, nil
 	case tPhrase:
 		p.next()
+		if err := p.clause(); err != nil {
+			return nil, err
+		}
 		return buildTerm("", t.text, t.text, true), nil
 	case tWord:
 		return p.parseClause()
@@ -448,6 +478,9 @@ func (p *parser) parsePrimary() (Query, error) {
 }
 
 func (p *parser) parseClause() (Query, error) {
+	if err := p.clause(); err != nil {
+		return nil, err
+	}
 	f := p.next()
 	field, glob, negate := f.text, f.glob, f.negate
 	if negate {
@@ -474,6 +507,9 @@ func (p *parser) parseClause() (Query, error) {
 	}
 
 	if negate {
+		if err := p.clause(); err != nil {
+			return nil, err
+		}
 		q = notQ{q}
 	}
 	return q, nil

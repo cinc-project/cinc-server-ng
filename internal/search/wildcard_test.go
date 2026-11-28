@@ -16,18 +16,18 @@ func TestWildcardPatternCompiledOnce(t *testing.T) {
 	if !ok {
 		t.Fatalf("parsed %T, want termQ", q)
 	}
-	if term.re == nil {
+	if term.glob == nil {
 		t.Error("a wildcarded term carries no compiled matcher; matchVal recompiles per value")
 	}
-	// A term with nothing to expand needs no regexp at all — an exact compare is
+	// A term with nothing to expand needs no matcher at all — an exact compare is
 	// both cheaper and what Plan relies on to use the postings directly.
 	for _, s := range []string{"name:web01", `name:"web*"`} {
 		q, err := Parse(s)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if term, ok := q.(termQ); ok && term.re != nil {
-			t.Errorf("%s compiled a regexp for a non-wildcard term", s)
+		if term, ok := q.(termQ); ok && term.glob != nil {
+			t.Errorf("%s compiled a matcher for a non-wildcard term", s)
 		}
 	}
 }
