@@ -58,6 +58,9 @@ type API struct {
 	// generateKey makes the key pairs the keys API hands out. Defaults to
 	// auth.GenerateKey.
 	generateKey func() (*rsa.PrivateKey, error)
+	// keygenSlots bounds how many key pairs are generated at once, server
+	// wide; see newKey.
+	keygenSlots chan struct{}
 	// membership orders group-membership changes against revocations; see
 	// groupmembers.go.
 	membership sync.RWMutex
@@ -106,6 +109,7 @@ func New(st *store.Store, opts ...Option) *API {
 		now:       time.Now,
 
 		generateKey: auth.GenerateKey,
+		keygenSlots: make(chan struct{}, keygenConcurrency()),
 	}
 	for _, opt := range opts {
 		opt(a)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -309,7 +310,17 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		// true create_key asking the server for a new pair.
 		pub, hasPub := body["public_key"].(string)
 		if !hasPub {
-			newPub, priv, err := a.generateKeyPair()
+			// A key name already taken is refused before the expensive
+			// generation, with the answer the create would give. The create
+			// checks again: this only spares the work.
+			if _, exists, err := org.View(keysColl(segment, name), keyName); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			} else if exists {
+				writeError(w, http.StatusConflict, "Key already exists")
+				return
+			}
+			newPub, priv, err := a.generateKeyPair(r.Context())
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -405,7 +416,7 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 		privateKey := ""
 		if createKey {
-			pub, priv, err := a.generateKeyPair()
+			pub, priv, err := a.generateKeyPair(r.Context())
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -556,8 +567,8 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 
 // generateKeyPair makes a new RSA key pair, returning the public half and the
 // private half as PEM.
-func (a *API) generateKeyPair() (pub, priv string, err error) {
-	key, err := a.generateKey()
+func (a *API) generateKeyPair(ctx context.Context) (pub, priv string, err error) {
+	key, err := a.newKey(ctx)
 	if err != nil {
 		return "", "", errors.New("key generation failed")
 	}
