@@ -2,8 +2,6 @@ package api
 
 import (
 	"net/http"
-
-	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
 // The org membership gate.
@@ -29,41 +27,42 @@ var membershipExempt = map[string]bool{
 }
 
 // orgMembershipGate refuses a user who is not associated with the org named in
-// the path, writing erchef's 403. For an org-scoped request it also returns
-// the org it resolved, for the caller to reuse; it returns a nil org, and lets
-// the request through, when the path names no org, the org does not exist (the
-// handler writes the 404), or no route matches (the 404 or 405 stands, as
-// webmachine decides both before is_authorized).
-func (a *API) orgMembershipGate(w http.ResponseWriter, r *http.Request, actor Actor) (*store.Org, bool) {
+// the path, writing erchef's 403. It lets the request through when the path
+// names no org, the org does not exist, or no route matches (the 404 or 405
+// stands, as webmachine decides both before is_authorized). The request it
+// returns records the org it looked up, so that authorize and the handler act
+// on that same answer (org_resolution.go): an org that was missing here gets
+// the handler's 404 even if it has been created since.
+func (a *API) orgMembershipGate(w http.ResponseWriter, r *http.Request, actor Actor) (*http.Request, bool) {
 	parts := PathSegments(r.URL.EscapedPath())
 	if len(parts) < 2 || parts[0] != "organizations" || parts[1] == "" {
-		return nil, true
+		return r, true
 	}
 	if actor.IsClient || (len(parts) > 2 && membershipExempt[parts[2]]) {
-		return nil, true
+		return r, true
 	}
 	if !a.routeMatched(r) {
-		return nil, true
+		return r, true
 	}
-	org, ok, err := a.store.Org(parts[1])
+	r, org, ok, err := a.lookupOrg(r, parts[1])
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
-		return nil, false
+		return r, false
 	}
 	if !ok {
-		return nil, true
+		return r, true
 	}
 	// View: only presence matters, so skip the copy. One keyed read; the
 	// clients that make up a fleet's traffic never get here.
 	_, member, err := org.View(assocColl, actor.Name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
-		return nil, false
+		return r, false
 	}
 	if !member {
 		writeError(w, http.StatusForbidden,
 			"'"+actor.Name+"' not associated with organization '"+org.Name()+"'")
-		return nil, false
+		return r, false
 	}
-	return org, true
+	return r, true
 }

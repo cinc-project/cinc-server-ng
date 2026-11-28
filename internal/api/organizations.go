@@ -213,6 +213,10 @@ func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getOrganization(w http.ResponseWriter, r *http.Request) {
+	if orgMissingWhenAuthorized(r, r.PathValue("org")) {
+		writeError(w, http.StatusNotFound, "Cannot find org "+r.PathValue("org"))
+		return
+	}
 	raw, ok, err := a.store.Global().Get(orgsColl, r.PathValue("org"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -227,6 +231,10 @@ func (a *API) getOrganization(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) putOrganization(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("org")
+	if orgMissingWhenAuthorized(r, name) {
+		writeError(w, http.StatusNotFound, "Cannot find org "+name)
+		return
+	}
 	raw, ok, err := a.store.Global().Get(orgsColl, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -272,6 +280,10 @@ func (a *API) putOrganization(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) deleteOrganization(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("org")
+	if orgMissingWhenAuthorized(r, name) {
+		writeError(w, http.StatusNotFound, "Cannot find org "+name)
+		return
+	}
 	raw, ok, err := a.store.Global().Delete(orgsColl, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

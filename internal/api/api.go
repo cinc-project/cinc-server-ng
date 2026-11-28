@@ -58,6 +58,9 @@ type API struct {
 	// generateKey makes the key pairs the keys API hands out. Defaults to
 	// auth.GenerateKey.
 	generateKey func() (*rsa.PrivateKey, error)
+	// afterAuthorize, when set, runs once a request has passed authorization
+	// and before its handler: a test seam for what changes in between.
+	afterAuthorize func(*http.Request)
 	// membership orders group-membership changes against revocations; see
 	// groupmembers.go.
 	membership sync.RWMutex
@@ -201,10 +204,11 @@ func WithoutTrailingSlash(next http.Handler) http.Handler {
 }
 
 // org resolves the {org} path value to its store, writing a 404 and returning
-// nil if it does not exist.
+// nil if it does not exist. Under enforcement that is the answer authorization
+// had (org_resolution.go), not a fresh lookup.
 func (a *API) org(w http.ResponseWriter, r *http.Request) *store.Org {
 	name := r.PathValue("org")
-	org, ok, err := a.store.Org(name)
+	_, org, ok, err := a.lookupOrg(r, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return nil

@@ -34,6 +34,9 @@ func (a *API) authzMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r, ok := a.authorize(w, r)
 		if ok {
+			if a.afterAuthorize != nil {
+				a.afterAuthorize(r)
+			}
 			next.ServeHTTP(w, r)
 		}
 	})
@@ -55,7 +58,7 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	}
 	// A user outside the org is refused before any ACL is read, on every org
 	// route (see org_membership_gate.go).
-	memberOrg, ok := a.orgMembershipGate(w, r, actor)
+	r, ok = a.orgMembershipGate(w, r, actor)
 	if !ok {
 		return r, false
 	}
@@ -100,19 +103,17 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, 
 	org := a.store.Global()
 	if !check.global {
 		// classifyRequest only succeeds for org-scoped paths, so parts[1] is the org.
-		orgName := PathSegments(r.URL.EscapedPath())[1]
-		if memberOrg != nil && memberOrg.Name() == orgName {
-			org = memberOrg // already resolved by the membership gate
-		} else {
-			var err error
-			org, ok, err = a.store.Org(orgName)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return r, false
-			}
-			if !ok {
-				return r, true // unknown org: let the handler emit its own 404
-			}
+		// The membership gate's lookup when it made one, so the gate, this
+		// check and the handler all judge one answer (org_resolution.go).
+		var err error
+		r, org, ok, err = a.lookupOrg(r, PathSegments(r.URL.EscapedPath())[1])
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return r, false
+		}
+		if !ok {
+			// Unknown org: the handler answers 404 from the recorded lookup.
+			return r, true
 		}
 	}
 	if check.existColl != "" {
