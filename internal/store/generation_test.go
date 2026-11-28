@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
@@ -82,6 +83,42 @@ func TestGroupsGenerationChangesInsideTx(t *testing.T) {
 	}
 	if org.GroupsGeneration() == before {
 		t.Fatal("generation unchanged after a groups write inside a transaction")
+	}
+}
+
+// A reader that samples the generation while a transaction that wrote a group
+// is still open reads the groups as they were before it. The generation must
+// move again once the transaction ends, committed or rolled back, so that what
+// the reader derived is not taken as current.
+func TestGroupsGenerationMovesAgainWhenTxEnds(t *testing.T) {
+	errRollback := errors.New("rollback")
+	for _, commit := range []bool{true, false} {
+		st := store.New()
+		if _, err := st.CreateOrg("acme"); err != nil {
+			t.Fatal(err)
+		}
+		org, _, _ := st.Org("acme")
+		var during uint64
+		err := st.Tx(func(tx *store.Store) error {
+			txOrg, _, err := tx.Org("acme")
+			if err != nil {
+				return err
+			}
+			if err := txOrg.Put("groups", "admins", []byte(`{"name":"admins"}`)); err != nil {
+				return err
+			}
+			during = org.GroupsGeneration()
+			if !commit {
+				return errRollback
+			}
+			return nil
+		})
+		if commit && err != nil {
+			t.Fatal(err)
+		}
+		if org.GroupsGeneration() == during {
+			t.Errorf("commit=%v: generation unchanged since it was sampled inside the transaction", commit)
+		}
 	}
 }
 

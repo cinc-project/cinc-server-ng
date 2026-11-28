@@ -46,6 +46,9 @@ type Store struct {
 	// rare (membership changes, not check-ins) and over-invalidation only costs
 	// a rebuild, while under-invalidation would be a correctness bug.
 	groupsGen *atomic.Uint64
+	// txGroups is set, on a transaction's view, when the transaction writes a
+	// group; Tx advances groupsGen again once it ends (see Tx).
+	txGroups *atomic.Bool
 	// watch holds the registered write observers; events is where this Store's
 	// writes are delivered — the observers directly, or a transaction buffer
 	// that releases them on commit.
@@ -93,7 +96,7 @@ func (s *Store) SetClock(now func() time.Time) { s.now = now }
 
 // org returns a handle on the named org (or the global space for "").
 func (s *Store) org(name string) *Org {
-	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, events: s.events, counts: s.counts, now: s.now}
+	return &Org{backend: s.backend, name: name, groupsGen: s.groupsGen, txGroups: s.txGroups, events: s.events, counts: s.counts, now: s.now}
 }
 
 // Backend returns the underlying Backend, for callers (e.g. the server) that need
@@ -174,10 +177,20 @@ func (s *Store) Tx(fn func(tx *Store) error) error {
 	// inside a transaction still invalidates the cached index. Its events are
 	// buffered and only released if the transaction commits, so an index never
 	// sees a write that was rolled back.
+	//
+	// That bump is not enough on its own: the write is invisible outside the
+	// transaction until it commits, so an index built meanwhile records the
+	// advanced generation but reads the groups as they were, and would be kept
+	// as current. The generation therefore advances again once the
+	// transaction has ended, committed or not, if it wrote any group.
 	buf := &txBuffer{}
+	wroteGroups := new(atomic.Bool)
 	err := s.backend.Tx(func(b Backend) error {
-		return fn(&Store{backend: b, groupsGen: s.groupsGen, watch: s.watch, events: buf, counts: s.counts, now: s.now})
+		return fn(&Store{backend: b, groupsGen: s.groupsGen, txGroups: wroteGroups, watch: s.watch, events: buf, counts: s.counts, now: s.now})
 	})
+	if wroteGroups.Load() {
+		s.groupsGen.Add(1)
+	}
 	if err == nil {
 		buf.flushTo(s.events)
 	}
@@ -190,6 +203,7 @@ type Org struct {
 	backend   Backend
 	name      string
 	groupsGen *atomic.Uint64
+	txGroups  *atomic.Bool
 	// events is where this handle's writes are reported: the registered
 	// observers directly, or a transaction buffer that releases them on commit.
 	events emitter
@@ -250,10 +264,18 @@ const groupsColl = "groups"
 // noteWrite advances the groups generation if coll is the groups collection.
 // It runs after the write has landed: a reader that samples the generation
 // before building an index and finds it unchanged afterwards is guaranteed to
-// have seen that write, so the cache can never latch onto stale data.
+// have seen that write, so the cache can never latch onto stale data. Inside a
+// transaction the write has landed only for the transaction, so Tx advances
+// the generation again when it ends.
 func (o *Org) noteWrite(coll string) {
-	if coll == groupsColl && o.groupsGen != nil {
+	if coll != groupsColl {
+		return
+	}
+	if o.groupsGen != nil {
 		o.groupsGen.Add(1)
+	}
+	if o.txGroups != nil {
+		o.txGroups.Store(true)
 	}
 }
 
