@@ -206,16 +206,25 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 	out := map[string]string{}
 	var decodeErr error
 	if err := org.Range("nodes", func(name string, raw []byte) bool {
+		// chef_environment is read loosely: a node stored with a non-string
+		// one (before validation refused it, or loaded from disk) is in no
+		// environment, rather than failing the listing for the whole org.
 		var node struct {
-			ChefEnvironment string `json:"chef_environment"`
+			ChefEnvironment any `json:"chef_environment"`
 		}
 		if err := chefjson.Unmarshal(raw, &node); err != nil {
 			decodeErr = err
 			return false
 		}
-		nodeEnv := node.ChefEnvironment
-		if nodeEnv == "" {
-			nodeEnv = "_default"
+		nodeEnv := "_default"
+		switch e := node.ChefEnvironment.(type) {
+		case nil:
+		case string:
+			if e != "" {
+				nodeEnv = e
+			}
+		default:
+			return true
 		}
 		if nodeEnv == env {
 			out[name] = objectURL(r, org.Name(), "nodes", name)
