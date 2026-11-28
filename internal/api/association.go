@@ -185,6 +185,14 @@ func (a *API) disassociateUser(w http.ResponseWriter, r *http.Request) {
 			" from this organization's admins group before removing him or her from the organization.")
 		return
 	}
+	// An invitation still pending for the user (one sent before a superuser
+	// associated it directly) goes first: accepting it later would bring back
+	// the user just removed. Removed before the association, a failure
+	// part-way leaves a member that the delete can simply retry.
+	if _, _, err := org.Delete(assocReqColl, inviteID(user, org.Name())); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if _, _, err := org.Delete(assocColl, user); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
