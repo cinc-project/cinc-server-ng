@@ -83,10 +83,10 @@ func testTxRollbackKeepsConcurrentWrites(t *testing.T, b store.Backend) {
 // transaction's writes until it commits.
 func testTxUncommittedInvisible(t *testing.T, b store.Backend) {
 	err := b.Tx(func(tx store.Backend) error {
-		if err := tx.Put("acme", "nodes", "web", []byte(`{}`), store.Stamp{}); err != nil {
+		if err := tx.CreateOrg("acme"); err != nil {
 			return err
 		}
-		if err := tx.CreateOrg("acme"); err != nil {
+		if err := tx.Put("acme", "nodes", "web", []byte(`{}`), store.Stamp{}); err != nil {
 			return err
 		}
 		if _, ok, err := b.Get("acme", "nodes", "web"); err != nil || ok {
@@ -192,8 +192,10 @@ func readByRange(tx store.Backend) ([]byte, error) {
 // testTxView asserts every read inside a transaction sees its own writes,
 // deletes and org drop, and that rolling it back leaves the backend as it was.
 func testTxView(t *testing.T, b store.Backend) {
-	if err := b.CreateOrg("acme"); err != nil {
-		t.Fatal(err)
+	for _, org := range []string{"acme", "beta"} {
+		if err := b.CreateOrg(org); err != nil {
+			t.Fatal(err)
+		}
 	}
 	mustPut(t, b, "acme", "nodes", "a", `{"n":"a"}`)
 	mustPut(t, b, "acme", "nodes", "b", `{"n":"b"}`)
@@ -306,8 +308,8 @@ func txViewChecks(tx store.Backend) error {
 	if colls, _ := tx.Collections("acme"); len(colls) != 0 {
 		return fmt.Errorf("recreated org in tx has collections %v", colls)
 	}
-	if orgs, err := tx.ListOrgs(); err != nil || fmt.Sprint(orgs) != "[acme]" {
-		return fmt.Errorf("ListOrgs in tx = %v (%v), want [acme]", orgs, err)
+	if orgs, err := tx.ListOrgs(); err != nil || fmt.Sprint(orgs) != "[acme beta]" {
+		return fmt.Errorf("ListOrgs in tx = %v (%v), want [acme beta]", orgs, err)
 	}
 	return nil
 }

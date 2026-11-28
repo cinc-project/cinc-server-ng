@@ -87,9 +87,18 @@ func (m *memoryBackend) putMeta(org, coll, key string, md Meta) {
 	m.meta[org][coll][key] = md
 }
 
+// exists reports whether writes into org are accepted: it is the global space
+// or a named org. Caller holds the lock.
+func (m *memoryBackend) exists(org string) bool {
+	return org == "" || m.orgs[org]
+}
+
 func (m *memoryBackend) Put(org, coll, key string, val []byte, st Stamp) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.exists(org) {
+		return ErrOrgNotFound
+	}
 	m.set(org, coll, key, val, st)
 	return nil
 }
@@ -97,6 +106,9 @@ func (m *memoryBackend) Put(org, coll, key string, val []byte, st Stamp) error {
 func (m *memoryBackend) Create(org, coll, key string, val []byte, st Stamp) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.exists(org) {
+		return ErrOrgNotFound
+	}
 	if _, ok := m.data[org][coll][key]; ok {
 		return ErrConflict
 	}
@@ -173,6 +185,9 @@ func (m *memoryBackend) Collections(org string) ([]string, error) {
 func (m *memoryBackend) PutBlob(org, checksum string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.exists(org) {
+		return ErrOrgNotFound
+	}
 	if m.blobs[org] == nil {
 		m.blobs[org] = map[string][]byte{}
 	}
@@ -210,6 +225,7 @@ func (m *memoryBackend) CreateOrg(name string) error {
 	if m.orgs[name] {
 		return ErrConflict
 	}
+	m.drop(name)
 	m.orgs[name] = true
 	return nil
 }
@@ -221,10 +237,18 @@ func (m *memoryBackend) DeleteOrg(name string) (bool, error) {
 		return false, nil
 	}
 	delete(m.orgs, name)
+	m.drop(name)
+	return true, nil
+}
+
+// drop discards every object, metadata row and blob held under name. A new
+// org starts with it too: nothing can be written under a name that is not an
+// org, but a new org must not inherit whatever might be there regardless.
+// Caller holds the write lock.
+func (m *memoryBackend) drop(name string) {
 	delete(m.data, name)
 	delete(m.meta, name)
 	delete(m.blobs, name)
-	return true, nil
 }
 
 func (m *memoryBackend) ListOrgs() ([]string, error) {

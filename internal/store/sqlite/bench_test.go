@@ -26,6 +26,9 @@ func benchBackend(b *testing.B) *sqlite.Backend {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { be.Close() })
+	if err := be.CreateOrg("acme"); err != nil {
+		b.Fatal(err)
+	}
 	return be
 }
 
@@ -64,6 +67,9 @@ func openBench(b *testing.B, opts ...sqlite.Option) *sqlite.Backend {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { be.Close() })
+	if err := be.CreateOrg("acme"); err != nil {
+		b.Fatal(err)
+	}
 	return be
 }
 
@@ -126,9 +132,6 @@ func BenchmarkSerialPutGroupCommit(b *testing.B) {
 // every request (a.org → HasOrg) before the actual data operation.
 func BenchmarkHasOrg(b *testing.B) {
 	be := benchBackend(b)
-	if err := be.CreateOrg("acme"); err != nil {
-		b.Fatal(err)
-	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if ok, err := be.HasOrg("acme"); err != nil || !ok {

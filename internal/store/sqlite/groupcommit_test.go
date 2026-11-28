@@ -38,6 +38,9 @@ func TestGroupCommitDurableAndVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { b.Close() })
+	if err := b.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
 
 	const n = 500
 	var wg sync.WaitGroup

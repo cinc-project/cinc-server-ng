@@ -41,6 +41,9 @@ func TestOpenCreatesOwnerOnlyFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { b.Close() })
+	if err := b.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
 	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`), store.Stamp{}); err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +61,9 @@ func TestOpenTightensExistingFiles(t *testing.T) {
 	db := filepath.Join(dir, "cinc.db")
 	b, err := sqlite.Open(db)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.CreateOrg("acme"); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Put("acme", "nodes", "web", []byte(`{"n":1}`), store.Stamp{}); err != nil {

@@ -19,37 +19,52 @@ import (
 // newBackend for each sub-test.
 func Run(t *testing.T, newBackend func(t *testing.T) store.Backend) {
 	t.Helper()
-	t.Run("ObjectRoundTrip", func(t *testing.T) { testObjectRoundTrip(t, newBackend(t)) })
-	t.Run("CopyIndependence", func(t *testing.T) { testCopyIndependence(t, newBackend(t)) })
-	t.Run("CreateConflict", func(t *testing.T) { testCreateConflict(t, newBackend(t)) })
-	t.Run("CreatePreservesOriginal", func(t *testing.T) { testCreatePreservesOriginal(t, newBackend(t)) })
-	t.Run("DeleteSemantics", func(t *testing.T) { testDeleteSemantics(t, newBackend(t)) })
-	t.Run("KeysSorted", func(t *testing.T) { testKeysSorted(t, newBackend(t)) })
-	t.Run("CollectionsSorted", func(t *testing.T) { testCollectionsSorted(t, newBackend(t)) })
-	t.Run("RangeEarlyStop", func(t *testing.T) { testRangeEarlyStop(t, newBackend(t)) })
-	t.Run("OrgNamespacing", func(t *testing.T) { testOrgNamespacing(t, newBackend(t)) })
-	t.Run("Blobs", func(t *testing.T) { testBlobs(t, newBackend(t)) })
+	// seeded is a fresh backend holding the organizations most tests write
+	// into: a backend refuses writes to an organization it does not have.
+	seeded := func(t *testing.T) store.Backend {
+		b := newBackend(t)
+		for _, org := range []string{"acme", "beta", "other"} {
+			if err := b.CreateOrg(org); err != nil {
+				t.Fatalf("CreateOrg(%q): %v", org, err)
+			}
+		}
+		return b
+	}
+	t.Run("ObjectRoundTrip", func(t *testing.T) { testObjectRoundTrip(t, seeded(t)) })
+	t.Run("CopyIndependence", func(t *testing.T) { testCopyIndependence(t, seeded(t)) })
+	t.Run("CreateConflict", func(t *testing.T) { testCreateConflict(t, seeded(t)) })
+	t.Run("CreatePreservesOriginal", func(t *testing.T) { testCreatePreservesOriginal(t, seeded(t)) })
+	t.Run("DeleteSemantics", func(t *testing.T) { testDeleteSemantics(t, seeded(t)) })
+	t.Run("KeysSorted", func(t *testing.T) { testKeysSorted(t, seeded(t)) })
+	t.Run("CollectionsSorted", func(t *testing.T) { testCollectionsSorted(t, seeded(t)) })
+	t.Run("RangeEarlyStop", func(t *testing.T) { testRangeEarlyStop(t, seeded(t)) })
+	t.Run("OrgNamespacing", func(t *testing.T) { testOrgNamespacing(t, seeded(t)) })
+	t.Run("Blobs", func(t *testing.T) { testBlobs(t, seeded(t)) })
 	t.Run("OrgLifecycle", func(t *testing.T) { testOrgLifecycle(t, newBackend(t)) })
 	t.Run("DeleteOrgDropsData", func(t *testing.T) { testDeleteOrgDropsData(t, newBackend(t)) })
 	t.Run("DeleteOrgIsolation", func(t *testing.T) { testDeleteOrgIsolation(t, newBackend(t)) })
 	t.Run("SortOrderFidelity", func(t *testing.T) { testSortOrderFidelity(t, newBackend(t)) })
-	t.Run("OpaqueBodies", func(t *testing.T) { testOpaqueBodies(t, newBackend(t)) })
-	t.Run("Concurrency", func(t *testing.T) { testConcurrency(t, newBackend(t)) })
+	t.Run("OpaqueBodies", func(t *testing.T) { testOpaqueBodies(t, seeded(t)) })
+	t.Run("Concurrency", func(t *testing.T) { testConcurrency(t, seeded(t)) })
 	t.Run("TxCommit", func(t *testing.T) { testTxCommit(t, newBackend(t)) })
-	t.Run("TxRollback", func(t *testing.T) { testTxRollback(t, newBackend(t)) })
-	t.Run("TxReadsOwnWrites", func(t *testing.T) { testTxReadsOwnWrites(t, newBackend(t)) })
-	t.Run("TxRollbackKeepsConcurrentWrites", func(t *testing.T) { testTxRollbackKeepsConcurrentWrites(t, newBackend(t)) })
+	t.Run("TxRollback", func(t *testing.T) { testTxRollback(t, seeded(t)) })
+	t.Run("TxReadsOwnWrites", func(t *testing.T) { testTxReadsOwnWrites(t, seeded(t)) })
+	t.Run("TxRollbackKeepsConcurrentWrites", func(t *testing.T) { testTxRollbackKeepsConcurrentWrites(t, seeded(t)) })
 	t.Run("TxUncommittedInvisible", func(t *testing.T) { testTxUncommittedInvisible(t, newBackend(t)) })
-	t.Run("TxCreateRace", func(t *testing.T) { testTxCreateRace(t, newBackend(t)) })
-	t.Run("TxNoLostUpdateGet", func(t *testing.T) { testTxNoLostUpdate(t, newBackend(t), readByGet) })
-	t.Run("TxNoLostUpdateRange", func(t *testing.T) { testTxNoLostUpdate(t, newBackend(t), readByRange) })
+	t.Run("TxCreateRace", func(t *testing.T) { testTxCreateRace(t, seeded(t)) })
+	t.Run("TxNoLostUpdateGet", func(t *testing.T) { testTxNoLostUpdate(t, seeded(t), readByGet) })
+	t.Run("TxNoLostUpdateRange", func(t *testing.T) { testTxNoLostUpdate(t, seeded(t), readByRange) })
 	t.Run("TxView", func(t *testing.T) { testTxView(t, newBackend(t)) })
-	t.Run("MetaCreateStamps", func(t *testing.T) { testMetaCreateStamps(t, newBackend(t)) })
-	t.Run("MetaPutKeepsCreated", func(t *testing.T) { testMetaPutKeepsCreated(t, newBackend(t)) })
-	t.Run("MetaDeleteForgets", func(t *testing.T) { testMetaDeleteForgets(t, newBackend(t)) })
-	t.Run("MetaSet", func(t *testing.T) { testMetaSet(t, newBackend(t)) })
-	t.Run("MetaTxRollback", func(t *testing.T) { testMetaTxRollback(t, newBackend(t)) })
+	t.Run("MetaCreateStamps", func(t *testing.T) { testMetaCreateStamps(t, seeded(t)) })
+	t.Run("MetaPutKeepsCreated", func(t *testing.T) { testMetaPutKeepsCreated(t, seeded(t)) })
+	t.Run("MetaDeleteForgets", func(t *testing.T) { testMetaDeleteForgets(t, seeded(t)) })
+	t.Run("MetaSet", func(t *testing.T) { testMetaSet(t, seeded(t)) })
+	t.Run("MetaTxRollback", func(t *testing.T) { testMetaTxRollback(t, seeded(t)) })
 	t.Run("MetaDeleteOrg", func(t *testing.T) { testMetaDeleteOrg(t, newBackend(t)) })
+	t.Run("WriteToMissingOrgRefused", func(t *testing.T) { testWriteToMissingOrgRefused(t, newBackend(t)) })
+	t.Run("DeletedOrgRecreatedEmpty", func(t *testing.T) { testDeletedOrgRecreatedEmpty(t, newBackend(t)) })
+	t.Run("TxWriteToMissingOrgRefused", func(t *testing.T) { testTxWriteToMissingOrgRefused(t, newBackend(t)) })
+	t.Run("TxOrgDeletedConcurrently", func(t *testing.T) { testTxOrgDeletedConcurrently(t, seeded(t)) })
 }
 
 func mustPut(t *testing.T, b store.Backend, org, coll, key, val string) {
@@ -278,6 +293,12 @@ func testDeleteOrgIsolation(t *testing.T, b store.Backend) {
 // the documented risk that a SQL backend's ORDER BY collation diverges from the
 // memory backend's sort.Strings for mixed-case/unicode keys.
 func testSortOrderFidelity(t *testing.T, b store.Backend) {
+	orgNames := []string{"Zorg", "acme", "Beta"}
+	for _, o := range orgNames {
+		if err := b.CreateOrg(o); err != nil {
+			t.Fatal(err)
+		}
+	}
 	keys := []string{"Zebra", "apple", "Banana", "10", "2", "apple2", "_under", "Ähen"}
 	for _, k := range keys {
 		mustPut(t, b, "acme", "nodes", k, `{}`)
@@ -294,11 +315,11 @@ func testSortOrderFidelity(t *testing.T, b store.Backend) {
 
 	colls := []string{"Roles", "nodes", "Environments", "data_bags"}
 	for _, c := range colls {
-		mustPut(t, b, "beta", c, "x", `{}`)
+		mustPut(t, b, "Beta", c, "x", `{}`)
 	}
 	wantColls := append([]string(nil), colls...)
 	sort.Strings(wantColls)
-	gotColls, err := b.Collections("beta")
+	gotColls, err := b.Collections("Beta")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,12 +327,6 @@ func testSortOrderFidelity(t *testing.T, b store.Backend) {
 		t.Fatalf("Collections order diverges:\n got=%v\nwant=%v", gotColls, wantColls)
 	}
 
-	orgNames := []string{"Zorg", "acme", "Beta"}
-	for _, o := range orgNames {
-		if err := b.CreateOrg(o); err != nil {
-			t.Fatal(err)
-		}
-	}
 	wantOrgs := append([]string(nil), orgNames...)
 	sort.Strings(wantOrgs)
 	gotOrgs, err := b.ListOrgs()

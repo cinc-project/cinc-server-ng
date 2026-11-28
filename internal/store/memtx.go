@@ -164,12 +164,28 @@ func (t *memTx) set(org, coll, key string, val []byte, st Stamp) {
 	t.record(org, coll, key, &txObj{val: clone(val), md: md})
 }
 
+// exists reports whether the transaction may write into org: the global
+// space, or an org that exists as the transaction sees it.
+func (t *memTx) exists(org string) bool {
+	if org == "" {
+		return true
+	}
+	ok, _ := t.HasOrg(org)
+	return ok
+}
+
 func (t *memTx) Put(org, coll, key string, val []byte, st Stamp) error {
+	if !t.exists(org) {
+		return ErrOrgNotFound
+	}
 	t.set(org, coll, key, val, st)
 	return nil
 }
 
 func (t *memTx) Create(org, coll, key string, val []byte, st Stamp) error {
+	if !t.exists(org) {
+		return ErrOrgNotFound
+	}
 	if _, _, ok := t.lookup(org, coll, key); ok {
 		return ErrConflict
 	}
@@ -296,6 +312,9 @@ func (t *memTx) recordBlob(org, checksum string, b *txBlob) {
 }
 
 func (t *memTx) PutBlob(org, checksum string, data []byte) error {
+	if !t.exists(org) {
+		return ErrOrgNotFound
+	}
 	t.recordBlob(org, checksum, &txBlob{data: clone(data)})
 	return nil
 }
@@ -329,8 +348,15 @@ func (t *memTx) CreateOrg(name string) error {
 	if ok, _ := t.HasOrg(name); ok {
 		return ErrConflict
 	}
+	// An org the transaction dropped existed when it began: recreating it
+	// conflicts with nobody. Otherwise another writer may create it first.
+	if !t.dropped[name] {
+		t.createdOrgs = append(t.createdOrgs, name)
+	}
 	t.orgs[name] = true
-	t.createdOrgs = append(t.createdOrgs, name)
+	// The new org starts empty: whatever the backend holds under the name is
+	// hidden from the transaction and discarded on commit, as for a drop.
+	t.dropped[name] = true
 	return nil
 }
 
@@ -366,21 +392,59 @@ func (t *memTx) ListOrgs() ([]string, error) {
 
 func (t *memTx) Tx(func(tx Backend) error) error { return errNestedTx }
 
+// orgsRemain reports ErrOrgNotFound if an org the transaction stores an
+// object or blob into will not exist once it commits: one it did not create,
+// which another writer deleted while it was open. Committing would leave the
+// writes under a name that is no org, for one created later to inherit.
+// Caller holds the backend's write lock.
+func (t *memTx) orgsRemain() error {
+	ok := func(org string) bool {
+		if org == "" {
+			return true
+		}
+		if exists, set := t.orgs[org]; set {
+			return exists
+		}
+		return t.m.orgs[org]
+	}
+	for org, colls := range t.objs {
+		for _, keys := range colls {
+			for _, e := range keys {
+				if !e.deleted && !e.metaOnly && !ok(org) {
+					return ErrOrgNotFound
+				}
+			}
+		}
+	}
+	for org, sums := range t.blobs {
+		for _, b := range sums {
+			if !b.deleted && !ok(org) {
+				return ErrOrgNotFound
+			}
+		}
+	}
+	return nil
+}
+
 func (t *memTx) Close() error { return nil }
 
 // commit applies the overlay to the backend under its write lock. It fails
 // with ErrConflict, applying nothing, if another writer has meanwhile changed
-// an object this transaction writes (see seen), or created an org it created.
-// Objects of an org the transaction dropped are not checked: the drop
-// discards them whatever they hold.
+// an object this transaction writes (see seen), or created an org it created;
+// and with ErrOrgNotFound if another writer deleted an org it writes into.
+// Objects of an org the transaction dropped (or created) are not checked: the
+// drop discards them whatever they hold.
 func (t *memTx) commit() error {
 	m := t.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, name := range t.createdOrgs {
-		if t.orgs[name] && !t.dropped[name] && m.orgs[name] {
+		if t.orgs[name] && m.orgs[name] {
 			return ErrConflict
 		}
+	}
+	if err := t.orgsRemain(); err != nil {
+		return err
 	}
 	for org, colls := range t.objs {
 		if t.dropped[org] {

@@ -122,6 +122,32 @@ func TestCachedGroupsRebuildOnlyWhenGroupsChange(t *testing.T) {
 	}
 }
 
+// An org deleted and created again under the same name starts with no
+// membership, even though creating it writes no group and so leaves the
+// groups generation where it was.
+func TestCachedGroupsDroppedWithTheOrg(t *testing.T) {
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	api := New(st)
+	if err := addMember(org, "clients", memberClients, "ghost"); err != nil {
+		t.Fatal(err)
+	}
+	ghost := Actor{Name: "ghost", IsClient: true}
+	if got, _ := api.actorGroups(org, ghost); !got["clients"] {
+		t.Fatalf("baseline: ghost should be in clients; got %v", got)
+	}
+	if _, err := st.DeleteOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
+	org, err := st.CreateOrg("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := api.actorGroups(org, ghost); got["clients"] {
+		t.Errorf("recreated org's index still has ghost in clients; got %v", got)
+	}
+}
+
 // Each organization gets its own membership, never another's.
 func TestCachedGroupsAreScopedPerOrg(t *testing.T) {
 	st := store.New()

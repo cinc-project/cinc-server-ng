@@ -253,10 +253,10 @@ func (c *coalescer) txView(tx *sql.Tx) *Backend {
 	return &Backend{db: c.b.db, rdb: c.b.rdb, q: tx, rq: tx}
 }
 
-// runBatch applies every job in one transaction and commits once. ErrConflict is
-// a normal Create result (the row's statement succeeded as a no-op), so it does
-// not abort the batch. Any other apply error, or a commit failure, drops the
-// whole batch to isolated single-job retries so one bad write cannot fail its
+// runBatch applies every job in one transaction and commits once. ErrConflict
+// and ErrOrgNotFound are normal write results (the row's statement succeeded as
+// a no-op), so they do not abort the batch. Any other apply error, or a commit
+// failure, drops the whole batch to isolated single-job retries so one bad write cannot fail its
 // innocent neighbors and each job still gets its true result.
 func (c *coalescer) runBatch(batch []*writeJob) {
 	tx, err := c.b.db.Begin()
@@ -268,7 +268,7 @@ func (c *coalescer) runBatch(batch []*writeJob) {
 	results := make([]error, len(batch))
 	for i, j := range batch {
 		results[i] = j.apply(tb)
-		if results[i] != nil && !errors.Is(results[i], store.ErrConflict) {
+		if results[i] != nil && !noOp(results[i]) {
 			tx.Rollback()
 			c.runIsolated(batch)
 			return
@@ -295,7 +295,7 @@ func (c *coalescer) runIsolated(batch []*writeJob) {
 			continue
 		}
 		err = j.apply(c.txView(tx))
-		if err != nil && !errors.Is(err, store.ErrConflict) {
+		if err != nil && !noOp(err) {
 			tx.Rollback()
 			j.done <- err
 			continue
@@ -306,6 +306,12 @@ func (c *coalescer) runIsolated(batch []*writeJob) {
 			j.done <- err
 		}
 	}
+}
+
+// noOp reports whether err is a write result whose statement changed nothing
+// and succeeded: a Create that found the key, or a write into a missing org.
+func noOp(err error) bool {
+	return errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrOrgNotFound)
 }
 
 // fail reports err to every job in batch (used when a batch transaction cannot
@@ -330,9 +336,14 @@ func (c *coalescer) close() {
 // raw fallback used inside a transaction.
 const (
 	sqlObjGet = `SELECT body FROM objects WHERE org=? AND collection=? AND key=?`
-	// An update keeps created_at: only a new row takes the stamp as its creation.
-	sqlObjPut     = `INSERT INTO objects(org,collection,key,body,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?) ON CONFLICT(org,collection,key) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at, updated_by=excluded.updated_by`
-	sqlObjCreate  = `INSERT INTO objects(org,collection,key,body,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?) ON CONFLICT(org,collection,key) DO NOTHING`
+	// A write stores a row only into the global space ('') or an org that
+	// exists, checked in the same statement, so a request that found an org
+	// before it was deleted cannot leave rows behind under the name (?1 is
+	// the org in every statement using it). An update keeps created_at: only
+	// a new row takes the stamp as its creation.
+	sqlOrgExists  = ` WHERE ?1='' OR EXISTS (SELECT 1 FROM orgs WHERE name=?1)`
+	sqlObjPut     = `INSERT INTO objects(org,collection,key,body,created_at,updated_at,updated_by) SELECT ?1,?2,?3,?4,?5,?6,?7` + sqlOrgExists + ` ON CONFLICT(org,collection,key) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at, updated_by=excluded.updated_by`
+	sqlObjCreate  = `INSERT INTO objects(org,collection,key,body,created_at,updated_at,updated_by) SELECT ?1,?2,?3,?4,?5,?6,?7` + sqlOrgExists + ` ON CONFLICT(org,collection,key) DO NOTHING`
 	sqlObjMeta    = `SELECT created_at, updated_at, updated_by FROM objects WHERE org=? AND collection=? AND key=?`
 	sqlObjSetMeta = `UPDATE objects SET created_at=?, updated_at=?, updated_by=? WHERE org=? AND collection=? AND key=?`
 	sqlObjDelete  = `DELETE FROM objects WHERE org=? AND collection=? AND key=?`
@@ -340,7 +351,7 @@ const (
 	sqlHasOrg     = `SELECT 1 FROM orgs WHERE name=?`
 	sqlBlobGet    = `SELECT content FROM blobs WHERE org=? AND checksum=?`
 	sqlBlobHas    = `SELECT 1 FROM blobs WHERE org=? AND checksum=?`
-	sqlBlobPut    = `INSERT INTO blobs(org,checksum,content) VALUES(?,?,?) ON CONFLICT(org,checksum) DO UPDATE SET content=excluded.content`
+	sqlBlobPut    = `INSERT INTO blobs(org,checksum,content) SELECT ?1,?2,?3` + sqlOrgExists + ` ON CONFLICT(org,checksum) DO UPDATE SET content=excluded.content`
 	sqlBlobDelete = `DELETE FROM blobs WHERE org=? AND checksum=?`
 )
 
@@ -512,9 +523,25 @@ func (b *Backend) Get(org, coll, key string) ([]byte, bool, error) {
 func (b *Backend) Put(org, coll, key string, val []byte, st store.Stamp) error {
 	at, by := nanos(st.At), text(st.By)
 	return b.coalesce(func(tb *Backend) error {
-		_, err := tb.exec(tb.stObjPut, sqlObjPut, org, coll, key, val, at, at, by)
-		return err
+		res, err := tb.exec(tb.stObjPut, sqlObjPut, org, coll, key, val, at, at, by)
+		return orgWritten(res, err)
 	})
+}
+
+// orgWritten turns the result of an upsert guarded by sqlOrgExists into
+// ErrOrgNotFound when it stored nothing, which only a missing org causes.
+func orgWritten(res sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return store.ErrOrgNotFound
+	}
+	return nil
 }
 
 func (b *Backend) Create(org, coll, key string, val []byte, st store.Stamp) error {
@@ -529,10 +556,30 @@ func (b *Backend) Create(org, coll, key string, val []byte, st store.Stamp) erro
 			return err
 		}
 		if n == 0 {
+			// Nothing stored: the key exists, or the org does not.
+			if ok, err := tb.writable(org); err != nil {
+				return err
+			} else if !ok {
+				return store.ErrOrgNotFound
+			}
 			return store.ErrConflict
 		}
 		return nil
 	})
+}
+
+// writable reports whether org is the global space or an org that exists, read
+// on the write connection (or transaction) so it sees what the write just saw.
+func (b *Backend) writable(org string) (bool, error) {
+	if org == "" {
+		return true, nil
+	}
+	var one int
+	err := b.q.QueryRow(sqlHasOrg, org).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (b *Backend) Meta(org, coll, key string) (store.Meta, bool, error) {
@@ -664,8 +711,7 @@ func (b *Backend) Collections(org string) ([]string, error) {
 
 func (b *Backend) PutBlob(org, checksum string, data []byte) error {
 	return b.coalesce(func(tb *Backend) error {
-		_, err := tb.exec(tb.stBlobPut, sqlBlobPut, org, checksum, data)
-		return err
+		return orgWritten(tb.exec(tb.stBlobPut, sqlBlobPut, org, checksum, data))
 	})
 }
 
@@ -697,46 +743,63 @@ func (b *Backend) DeleteBlob(org, checksum string) error {
 	})
 }
 
+// CreateOrg records the org and, in the same transaction, discards any rows
+// held under its name, so the new org starts empty.
 func (b *Backend) CreateOrg(name string) error {
 	return b.coalesce(func(tb *Backend) error {
-		res, err := tb.q.Exec(`INSERT INTO orgs(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return store.ErrConflict
-		}
-		return nil
+		return tb.atomically(func(tb *Backend) error {
+			res, err := tb.q.Exec(`INSERT INTO orgs(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return store.ErrConflict
+			}
+			return tb.dropRows(name)
+		})
 	})
+}
+
+// atomically runs fn in a transaction: the one b is already bound to, or a
+// new one on the writer pool.
+func (b *Backend) atomically(fn func(tb *Backend) error) error {
+	if _, pool := b.q.(*sql.DB); !pool {
+		return fn(b)
+	}
+	return b.Tx(func(tx store.Backend) error { return fn(tx.(*Backend)) })
+}
+
+// dropRows deletes every object and blob held under org.
+func (b *Backend) dropRows(org string) error {
+	if _, err := b.q.Exec(`DELETE FROM objects WHERE org=?`, org); err != nil {
+		return err
+	}
+	_, err := b.q.Exec(`DELETE FROM blobs WHERE org=?`, org)
+	return err
 }
 
 func (b *Backend) DeleteOrg(name string) (bool, error) {
 	var existed bool
 	err := b.coalesce(func(tb *Backend) error {
-		res, err := tb.q.Exec(`DELETE FROM orgs WHERE name=?`, name)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			existed = false
-			return nil
-		}
-		if _, err := tb.q.Exec(`DELETE FROM objects WHERE org=?`, name); err != nil {
-			return err
-		}
-		if _, err := tb.q.Exec(`DELETE FROM blobs WHERE org=?`, name); err != nil {
-			return err
-		}
-		existed = true
-		return nil
+		return tb.atomically(func(tb *Backend) error {
+			res, err := tb.q.Exec(`DELETE FROM orgs WHERE name=?`, name)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			existed = n > 0
+			if !existed {
+				return nil
+			}
+			return tb.dropRows(name)
+		})
 	})
 	return existed, err
 }

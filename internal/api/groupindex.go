@@ -200,6 +200,14 @@ func (c *groupIndexCache) get(org *store.Org) (*groupIndex, error) {
 // reason membership is stored as rows. Changes to a group *document* are rare
 // and still go through the generation check, which rebuilds.
 func (c *groupIndexCache) observe(ev store.Event) {
+	// An org dropped, or created afresh: whatever index it had describes
+	// another org's membership.
+	if ev.Deleted && ev.Collection == "" {
+		c.mu.Lock()
+		delete(c.m, ev.Org)
+		c.mu.Unlock()
+		return
+	}
 	if ev.Collection != groupMembersColl {
 		return
 	}
