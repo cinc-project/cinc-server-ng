@@ -83,7 +83,7 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.BoolVar(&f.enforceACLs, "enforce-acls", true, "enforce object ACLs and group membership; pass --enforce-acls=false for a permissive server")
 	fs.StringVar(&f.repo, "repo", "", "path to a chef-repo to load into the first org at startup")
 	fs.StringVar(&f.state, "state", "", "path to a full server-state directory to load at startup")
-	fs.StringVar(&f.webuiKey, "webui-key", "", "path to a webui public/private key for X-Ops-Request-Source: web impersonation (defaults to the admin key)")
+	fs.StringVar(&f.webuiKey, "webui-key", "", "path to a webui public/private key for X-Ops-Request-Source: web impersonation (defaults to the admin user's current keys)")
 	fs.StringVar(&f.storage, "storage", envOr("CINC_SERVER_NG_STORAGE", "memory"), "storage backend: memory (ephemeral) or sqlite (durable)")
 	fs.StringVar(&f.db, "db", os.Getenv("CINC_SERVER_NG_DB"), "sqlite database file path (required when --storage sqlite)")
 	fs.BoolVar(&f.groupCommit, "sqlite-group-commit", true, "batch concurrent sqlite writes into shared transactions: much higher write throughput and far better tail latency under fleet load, at a few microseconds more on a serialized single-client write; pass --sqlite-group-commit=false to opt out")
@@ -187,7 +187,14 @@ func run(args []string, out io.Writer) error {
 	}
 	// The admin key is available right after New (before Start), so --key-out and
 	// --init both work without binding a listener.
-	if f.keyFile != "" {
+	// The server holds only the private key it bootstrapped the admin with. If
+	// the admin has since replaced, deleted or let that key expire, it no
+	// longer authenticates, and the file is left as it is (it may hold the
+	// operator's copy of the new key) rather than overwritten with a dead one.
+	if f.keyFile != "" && !srv.AdminKeyCurrent() {
+		fmt.Fprintf(out, "WARNING: admin key not written to %s: %q no longer holds the key it was bootstrapped with (rotated, deleted or expired through the keys API)\n",
+			f.keyFile, srv.AdminName())
+	} else if f.keyFile != "" {
 		if err := os.WriteFile(f.keyFile, srv.AdminKey(), 0o600); err != nil {
 			return fmt.Errorf("write key file: %w", err)
 		}
@@ -225,7 +232,7 @@ func run(args []string, out io.Writer) error {
 	statsUser, statsPassword := srv.StatsCredentials()
 	fmt.Fprintln(out, statsBanner(statsUser, statsPassword, f.statsPassword == "", f.noAuth))
 	if !f.noAuth {
-		webuiSrc := "admin key"
+		webuiSrc := "the admin user's current keys"
 		if f.webuiKey != "" {
 			webuiSrc = f.webuiKey
 		}

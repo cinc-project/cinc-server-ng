@@ -101,7 +101,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			if !ok {
 				return
 			}
-			if err := auth.Verify(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"), s.webuiPub); err != nil {
+			webuiPubs, err := s.webuiKeys(candidates[0])
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			prepared, err := auth.Prepare(r.Method, wirePath(r.URL), body, parsed, r.Header.Get("X-Ops-Server-API-Version"))
+			if err != nil || !prepared.VerifyAny(webuiPubs) {
 				s.authFailed(w, r, parsed.UserID, "web UI signature did not verify against the webui key")
 				return
 			}
@@ -140,7 +146,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			// A stand-in verification, so that an unknown name costs about
 			// what a known one with a bad signature does. Its result is
 			// ignored: nobody answers to the name, whatever key signed.
-			prepared.VerifyAny([]*rsa.PublicKey{s.webuiPub})
+			prepared.VerifyAny([]*rsa.PublicKey{s.standInKey()})
 			s.authFailed(w, r, parsed.UserID, "no such actor, or it has no unexpired key")
 			return
 		}
@@ -229,6 +235,42 @@ func (s *Server) resolveAuth(path, name string) ([]authCandidate, error) {
 		out = append(out, *client)
 	}
 	return out, nil
+}
+
+// webuiKeys returns the keys a web-UI request (X-Ops-Request-Source: web) may
+// be signed with. A configured WebUIKey is the only one. Without it, the webui
+// key is the bootstrap admin's: every key the admin user may sign with now
+// (its unexpired keys, as resolveAuth reads them), and none once the user no
+// longer carries the superuser flag. Reading them per request, rather than
+// fixing the bootstrap key at startup, is what makes a key the admin rotates
+// away, deletes or lets expire stop impersonating users, and lets a console
+// moved to the admin's new key keep working. A request made as the admin
+// itself reuses the keys already read for it.
+func (s *Server) webuiKeys(actor authCandidate) ([]*rsa.PublicKey, error) {
+	if s.webuiPub != nil {
+		return []*rsa.PublicKey{s.webuiPub}, nil
+	}
+	if !actor.actor.IsClient && actor.actor.Name == s.opts.AdminName {
+		if !actor.actor.IsGlobalAdmin {
+			return nil, nil
+		}
+		return actor.pubs, nil
+	}
+	pubs, admin, ok, err := s.parseActorRecord(s.store.Global(), "users", s.opts.AdminName)
+	if err != nil || !ok || !admin {
+		return nil, err
+	}
+	return pubs, nil
+}
+
+// standInKey is the key an unknown actor's signature is checked against, for
+// timing only (see authFailed): the configured webui key, else the admin's
+// bootstrap key.
+func (s *Server) standInKey() *rsa.PublicKey {
+	if s.webuiPub != nil {
+		return s.webuiPub
+	}
+	return s.adminPub
 }
 
 // parseWebUIKey accepts a PEM-encoded RSA public or private key and returns the

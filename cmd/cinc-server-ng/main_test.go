@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -373,5 +374,59 @@ func TestBootstrapUserFlagErrors(t *testing.T) {
 		if err := run(append(tc.args, "--init"), io.Discard); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("run(%v) = %v, want an error mentioning %q", tc.args, err, tc.want)
 		}
+	}
+}
+
+// --key-out writes the admin key only while it still authenticates: once the
+// admin has rotated it away through the keys API, the server holds no private
+// half of the admin's current key, so it leaves the file alone and says why
+// rather than overwrite it with a key that no longer works.
+func TestKeyOutSkipsARetiredAdminKey(t *testing.T) {
+	dir := t.TempDir()
+	db, keyFile := filepath.Join(dir, "k.db"), filepath.Join(dir, "pivotal.pem")
+
+	// Baseline: on a fresh database the bootstrap key is written.
+	if err := run([]string{"--storage", "sqlite", "--db", db, "--init", "--key-out", keyFile}, io.Discard); err != nil {
+		t.Fatalf("run(--init): %v", err)
+	}
+	written, err := os.ReadFile(keyFile)
+	if err != nil || !strings.Contains(string(written), "PRIVATE KEY") {
+		t.Fatalf("key file after first run: %q, %v", written, err)
+	}
+
+	// The admin retires the bootstrap key.
+	srv, err := server.New(server.Options{Storage: "sqlite", DB: db, DisableAuth: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("DELETE", srv.URL()+"/users/pivotal/keys/default", nil)
+	req.Header.Set("X-Ops-Server-API-Version", "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete default key = %d", resp.StatusCode)
+	}
+	if err := srv.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(keyFile, []byte("operator's key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := run([]string{"--storage", "sqlite", "--db", db, "--init", "--key-out", keyFile}, &buf); err != nil {
+		t.Fatalf("run(--init) after rotation: %v", err)
+	}
+	if got, _ := os.ReadFile(keyFile); string(got) != "operator's key\n" {
+		t.Errorf("key file overwritten with the retired key: %q", got)
+	}
+	if !strings.Contains(buf.String(), "not written") {
+		t.Errorf("no warning that the key was not written, got: %q", buf.String())
 	}
 }

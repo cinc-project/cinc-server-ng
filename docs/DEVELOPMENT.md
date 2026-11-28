@@ -116,7 +116,9 @@ for Chef Infra Server) signs requests on a user's behalf using the **webui key**
 via the
 `X-Ops-Request-Source: web` mechanism, which cinc-server-ng supports. By default the
 webui key **is** the bootstrap admin key, i.e. the `dev-admin.pem` written above —
-no extra setup. (To use a distinct key instead, pass `--webui-key <path>`; production
+no extra setup. (More exactly, it is whichever keys the admin can currently sign
+with, so rotating the admin's key through the keys API rotates the console's too.
+To use a distinct key instead, pass `--webui-key <path>`; production
 setups should, see [DEPLOYMENT.md](DEPLOYMENT.md#running-cinc-console-against-it).)
 
 1. Start the durable dev server with auth on:

@@ -239,6 +239,18 @@ cinc-server-ng --storage sqlite --db /data/cinc.db \
 - The admin key and the webui key rotate independently. To rotate the webui
   key, generate a new pair, replace both files, and restart both processes.
 
+Without `--webui-key`, the webui key is whichever keys `pivotal` can sign
+with at the moment of each request: its unexpired keys, as
+`GET /users/pivotal/keys` lists them, and only while `pivotal` is the
+superuser. Rotating `pivotal`'s key through the keys API therefore rotates
+the webui key too: the old key stops working for the console at once, and
+the console must be given the new private key.
+
+`--key-out` writes the private key the server bootstrapped `pivotal` with,
+the only one it holds. Once `pivotal` has replaced, deleted or let that key
+expire, `--key-out` leaves the file as it is and prints a warning rather
+than write a key that no longer authenticates; keep the new key yourself.
+
 ### Create a user to log in as
 
 The console logs users in with a password, which it checks with
