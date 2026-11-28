@@ -142,6 +142,17 @@ server's clock synchronized.
 - The server allows 10 s to receive request headers and sets no overall
   request timeout, so large cookbook transfers on slow links complete. Don't
   set a short overall timeout on the proxy either.
+- Request bodies are on a clock, `--body-timeout` (default `2m`). An API body
+  is read before its signature is checked, so it must arrive whole within that
+  time, or the connection is closed; a full 2,000,000-byte body needs about
+  130 kbit/s. A cookbook file upload has no overall limit and is closed only
+  after it sends nothing for that long, like nginx's `client_body_timeout`.
+  A negative value turns this off.
+- `--max-connections` (default `0`, no limit) caps the client connections held
+  open at once; more wait in the listen backlog until one closes. If you set
+  it, leave room for your fleet's concurrent chef-client runs plus the load
+  balancer's kept-alive connections, and keep it below the process's open file
+  limit.
 - API request bodies are capped at 2,000,000 bytes (`--max-request-size`) and
   cookbook files at 250 MiB (`--max-file-size`), Chef Infra Server's defaults;
   larger ones get `413`. Set the proxy's limit to at least the file cap. nginx

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cinc-project/cinc-server-ng/internal/api"
 	"github.com/cinc-project/cinc-server-ng/server"
@@ -276,6 +277,30 @@ func TestBodyCapFlagsSet(t *testing.T) {
 	opts := f.serverOptions(nil)
 	if opts.MaxBodyBytes != 1000000 || opts.MaxFileStoreBytes != 1048576 {
 		t.Errorf("options caps = %d, %d, want 1000000, 1048576", opts.MaxBodyBytes, opts.MaxFileStoreBytes)
+	}
+}
+
+// --body-timeout defaults to the server's own default, and --max-connections
+// to no cap, so neither changes a normal chef-client or knife run.
+func TestConnectionFlagsDefault(t *testing.T) {
+	f, err := parseFlags(nil, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	opts := f.serverOptions(nil)
+	if opts.BodyTimeout != server.DefaultBodyTimeout || opts.MaxConnections != 0 {
+		t.Errorf("defaults = %v, %d, want %v, 0", opts.BodyTimeout, opts.MaxConnections, server.DefaultBodyTimeout)
+	}
+}
+
+func TestConnectionFlagsSet(t *testing.T) {
+	f, err := parseFlags([]string{"--body-timeout", "30s", "--max-connections", "500"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	opts := f.serverOptions(nil)
+	if opts.BodyTimeout != 30*time.Second || opts.MaxConnections != 500 {
+		t.Errorf("options = %v, %d, want 30s, 500", opts.BodyTimeout, opts.MaxConnections)
 	}
 }
 
