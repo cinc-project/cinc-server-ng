@@ -277,11 +277,14 @@ type Server struct {
 	validatorKeys map[string][]byte // org name -> PEM-encoded validator private key
 	keyCache      *auth.PublicKeyCache
 	users         *userNames     // global user names, for resolveAuth
-	webuiPub      *rsa.PublicKey // verifies X-Ops-Request-Source: web requests
-	fileStoreKey  []byte         // signs/verifies pre-signed cookbook file-store URLs
-	api           *api.API
-	url           string
-	certs         *certLoader // nil unless serving TLS
+	adminPub      *rsa.PublicKey // public half of adminKey
+	// webuiPub verifies X-Ops-Request-Source: web requests when a WebUIKey
+	// was configured. When nil, the admin user's current keys do (webuiKeys).
+	webuiPub     *rsa.PublicKey
+	fileStoreKey []byte // signs/verifies pre-signed cookbook file-store URLs
+	api          *api.API
+	url          string
+	certs        *certLoader // nil unless serving TLS
 	// bootstrapWarning says why the bootstrap user was not granted its
 	// memberships at startup, or is empty.
 	bootstrapWarning string
@@ -509,9 +512,11 @@ func New(opts Options) (*Server, error) {
 	}
 
 	// The webui key verifies management-console requests (X-Ops-Request-Source:
-	// web). It defaults to the admin key, so the --key-out key acts as the webui
-	// key without extra setup; a distinct key may be supplied via WebUIKey.
-	webuiPub := &adminPriv.PublicKey
+	// web). A distinct key may be supplied via WebUIKey. Without one, the admin
+	// user's keys serve, read per request (webuiKeys), so the --key-out key acts
+	// as the webui key without extra setup and a key the admin rotates away,
+	// deletes or lets expire stops verifying web requests with it.
+	var webuiPub *rsa.PublicKey
 	if len(opts.WebUIKey) > 0 {
 		webuiPub, err = parseWebUIKey(opts.WebUIKey)
 		if err != nil {
@@ -637,6 +642,7 @@ func New(opts Options) (*Server, error) {
 		adminKey:      auth.EncodePrivateKeyPEM(adminPriv),
 		validatorKeys: validatorKeys,
 		keyCache:      auth.NewPublicKeyCache(),
+		adminPub:      &adminPriv.PublicKey,
 		webuiPub:      webuiPub,
 		fileStoreKey:  fileStoreKey,
 		certs:         certs,
@@ -764,9 +770,29 @@ func (s *Server) Drain() {
 // URL is the base URL the server is listening on (valid after Start).
 func (s *Server) URL() string { return s.url }
 
-// AdminKey returns the PEM-encoded private key for the admin user. Sign
-// requests with this key (and AdminName) to act as the administrator.
+// AdminKey returns the PEM-encoded private key the admin user was bootstrapped
+// with. Sign requests with this key (and AdminName) to act as the
+// administrator, as long as AdminKeyCurrent says it still can: the server
+// holds only the private key it generated, so once the admin replaces, deletes
+// or lets that key expire through the keys API, this key no longer
+// authenticates and the server has no private half of the new one to hand out.
 func (s *Server) AdminKey() []byte { return s.adminKey }
+
+// AdminKeyCurrent reports whether AdminKey is still one of the admin user's
+// unexpired keys, so that it authenticates as the admin (and, with no WebUIKey
+// configured, signs web-UI requests).
+func (s *Server) AdminKeyCurrent() bool {
+	pubs, _, ok, err := s.parseActorRecord(s.store.Global(), "users", s.opts.AdminName)
+	if err != nil || !ok {
+		return false
+	}
+	for _, pub := range pubs {
+		if pub.Equal(s.adminPub) {
+			return true
+		}
+	}
+	return false
+}
 
 // AdminName returns the bootstrap admin user name.
 func (s *Server) AdminName() string { return s.opts.AdminName }

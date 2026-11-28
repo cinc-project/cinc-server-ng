@@ -17,7 +17,13 @@ import (
 // console uses to act on a user's behalf.
 func webuiSignedAs(t *testing.T, srv *Server, userID, method, url, body string) *http.Request {
 	t.Helper()
-	key, err := auth.ParsePrivateKey(srv.AdminKey())
+	return webuiSignedWith(t, srv.AdminKey(), userID, method, url, body)
+}
+
+// webuiSignedWith is webuiSignedAs with the webui private key given as PEM.
+func webuiSignedWith(t *testing.T, keyPEM []byte, userID, method, url, body string) *http.Request {
+	t.Helper()
+	key, err := auth.ParsePrivateKey(keyPEM)
 	if err != nil {
 		t.Fatalf("parse webui key: %v", err)
 	}
