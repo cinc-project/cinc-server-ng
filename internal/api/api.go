@@ -6,6 +6,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -147,34 +148,47 @@ func (a *API) Handler() http.Handler {
 	if a.enforceACL {
 		h = a.authzMiddleware(h)
 	}
-	h = withoutTrailingSlash(WithAPIVersion(h))
+	h = WithoutTrailingSlash(WithAPIVersion(h))
 	if a.externalURL != "" {
 		h = withExternalURL(a.externalURL, h)
 	}
 	return h
 }
 
-// withoutTrailingSlash routes "/users/" as "/users", as Chef Infra Server does
+// WithoutTrailingSlash routes "/users/" as "/users", as Chef Infra Server does
 // (webmachine matches path tokens, so a trailing slash is not one), and real
-// clients rely on it: knife user create posts to "/users/". It is the
-// outermost layer on purpose: authorization classifies requests by path, and
-// an unrecognized read is allowed through, so a slash that survived to that
-// point could make "/nodes/web01/" skip its ACL check and then route anyway.
-func withoutTrailingSlash(next http.Handler) http.Handler {
+// clients rely on it: knife user create posts to "/users/". Authorization
+// classifies requests by path, and an unrecognized read is allowed through, so
+// a slash that survived to that point could make "/nodes/web01/" skip its ACL
+// check and then route anyway. The server applies it ahead of authentication
+// too, so that every layer decides on the one path the router routes.
+//
+// The slashes are trimmed from the escaped path, as received, and the decoded
+// path is derived from what is left: an escaped slash (%2F) is part of a name,
+// not a separator, and stays. Trimming the decoded path instead would drop
+// the slash a trailing %2F decodes to while RawPath kept it; url.URL then
+// discards RawPath as stale and re-encodes Path, turning "file_store%2Fx%2F"
+// into the two segments "file_store/x" after the auth layer had judged it one.
+func WithoutTrailingSlash(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := r.URL.Path
-		if len(p) <= 1 || !strings.HasSuffix(p, "/") {
+		escaped := r.URL.EscapedPath()
+		if len(escaped) <= 1 || !strings.HasSuffix(escaped, "/") {
 			next.ServeHTTP(w, r)
 			return
 		}
+		trimmed := strings.TrimRight(escaped, "/")
+		if trimmed == "" {
+			trimmed = "/"
+		}
+		decoded, err := url.PathUnescape(trimmed)
+		if err != nil {
+			// EscapedPath only returns a valid encoding; this is unreachable.
+			writeError(w, http.StatusBadRequest, "invalid request path")
+			return
+		}
 		r = r.Clone(r.Context())
-		r.URL.Path = strings.TrimRight(p, "/")
-		if r.URL.Path == "" {
-			r.URL.Path = "/"
-		}
-		if r.URL.RawPath != "" {
-			r.URL.RawPath = strings.TrimRight(r.URL.RawPath, "/")
-		}
+		r.URL.Path = decoded
+		r.URL.RawPath = trimmed
 		next.ServeHTTP(w, r)
 	})
 }
