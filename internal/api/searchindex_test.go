@@ -2,8 +2,12 @@ package api
 
 import (
 	"fmt"
+	"runtime"
+	"sort"
+	"strings"
 	"testing"
 
+	"github.com/cinc-project/cinc-server-ng/internal/search"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -110,5 +114,104 @@ func TestSearchIndexDroppedWithOrg(t *testing.T) {
 	defer ci.mu.RUnlock()
 	if ci.size() != 0 {
 		t.Fatalf("recreated org inherited %d indexed documents", ci.size())
+	}
+}
+
+// wideNode builds a node of about size bytes whose normal attributes are as
+// many short, distinct keys as fit: the cheapest way, per body byte, to give
+// the index a distinct field.
+func wideNode(size int) []byte {
+	var b strings.Builder
+	b.WriteString(`{"name":"wide","normal":{`)
+	for i := 0; b.Len() < size-32; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `"%x":0`, i)
+	}
+	b.WriteString(`}}`)
+	return []byte(b.String())
+}
+
+func heapInUse() uint64 {
+	runtime.GC()
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.HeapAlloc
+}
+
+// The index keeps what a document contributes for as long as the document
+// exists, so its cost per field bounds what one write can pin. A node body at
+// the request cap made of short distinct keys gives it about 400K fields, each
+// with one value held by one document: that shape must not cost a set (or
+// several) per field.
+func TestSearchIndexWideDocumentHeap(t *testing.T) {
+	raw := wideNode(2_000_000)
+	before := heapInUse()
+	ci := newCollIndex(true)
+	ci.putRaw("wide", raw)
+	retained := heapInUse() - before
+	fields := len(ci.fields)
+	runtime.KeepAlive(ci)
+
+	if fields < 400_000 {
+		t.Fatalf("indexed %d fields, want the node's ~400K", fields)
+	}
+	perField := retained / uint64(fields)
+	t.Logf("%d body bytes, %d fields, %d MB retained, %d bytes/field", len(raw), fields, retained>>20, perField)
+	if perField > 250 {
+		t.Fatalf("index retains %d bytes per field, want at most 250", perField)
+	}
+}
+
+// A field moves between holding one value and several as documents come and
+// go; every lookup must answer the same through those transitions.
+func TestSearchIndexFieldValueTransitions(t *testing.T) {
+	ci := newCollIndex(false)
+	look := func(what string, got search.DocIDs, want ...string) {
+		t.Helper()
+		ids := make([]string, 0, len(got))
+		for id := range got {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		sort.Strings(want)
+		if strings.Join(ids, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s = %v, want %v", what, ids, want)
+		}
+	}
+	p := postingsView{ci}
+	isB := func(v string) bool { return v == "b" }
+
+	ci.putRaw("1", []byte(`{"f":"a"}`))
+	look("Exact a", p.Exact("f", "a"), "1")
+	look("Exists", p.Exists("f"), "1")
+
+	ci.putRaw("2", []byte(`{"f":"a"}`))
+	ci.putRaw("3", []byte(`{"f":["b","a","b"]}`))
+	look("Exact a", p.Exact("f", "a"), "1", "2", "3")
+	look("Exact b", p.Exact("f", "b"), "3")
+	look("Exists", p.Exists("f"), "1", "2", "3")
+	look("Match b", p.Match("f", isB), "3")
+	look("MatchAny b", p.MatchAny(isB), "3")
+
+	ci.putRaw("1", []byte(`{"g":"a"}`))
+	ci.remove("2")
+	look("Exact a", p.Exact("f", "a"), "3")
+	look("Exists", p.Exists("f"), "3")
+	look("Exists g", p.Exists("g"), "1")
+
+	ci.putRaw("3", []byte(`{"f":"b"}`))
+	look("Exact a", p.Exact("f", "a"))
+	look("Exact b", p.Exact("f", "b"), "3")
+	look("Exists", p.Exists("f"), "3")
+
+	ci.remove("3")
+	ci.remove("1")
+	look("Exists", p.Exists("f"))
+	look("All", p.All())
+	if len(ci.fields) != 0 {
+		t.Fatalf("emptied index still holds %d fields", len(ci.fields))
 	}
 }

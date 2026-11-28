@@ -26,24 +26,156 @@ import (
 // retract exactly what that document previously contributed.
 type term struct{ field, value string }
 
+// idSet is the set of documents holding one term. Most terms are held by a
+// single document (every attribute only one node carries), so a set of one is
+// kept inline and a map is made only once a second document joins.
+type idSet struct {
+	one  string
+	has  bool
+	many map[string]struct{}
+}
+
+func (s *idSet) add(id string) {
+	switch {
+	case s.many != nil:
+		s.many[id] = struct{}{}
+	case !s.has:
+		s.one, s.has = id, true
+	case s.one != id:
+		s.many = map[string]struct{}{s.one: {}, id: {}}
+		s.one, s.has = "", false
+	}
+}
+
+// del removes id, returning the set to its inline form once one member is left
+// so a term that was briefly shared does not keep a map for good.
+func (s *idSet) del(id string) {
+	if s.many == nil {
+		if s.has && s.one == id {
+			s.one, s.has = "", false
+		}
+		return
+	}
+	delete(s.many, id)
+	if len(s.many) == 1 {
+		for last := range s.many {
+			s.one, s.has = last, true
+		}
+		s.many = nil
+	}
+}
+
+func (s *idSet) empty() bool { return !s.has && len(s.many) == 0 }
+
+// addTo adds the set's members to out.
+func (s *idSet) addTo(out search.DocIDs) {
+	if s.has {
+		out[s.one] = struct{}{}
+	}
+	for id := range s.many {
+		out[id] = struct{}{}
+	}
+}
+
+// fieldIndex is one field's postings: each value the field holds, with the
+// documents holding it. Most fields hold a single value across the collection
+// (again, any attribute only one node carries), so that value is kept inline
+// and the map is made only once the field holds a second.
+type fieldIndex struct {
+	value  string
+	ids    idSet             // the documents holding value, while values is nil
+	values map[string]*idSet // every value, once the field has held two
+}
+
+func (f *fieldIndex) add(value, id string) {
+	if f.values == nil {
+		if f.ids.empty() || f.value == value {
+			f.value = value
+			f.ids.add(id)
+			return
+		}
+		first := f.ids
+		f.values = map[string]*idSet{f.value: &first}
+		f.value, f.ids = "", idSet{}
+	}
+	ids, ok := f.values[value]
+	if !ok {
+		ids = &idSet{}
+		f.values[value] = ids
+	}
+	ids.add(id)
+}
+
+// del removes id from value's documents, returning the field to its inline
+// form once it holds a single value again.
+func (f *fieldIndex) del(value, id string) {
+	if f.values == nil {
+		if f.value == value {
+			f.ids.del(id)
+			if f.ids.empty() {
+				f.value = ""
+			}
+		}
+		return
+	}
+	ids, ok := f.values[value]
+	if !ok {
+		return
+	}
+	ids.del(id)
+	if ids.empty() {
+		delete(f.values, value)
+	}
+	if len(f.values) == 1 {
+		for v, last := range f.values {
+			f.value, f.ids = v, *last
+		}
+		f.values = nil
+	}
+}
+
+func (f *fieldIndex) empty() bool { return f.values == nil && f.ids.empty() }
+
+// lookup returns the documents holding value, or nil.
+func (f *fieldIndex) lookup(value string) *idSet {
+	if f.values != nil {
+		return f.values[value]
+	}
+	if f.value == value && !f.ids.empty() {
+		return &f.ids
+	}
+	return nil
+}
+
+// each calls fn for every value the field holds.
+func (f *fieldIndex) each(fn func(value string, ids *idSet)) {
+	if f.values == nil {
+		if !f.ids.empty() {
+			fn(f.value, &f.ids)
+		}
+		return
+	}
+	for v, ids := range f.values {
+		fn(v, ids)
+	}
+}
+
 // collIndex is the inverted index for one collection of one organization. The
 // postings view takes mu for each lookup it makes on the planner's behalf.
 type collIndex struct {
-	mu        sync.RWMutex
-	merge     bool // node-style attribute precedence merge before flattening
-	postings  map[string]map[string]map[string]struct{}
-	fieldDocs map[string]map[string]struct{}
-	docTerms  map[string][]term
-	all       map[string]struct{}
+	mu       sync.RWMutex
+	merge    bool // node-style attribute precedence merge before flattening
+	fields   map[string]*fieldIndex
+	docTerms map[string][]term
+	all      map[string]struct{}
 }
 
 func newCollIndex(merge bool) *collIndex {
 	return &collIndex{
-		merge:     merge,
-		postings:  map[string]map[string]map[string]struct{}{},
-		fieldDocs: map[string]map[string]struct{}{},
-		docTerms:  map[string][]term{},
-		all:       map[string]struct{}{},
+		merge:    merge,
+		fields:   map[string]*fieldIndex{},
+		docTerms: map[string][]term{},
+		all:      map[string]struct{}{},
 	}
 }
 
@@ -68,24 +200,13 @@ func (c *collIndex) put(id string, fields map[string][]string) {
 	c.retract(id)
 	terms := make([]term, 0, len(fields))
 	for field, values := range fields {
-		byValue, ok := c.postings[field]
+		f, ok := c.fields[field]
 		if !ok {
-			byValue = map[string]map[string]struct{}{}
-			c.postings[field] = byValue
+			f = &fieldIndex{}
+			c.fields[field] = f
 		}
-		docs, ok := c.fieldDocs[field]
-		if !ok {
-			docs = map[string]struct{}{}
-			c.fieldDocs[field] = docs
-		}
-		docs[id] = struct{}{}
 		for _, v := range values {
-			ids, ok := byValue[v]
-			if !ok {
-				ids = map[string]struct{}{}
-				byValue[v] = ids
-			}
-			ids[id] = struct{}{}
+			f.add(v, id)
 			terms = append(terms, term{field, v})
 		}
 	}
@@ -100,25 +221,14 @@ func (c *collIndex) remove(id string) {
 	delete(c.all, id)
 }
 
-// retract removes a document's contributions, pruning postings that become
-// empty so a long-lived index does not accumulate dead values.
+// retract removes a document's contributions, pruning values and fields that
+// become empty so a long-lived index does not accumulate dead ones.
 func (c *collIndex) retract(id string) {
 	for _, t := range c.docTerms[id] {
-		if byValue, ok := c.postings[t.field]; ok {
-			if ids, ok := byValue[t.value]; ok {
-				delete(ids, id)
-				if len(ids) == 0 {
-					delete(byValue, t.value)
-				}
-			}
-			if len(byValue) == 0 {
-				delete(c.postings, t.field)
-			}
-		}
-		if docs, ok := c.fieldDocs[t.field]; ok {
-			delete(docs, id)
-			if len(docs) == 0 {
-				delete(c.fieldDocs, t.field)
+		if f, ok := c.fields[t.field]; ok {
+			f.del(t.value, id)
+			if f.empty() {
+				delete(c.fields, t.field)
 			}
 		}
 	}
@@ -141,42 +251,48 @@ func (c *collIndex) size() int { return len(c.all) }
 // search is no more a snapshot than Solr's eventually-committed index is.
 type postingsView struct{ c *collIndex }
 
-func copySet(src map[string]struct{}) search.DocIDs {
-	out := make(search.DocIDs, len(src))
-	for id := range src {
+func (p postingsView) All() search.DocIDs {
+	p.c.mu.RLock()
+	defer p.c.mu.RUnlock()
+	out := make(search.DocIDs, len(p.c.all))
+	for id := range p.c.all {
 		out[id] = struct{}{}
 	}
 	return out
 }
 
-func (p postingsView) All() search.DocIDs {
-	p.c.mu.RLock()
-	defer p.c.mu.RUnlock()
-	return copySet(p.c.all)
-}
-
 func (p postingsView) Exact(field, value string) search.DocIDs {
 	p.c.mu.RLock()
 	defer p.c.mu.RUnlock()
-	return copySet(p.c.postings[field][value])
+	f, ok := p.c.fields[field]
+	if !ok {
+		return search.DocIDs{}
+	}
+	ids := f.lookup(value)
+	if ids == nil {
+		return search.DocIDs{}
+	}
+	out := make(search.DocIDs, max(len(ids.many), 1))
+	ids.addTo(out)
+	return out
 }
 
+// Exists is the union of the field's values' documents: keeping a separate
+// per-field document set would cost a set for every field of every document.
 func (p postingsView) Exists(field string) search.DocIDs {
-	p.c.mu.RLock()
-	defer p.c.mu.RUnlock()
-	return copySet(p.c.fieldDocs[field])
+	return p.Match(field, func(string) bool { return true })
 }
 
 func (p postingsView) Match(field string, pred func(string) bool) search.DocIDs {
 	p.c.mu.RLock()
 	defer p.c.mu.RUnlock()
 	out := search.DocIDs{}
-	for value, ids := range p.c.postings[field] {
-		if pred(value) {
-			for id := range ids {
-				out[id] = struct{}{}
+	if f, ok := p.c.fields[field]; ok {
+		f.each(func(value string, ids *idSet) {
+			if pred(value) {
+				ids.addTo(out)
 			}
-		}
+		})
 	}
 	return out
 }
@@ -185,14 +301,12 @@ func (p postingsView) MatchAny(pred func(string) bool) search.DocIDs {
 	p.c.mu.RLock()
 	defer p.c.mu.RUnlock()
 	out := search.DocIDs{}
-	for _, byValue := range p.c.postings {
-		for value, ids := range byValue {
+	for _, f := range p.c.fields {
+		f.each(func(value string, ids *idSet) {
 			if pred(value) {
-				for id := range ids {
-					out[id] = struct{}{}
-				}
+				ids.addTo(out)
 			}
-		}
+		})
 	}
 	return out
 }
