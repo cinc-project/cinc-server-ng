@@ -308,22 +308,30 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		// validateKeyFields leaves exactly one source: a public_key, or a
 		// true create_key asking the server for a new pair.
 		pub, hasPub := body["public_key"].(string)
-		if hasPub && a.refuseSameNameKey(w, segment, name, pub) {
+		if !hasPub {
+			newPub, priv, err := a.generateKeyPair()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			pub = newPub
+			resp["private_key"] = priv
+		}
+
+		// The checks above may be stale by now (key generation takes a
+		// while), so they are made again where the write is ordered against
+		// deleting or renaming the actor.
+		a.membership.RLock()
+		defer a.membership.RUnlock()
+		if actor, ok = loadActor(w, org, segment, name); !ok {
 			return
 		}
-		if !hasPub {
-			key, err := auth.GenerateKey()
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "key generation failed")
-				return
-			}
-			pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "key encoding failed")
-				return
-			}
-			pub = string(pubPEM)
-			resp["private_key"] = string(auth.EncodePrivateKeyPEM(key))
+		if keyName == defaultKeyName && str(actor["public_key"]) != "" {
+			writeError(w, http.StatusConflict, "Key already exists")
+			return
+		}
+		if hasPub && a.refuseSameNameKey(w, segment, name, pub) {
+			return
 		}
 
 		expiration, _ := body["expiration_date"].(string)
@@ -352,8 +360,9 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		name, keyName := r.PathValue("name"), r.PathValue("key")
-		actor, ok := loadActor(w, org, segment, name)
-		if !ok {
+		// The actor is read again for the writes, once they are ordered
+		// against its delete below; this read answers a missing one first.
+		if _, ok := loadActor(w, org, segment, name); !ok {
 			return
 		}
 		var body map[string]any
@@ -377,26 +386,48 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 		createKey, _ := body["create_key"].(bool)
 		delete(body, "create_key")
 		coll := keysColl(segment, name)
-		oldRaw, stored, err := org.Get(coll, keyName)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+		// findKey reads the key being updated, writing the 404 when there is
+		// no such key and reporting false when the request is answered.
+		findKey := func() (oldRaw []byte, stored, found bool) {
+			oldRaw, stored, err := org.Get(coll, keyName)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return nil, false, false
+			}
+			if !stored && keyName != defaultKeyName {
+				writeError(w, http.StatusNotFound, "Cannot find key "+keyName)
+				return nil, false, false
+			}
+			return oldRaw, stored, true
 		}
-		if !stored && keyName != defaultKeyName {
-			writeError(w, http.StatusNotFound, "Cannot find key "+keyName)
-			return
-		}
-		if !createKey && a.refuseSameNameKey(w, segment, name, str(body["public_key"])) {
+		if _, _, found := findKey(); !found {
 			return
 		}
 		privateKey := ""
 		if createKey {
-			pub, priv, err := generateKeyPair()
+			pub, priv, err := a.generateKeyPair()
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			body["public_key"], privateKey = pub, priv
+		}
+
+		// The checks above may be stale by now (key generation takes a
+		// while), so they are made again where the writes are ordered against
+		// deleting or renaming the actor.
+		a.membership.RLock()
+		defer a.membership.RUnlock()
+		actor, ok := loadActor(w, org, segment, name)
+		if !ok {
+			return
+		}
+		oldRaw, stored, found := findKey()
+		if !found {
+			return
+		}
+		if !createKey && a.refuseSameNameKey(w, segment, name, str(body["public_key"])) {
+			return
 		}
 
 		// Updating the synthetic default key stores it as a row, so it keeps the
@@ -525,8 +556,8 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 
 // generateKeyPair makes a new RSA key pair, returning the public half and the
 // private half as PEM.
-func generateKeyPair() (pub, priv string, err error) {
-	key, err := auth.GenerateKey()
+func (a *API) generateKeyPair() (pub, priv string, err error) {
+	key, err := a.generateKey()
 	if err != nil {
 		return "", "", errors.New("key generation failed")
 	}
@@ -544,6 +575,10 @@ func (a *API) deleteKey(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		name, keyName := r.PathValue("name"), r.PathValue("key")
+		// Shared, from the existence check through the writes, so a delete
+		// of the actor cannot land in between and have its record re-created.
+		a.membership.RLock()
+		defer a.membership.RUnlock()
 		actor, ok := loadActor(w, org, segment, name)
 		if !ok {
 			return
