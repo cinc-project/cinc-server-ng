@@ -355,6 +355,12 @@ func fallbackACL(org *store.Org, typ, name string) (map[string]any, error) {
 	case "organizations":
 		return orgACL(), nil
 	case "containers":
+		// The clients container's ACL is stored at org creation with the
+		// validator on create; should that row go (the superuser deleted the
+		// container), fall back to the same ACL so registration keeps working.
+		if name == "clients" {
+			return validatorClientsACL(org.Name() + "-validator"), nil
+		}
 		return containerACL(name), nil
 	case "groups":
 		if slices.Contains(defaultGroups, name) {

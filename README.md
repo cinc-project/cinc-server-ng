@@ -110,7 +110,10 @@ or policy group, takes create on its container, and pushing a policy to a group
 is checked on both the policy and the group. Uploading cookbook files (creating
 and committing a sandbox) takes create on the `sandboxes` container, which by
 default only admins and users hold, so a client (the validator included)
-cannot store files. Objects loaded from a chef-repo or state directory, or
+cannot store files. Unlike Chef Infra Server, only the superuser may delete one
+of the default containers (`clients`, `nodes`, `cookbooks`, ...), whose ACLs
+every create in the org is checked against; containers created with
+`POST /containers` delete as before. Objects loaded from a chef-repo or state directory, or
 stored by an older version without such an ACL, are given it at startup. A user
 who is not a member of the org (never invited, or removed from it) is refused
 every request under `/organizations/<org>` with `403`, whatever ACLs or groups

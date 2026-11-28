@@ -508,6 +508,14 @@ func classifyGeneric(method, seg string, rest []string, read bool) (*authzCheck,
 		if !ok {
 			return nil, false
 		}
+		// A default container holds the ACL every create in the org is
+		// checked against, and deleting it drops that ACL. erchef lets anyone
+		// with delete on it do so (the org policy gives the users group delete
+		// on clients, nodes, cookbooks and more), which breaks the org; here
+		// only the superuser may.
+		if seg == "containers" && method == http.MethodDelete && slices.Contains(defaultContainers, name) {
+			return &authzCheck{superuserOnly: true, perm: perm}, true
+		}
 		c := &authzCheck{aclType: seg, aclName: name, perm: perm}
 		if existenceSegs[seg] {
 			c.existColl, c.existKey, c.existMsg = seg, name, notFoundMessage(seg, name)
