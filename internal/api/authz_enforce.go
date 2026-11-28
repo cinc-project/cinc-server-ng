@@ -298,8 +298,8 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 	// Infra Server only the superuser may; here a server-admin may too, so a
 	// human operator can stand up an org without holding pivotal's key (the
 	// handler makes such a creator an admin of the org, see
-	// createOrganization). Listing them stays open: it exposes only names,
-	// which a caller can already enumerate via /users/{user}/organizations.
+	// createOrganization). Listing them stays open: knife reads the list
+	// during setup, and it exposes only names.
 	if len(parts) == 1 && parts[0] == "organizations" {
 		if method == http.MethodPost {
 			return &authzCheck{superuserOnly: true, perm: "create", serverAdmins: true}, true
@@ -455,6 +455,16 @@ func classifyUsers(method string, rest []string) (*authzCheck, bool) {
 	// /users/{name}/_acl[/{perm}] — grant on the user object (global space).
 	if rest[1] == "_acl" {
 		return &authzCheck{global: true, aclType: "users", aclName: rest[0], perm: "grant", aclEndpoint: true}, true
+	}
+	// /users/{name}/organizations — erchef serves it from the named-user
+	// resource with the same check as GET /users/{name}, so which orgs a user
+	// belongs to is the user's (and the superuser's) to read.
+	if rest[1] == "organizations" && len(rest) == 2 {
+		if method != http.MethodGet && method != http.MethodHead {
+			return nil, false
+		}
+		return &authzCheck{superuserOnly: true, perm: "read", allowSelf: rest[0],
+			serverAdmins: true, serverAdminTarget: rest[0]}, true
 	}
 	// /users/{name}/keys[/{key}] — a user's public_key is the credential the
 	// auth layer verifies against, so rewriting it is an account takeover.
