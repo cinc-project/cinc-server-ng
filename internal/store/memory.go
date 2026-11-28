@@ -205,6 +205,17 @@ func (m *memoryBackend) Blob(org, checksum string) ([]byte, bool, error) {
 	return clone(v), true, nil
 }
 
+// ViewBlob implements BlobViewer by lending the stored blob. PutBlob always
+// stores a fresh copy and nothing writes a stored blob in place, so the slice
+// stays as it is for as long as the caller holds it, and the lock is held only
+// for the map lookup, not for a copy of a file that may be hundreds of MiB.
+func (m *memoryBackend) ViewBlob(org, checksum string) ([]byte, func(), bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	v, ok := m.blobs[org][checksum]
+	return v, func() {}, ok, nil
+}
+
 func (m *memoryBackend) HasBlob(org, checksum string) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

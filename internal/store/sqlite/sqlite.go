@@ -107,6 +107,12 @@ type Backend struct {
 	// the coalescer's own per-batch view leave it nil, so writes made through
 	// those run directly on their transaction connection.
 	cw *coalescer
+
+	// shares, set only on the top-level Backend, lets concurrent ViewBlob calls
+	// share one read of a blob. A Tx view instead records the blobs it writes in
+	// txBlobs, and Tx forgets their shared reads once the transaction commits.
+	shares  *blobShares
+	txBlobs *[]blobKey
 }
 
 // Option configures an optional Backend behavior at Open time.
@@ -150,7 +156,7 @@ func Open(path string, opts ...Option) (*Backend, error) {
 	// a single connection turns that into a cheap in-process queue: writes serialize
 	// on Go's connection mutex instead of spinning inside SQLite.
 	db.SetMaxOpenConns(1)
-	b := &Backend{db: db, q: db, rdb: db, rq: db}
+	b := &Backend{db: db, q: db, rdb: db, rq: db, shares: newBlobShares()}
 
 	// WAL admits many readers concurrently with the single writer. Capping the
 	// writer pool to one connection is right for writes, but forcing reads through
@@ -710,9 +716,35 @@ func (b *Backend) Collections(org string) ([]string, error) {
 }
 
 func (b *Backend) PutBlob(org, checksum string, data []byte) error {
+	defer b.blobWritten(blobKey{org, checksum})
 	return b.coalesce(func(tb *Backend) error {
 		return orgWritten(tb.exec(tb.stBlobPut, sqlBlobPut, org, checksum, data))
 	})
+}
+
+// ViewBlob implements store.BlobViewer. SQLite hands each read a fresh copy of
+// the whole blob, so concurrent views of one blob share a single read rather
+// than holding a copy each for as long as their downloads take. A Tx view has
+// no shares and reads its own copy.
+func (b *Backend) ViewBlob(org, checksum string) ([]byte, func(), bool, error) {
+	if b.shares == nil {
+		data, ok, err := b.Blob(org, checksum)
+		return data, func() {}, ok, err
+	}
+	return b.shares.view(blobKey{org, checksum}, func() ([]byte, bool, error) {
+		return b.Blob(org, checksum)
+	})
+}
+
+// blobWritten drops any shared read of k once a write to it is visible: on the
+// top-level Backend, right after the write; on a Tx view, when Tx commits.
+func (b *Backend) blobWritten(k blobKey) {
+	switch {
+	case b.shares != nil:
+		b.shares.forget(k)
+	case b.txBlobs != nil:
+		*b.txBlobs = append(*b.txBlobs, k)
+	}
 }
 
 func (b *Backend) Blob(org, checksum string) ([]byte, bool, error) {
@@ -737,6 +769,7 @@ func (b *Backend) HasBlob(org, checksum string) (bool, error) {
 }
 
 func (b *Backend) DeleteBlob(org, checksum string) error {
+	defer b.blobWritten(blobKey{org, checksum})
 	return b.coalesce(func(tb *Backend) error {
 		_, err := tb.exec(tb.stBlobDelete, sqlBlobDelete, org, checksum)
 		return err
@@ -746,6 +779,7 @@ func (b *Backend) DeleteBlob(org, checksum string) error {
 // CreateOrg records the org and, in the same transaction, discards any rows
 // held under its name, so the new org starts empty.
 func (b *Backend) CreateOrg(name string) error {
+	defer b.blobWritten(blobKey{org: name})
 	return b.coalesce(func(tb *Backend) error {
 		return tb.atomically(func(tb *Backend) error {
 			res, err := tb.q.Exec(`INSERT INTO orgs(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name)
@@ -784,6 +818,7 @@ func (b *Backend) dropRows(org string) error {
 
 func (b *Backend) DeleteOrg(name string) (bool, error) {
 	var existed bool
+	defer b.blobWritten(blobKey{org: name})
 	err := b.coalesce(func(tb *Backend) error {
 		return tb.atomically(func(tb *Backend) error {
 			res, err := tb.q.Exec(`DELETE FROM orgs WHERE name=?`, name)
@@ -842,11 +877,16 @@ func (b *Backend) Tx(fn func(tx store.Backend) error) error {
 	// Inside the transaction both reads and writes use the tx connection so it
 	// observes its own uncommitted writes (the reader pool would only see the last
 	// committed snapshot).
-	if err := fn(&Backend{db: b.db, rdb: b.rdb, q: sqlTx, rq: sqlTx}); err != nil {
+	var written []blobKey
+	if err := fn(&Backend{db: b.db, rdb: b.rdb, q: sqlTx, rq: sqlTx, txBlobs: &written}); err != nil {
 		_ = sqlTx.Rollback()
 		return err
 	}
-	return sqlTx.Commit()
+	err = sqlTx.Commit()
+	for _, k := range written {
+		b.blobWritten(k)
+	}
+	return err
 }
 
 // Ping implements store.Pinger: the writer pool must reach the database, and a

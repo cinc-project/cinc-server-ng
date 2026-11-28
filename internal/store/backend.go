@@ -66,3 +66,15 @@ type Pinger interface {
 	// load balancer to call it on every health check.
 	Ping(ctx context.Context) error
 }
+
+// BlobViewer is implemented by a Backend that can serve a blob for a reader
+// without handing each reader a copy of its own. A file-store download can be
+// as large as the largest cookbook file and is held until a possibly slow
+// client has read it, so concurrent downloads of one file must share it.
+type BlobViewer interface {
+	// ViewBlob returns the blob stored under checksum, read-only, and a release
+	// func the caller must call once it is done with the bytes (also when ok is
+	// false). The bytes stay valid after a later write replaces or deletes the
+	// blob; that write is seen by the next ViewBlob.
+	ViewBlob(org, checksum string) (data []byte, release func(), ok bool, err error)
+}
