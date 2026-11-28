@@ -220,10 +220,16 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	// Read-modify-write: a revocation landing between the read and the write
 	// would be undone (see groupmembers.go). The group is checked again under
-	// the lock, so a concurrent delete is not undone either.
+	// the lock, so a concurrent delete is not undone either. That check reads
+	// the store: the bytes authorize read (see preread.go) predate the lock,
+	// so they miss a delete that ran while this request waited on it.
 	a.membership.Lock()
 	defer a.membership.Unlock()
-	if !exists(w, r, org, "groups", name, notFoundMessage("groups", name)) {
+	if _, ok, err := org.View("groups", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if !ok {
+		writeError(w, http.StatusNotFound, notFoundMessage("groups", name))
 		return
 	}
 	users, clients, groups, err := groupMembership(org, name)
