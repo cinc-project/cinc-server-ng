@@ -412,7 +412,13 @@ func (a *API) putGroupPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := org.Put(policyRevColl(policy), revID, raw); err != nil {
+	// A revision is immutable once stored. Pushing a revision_id that already
+	// exists (promoting it to another group) links the group to the stored
+	// revision and ignores the body's copy, as erchef's
+	// ensure_policy_revision_exists does; overwriting it would change what
+	// every other group deploying that revision serves. The response still
+	// echoes the request body, as erchef's does.
+	if err := org.Create(policyRevColl(policy), revID, raw); err != nil && !errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
