@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
@@ -17,10 +18,10 @@ import (
 // membership entries to learn one bit.
 //
 // The scan is inverted once into actor -> groups, and reused until groups
-// change. The store advances a generation counter on every write to a groups
-// collection (see store.Org.GroupsGeneration), which is the invalidation
-// signal: it sits at the single point all writes pass through, so no call site
-// can forget to invalidate. The generation is sampled *before* the index is
+// change. The store advances the org's generation counter on every write to
+// its groups collection (see store.Org.GroupsGeneration), which is the
+// invalidation signal: it sits at the single point all writes pass through, so
+// no call site can forget to invalidate. The generation is sampled *before* the index is
 // built, so an index built concurrently with a write is discarded rather than
 // cached as current.
 
@@ -151,26 +152,56 @@ func (idx *groupIndex) membership(actor Actor) map[string]bool {
 }
 
 // groupIndexCache holds the current index per organization.
+//
+// Each organization's index is built, replaced and patched under a lock of its
+// own: the cache is shared by every org on the server, and a lock over all of
+// it would let one org's rebuild (which takes as long as its fleet is large)
+// hold up authorization checks and registrations in every other org.
 type groupIndexCache struct {
-	mu sync.RWMutex
-	m  map[string]*groupIndex
+	mu sync.RWMutex // guards m, not the entries in it
+	m  map[string]*orgGroupIndex
+}
+
+// orgGroupIndex is one organization's slot in the cache.
+type orgGroupIndex struct {
+	// mu serializes rebuilding this org's index against observe patching it
+	// (see get). Checks that find the index current do not take it.
+	mu  sync.Mutex
+	cur atomic.Pointer[groupIndex] // nil until built, or once dropped
 }
 
 func newGroupIndexCache() *groupIndexCache {
-	return &groupIndexCache{m: map[string]*groupIndex{}}
+	return &groupIndexCache{m: map[string]*orgGroupIndex{}}
+}
+
+// slot returns org's slot, creating it if create is set; otherwise it returns
+// nil for an org that has none. A slot is never removed, so every caller for
+// an org shares one lock (dropping an index clears the slot instead).
+func (c *groupIndexCache) slot(org string, create bool) *orgGroupIndex {
+	c.mu.RLock()
+	e := c.m[org]
+	c.mu.RUnlock()
+	if e != nil || !create {
+		return e
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e = c.m[org]; e == nil {
+		e = &orgGroupIndex{}
+		c.m[org] = e
+	}
+	return e
 }
 
 // get returns an index current as of the org's groups generation, rebuilding it
 // if groups have been written since the cached one was built.
 func (c *groupIndexCache) get(org *store.Org) (*groupIndex, error) {
-	c.mu.RLock()
-	idx, ok := c.m[org.Name()]
-	c.mu.RUnlock()
-	if ok && idx.gen == org.GroupsGeneration() {
+	e := c.slot(org.Name(), true)
+	if idx := e.cur.Load(); idx != nil && idx.gen == org.GroupsGeneration() {
 		return idx, nil
 	}
 
-	// The rebuild runs under the cache lock, which observe also takes.
+	// The rebuild runs under the org's lock, which observe also takes.
 	//
 	// A rebuild re-reads the membership rows, and observe folds each new row
 	// into whichever index is installed. If the two could interleave, a row
@@ -182,16 +213,16 @@ func (c *groupIndexCache) get(org *store.Org) (*groupIndex, error) {
 	//
 	// Serializing also collapses a herd of concurrent rebuilds into one, which
 	// is the case that matters: every authorization check calls get.
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if idx, ok := c.m[org.Name()]; ok && idx.gen == org.GroupsGeneration() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if idx := e.cur.Load(); idx != nil && idx.gen == org.GroupsGeneration() {
 		return idx, nil // rebuilt by another goroutine while we waited
 	}
 	built, err := buildGroupIndex(org)
 	if err != nil {
 		return nil, err
 	}
-	c.m[org.Name()] = built
+	e.cur.Store(built)
 	return built, nil
 }
 
@@ -203,9 +234,11 @@ func (c *groupIndexCache) observe(ev store.Event) {
 	// An org dropped, or created afresh: whatever index it had describes
 	// another org's membership.
 	if ev.Deleted && ev.Collection == "" {
-		c.mu.Lock()
-		delete(c.m, ev.Org)
-		c.mu.Unlock()
+		if e := c.slot(ev.Org, false); e != nil {
+			e.mu.Lock()
+			e.cur.Store(nil)
+			e.mu.Unlock()
+		}
 		return
 	}
 	if ev.Collection != groupMembersColl {
@@ -215,16 +248,20 @@ func (c *groupIndexCache) observe(ev store.Event) {
 	if !ok {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	idx, ok := c.m[ev.Org]
-	if !ok {
+	e := c.slot(ev.Org, false)
+	if e == nil {
+		return // not built yet; the build will read the row itself
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	idx := e.cur.Load()
+	if idx == nil {
 		return // not built yet; the build will read the row itself
 	}
 	if ev.Deleted {
 		// A removal is rare (an explicit group write clearing rows), and the
 		// membership lists are short, so drop the index and let it rebuild.
-		delete(c.m, ev.Org)
+		e.cur.Store(nil)
 		return
 	}
 	idx.addOne(group, kind, actor)

@@ -85,6 +85,36 @@ func TestGroupsGenerationChangesInsideTx(t *testing.T) {
 	}
 }
 
+// A group write in one organization says nothing about another's groups, so
+// it must not invalidate what was derived from them: otherwise any org's admin
+// forces a rebuild in every org with each group write.
+func TestGroupsGenerationIsPerOrg(t *testing.T) {
+	st := store.New()
+	a, err := st.CreateOrg("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.CreateOrg("globex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeA, beforeB := a.GroupsGeneration(), b.GroupsGeneration()
+	if err := a.Put("groups", "admins", []byte(`{"name":"admins"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if a.GroupsGeneration() == beforeA {
+		t.Fatal("baseline: acme's generation unchanged after its own group write")
+	}
+	if got := b.GroupsGeneration(); got != beforeB {
+		t.Fatalf("globex's generation moved on acme's group write: %d -> %d", beforeB, got)
+	}
+	// A fresh handle on the org sees the same counter.
+	b2, _, _ := st.Org("globex")
+	if b2.GroupsGeneration() != b.GroupsGeneration() {
+		t.Fatal("handles on globex disagree")
+	}
+}
+
 // Every handle onto the same store must observe the same generation, since the
 // cache is keyed by it.
 func TestGroupsGenerationSharedAcrossHandles(t *testing.T) {
