@@ -5,6 +5,7 @@
 package api
 
 import (
+	"crypto/rsa"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cinc-project/cinc-server-ng/internal/auth"
 	"github.com/cinc-project/cinc-server-ng/internal/store"
 )
 
@@ -53,6 +55,9 @@ type API struct {
 	// now is the clock that decides whether an actor's key has expired.
 	// Defaults to time.Now.
 	now func() time.Time
+	// generateKey makes the key pairs the keys API hands out. Defaults to
+	// auth.GenerateKey.
+	generateKey func() (*rsa.PrivateKey, error)
 	// membership orders group-membership changes against revocations; see
 	// groupmembers.go.
 	membership sync.RWMutex
@@ -99,6 +104,8 @@ func New(st *store.Store, opts ...Option) *API {
 		groups:    newGroupIndexCache(),
 		searchIdx: newSearchIndexes(),
 		now:       time.Now,
+
+		generateKey: auth.GenerateKey,
 	}
 	for _, opt := range opts {
 		opt(a)

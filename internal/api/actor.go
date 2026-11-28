@@ -152,15 +152,26 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// row behind (see groupmembers.go).
 		a.membership.RLock()
 		defer a.membership.RUnlock()
-		if password == nil && segment != "users" {
+		// Keys authenticate by actor name, so key rows left under this name
+		// with no actor (by an older version, or a state directory) would
+		// pass to the new actor. Deleting an actor removes its keys, and a
+		// key write needs its actor to exist, so while this lock is held no
+		// new leftover can appear: one found now is all there is.
+		leftoverKeys, err := org.Keys(keysColl(segment, name))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if password == nil && segment != "users" && len(leftoverKeys) == 0 {
 			// The common case (every client registration): a single write.
 			err = org.Create(segment, name, raw)
 		} else {
-			// A user's password is written in the create's transaction: a
-			// create refused because the user exists must not replace that
-			// user's password. A user created without one (externally
-			// authenticated) clears any row left under its name, which would
-			// otherwise let a former holder of the name log in as it.
+			// A user's password is stored, and leftover keys dropped, in the
+			// create's transaction: a create refused because the actor exists
+			// must not replace that actor's password or take its keys. A user
+			// created without a password (externally authenticated) clears
+			// any row left under its name, which would otherwise let a former
+			// holder of the name log in as it.
 			err = a.store.Tx(func(tx *store.Store) error {
 				scoped, err := txScope(tx, org)
 				if err != nil {
@@ -169,7 +180,13 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 				if err := scoped.As(actorID(r)).Create(segment, name, raw); err != nil {
 					return err
 				}
+				if err := deleteActorKeys(scoped, segment, name); err != nil {
+					return err
+				}
 				if password == nil {
+					if segment != "users" {
+						return nil
+					}
 					_, _, err := scoped.Delete(PasswordsCollection, name)
 					return err
 				}
@@ -616,7 +633,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		pub := bodyPublicKey(obj)
 		var privateKey string
 		if regenerate {
-			key, err := auth.GenerateKey()
+			key, err := a.generateKey()
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "key generation failed")
 				return
@@ -642,18 +659,17 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 				return
 			}
 		}
+		// rotateDefault: the body's key replaces the default key, which may be
+		// a row the keys API stored rather than the actor's own public_key. It
+		// is written with the record, below.
+		rotateDefault := false
 		switch {
 		case rename && segment == "clients":
 			// A renamed client keeps a default key only when this update
 			// gives it one (see rename.go); the move drops a stored default
 			// row.
 		case pub != "":
-			// The body's key replaces the default key, which may be a row the
-			// keys API stored rather than the actor's own public_key.
-			if err := setStoredDefaultPublicKey(org, segment, name, pub); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
+			rotateDefault = true
 		default:
 			stored, err := storedPublicKey(org, segment, name)
 			if err != nil {
@@ -692,6 +708,12 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			case taken:
 				err = store.ErrConflict
 			case segment == "users":
+				if rotateDefault {
+					// Before the move, which takes the row along.
+					if err = setStoredDefaultPublicKey(org, segment, name, pub); err != nil {
+						break
+					}
+				}
 				// The password is stored under the new name, in the move.
 				raw = mustEncode(withoutPassword(obj))
 				err = a.renameUser(r, name, newName, raw, obj)
@@ -732,8 +754,28 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 					})
 				}
 			}
-			if err := write(); err != nil {
+			// Shared, from rechecking that the actor exists through the
+			// writes, so a delete of the actor landing since the check at the
+			// top (a regenerated key takes a while) is not undone by
+			// re-creating its record.
+			a.membership.RLock()
+			ok, err := func() (bool, error) {
+				defer a.membership.RUnlock()
+				if _, ok, err := org.Get(segment, name); err != nil || !ok {
+					return ok, err
+				}
+				if rotateDefault {
+					if err := setStoredDefaultPublicKey(org, segment, name, pub); err != nil {
+						return true, err
+					}
+				}
+				return true, write()
+			}()
+			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			} else if !ok {
+				writeError(w, http.StatusNotFound, notFoundMessage(segment, name))
 				return
 			}
 		}
