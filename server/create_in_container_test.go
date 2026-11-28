@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -94,4 +95,37 @@ func TestPolicyGroupPushChecksBothObjects(t *testing.T) {
 	mustStatus(t, signed(t, srv, "PUT", base+"/policies/web/_acl/update",
 		`{"update":{"actors":[],"groups":["admins"]}}`), http.StatusOK)
 	mustStatus(t, signedAs(t, "bob", bob, "PUT", base+"/policy_groups/dev/policies/web", fmt.Sprintf(policyBody, "aa03", "web")), http.StatusForbidden)
+}
+
+// Pushing an existing revision_id to a group the pusher may write must not
+// replace what other groups deploy: a revision is immutable once stored.
+func TestPolicyGroupPushCannotReplaceAnotherGroupsRevision(t *testing.T) {
+	srv, base, bob := memberSetup(t)
+	const rev = "aa01"
+	mustStatus(t, signed(t, srv, "PUT", base+"/policy_groups/prod/policies/web", fmt.Sprintf(policyBody, rev, "web")), http.StatusOK)
+	mustStatus(t, signed(t, srv, "PUT", base+"/policy_groups/prod/_acl/update",
+		`{"update":{"actors":[],"groups":["admins"]}}`), http.StatusCreated) // erchef's status for a policy group ACL
+
+	evil := `{"revision_id":"` + rev + `","name":"web","run_list":["recipe[evil::default]"],` +
+		`"cookbook_locks":{"evil":{"identifier":"f04cc40faf628253fe7d9566d66a1733fb1afbe9","version":"6.6.6"}}}`
+	// Baseline: bob cannot push to prod.
+	mustStatus(t, signedAs(t, "bob", bob, "PUT", base+"/policy_groups/prod/policies/web", evil), http.StatusForbidden)
+	// He may push the same revision_id to a group of his own...
+	mustStatus(t, signedAs(t, "bob", bob, "PUT", base+"/policy_groups/scratch/policies/web", evil), http.StatusOK)
+
+	// ...but prod still deploys the revision as first stored.
+	resp, err := http.DefaultClient.Do(signed(t, srv, "GET", base+"/policy_groups/prod/policies/web", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var doc struct {
+		RunList []string `json:"run_list"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || len(doc.RunList) != 1 || doc.RunList[0] != "recipe[demo::default]" {
+		t.Fatalf("prod serves %d %v, want the original revision", resp.StatusCode, doc.RunList)
+	}
 }

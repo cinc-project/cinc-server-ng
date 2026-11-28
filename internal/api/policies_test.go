@@ -179,3 +179,46 @@ func TestPolicyGroupReadShape(t *testing.T) {
 		}
 	}
 }
+
+// A revision is immutable once stored. Pushing a revision_id that already
+// exists to another group links that group to the stored revision and leaves
+// it alone, as erchef's ensure_policy_revision_exists does; the response still
+// echoes the request body, as oc_chef_wm_policy_group_policy_rev does.
+func TestPolicyGroupPushKeepsExistingRevision(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	const rev = "1111111111111111111111111111111111111111111111111111111111111111"
+
+	resp, body := do(t, "PUT", base+"/policy_groups/prod/policies/appserver", sampleRevision)
+	if resp.StatusCode != 200 {
+		t.Fatalf("push to prod = %d: %s", resp.StatusCode, body)
+	}
+
+	evil := `{"revision_id":"` + rev + `","name":"appserver","run_list":["recipe[evil::default]"],` +
+		`"cookbook_locks":{"evil":{"version":"6.6.6","identifier":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}`
+	resp, body = do(t, "PUT", base+"/policy_groups/scratch/policies/appserver", evil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("push to scratch = %d: %s", resp.StatusCode, body)
+	}
+	var echoed map[string]any
+	json.Unmarshal([]byte(body), &echoed)
+	if rl, _ := echoed["run_list"].([]any); len(rl) != 1 || rl[0] != "recipe[evil::default]" {
+		t.Fatalf("push response should echo the request body: %s", body)
+	}
+
+	for _, url := range []string{
+		base + "/policy_groups/prod/policies/appserver",
+		base + "/policy_groups/scratch/policies/appserver",
+		base + "/policies/appserver/revisions/" + rev,
+	} {
+		resp, body = do(t, "GET", url, "")
+		if resp.StatusCode != 200 {
+			t.Fatalf("GET %s = %d: %s", url, resp.StatusCode, body)
+		}
+		var doc map[string]any
+		json.Unmarshal([]byte(body), &doc)
+		if rl, _ := doc["run_list"].([]any); len(rl) != 1 || rl[0] != "recipe[nginx::default]" {
+			t.Fatalf("GET %s served a replaced revision: %s", url, body)
+		}
+	}
+}
